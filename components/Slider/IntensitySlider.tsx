@@ -8,6 +8,7 @@ import {
   useTransform,
 } from "framer-motion";
 import { EMOTION_HUES, SPRING, type Emotion } from "@/lib/theme";
+import { primeAudio, playCommitSwell, playTick } from "@/lib/audio";
 import { rgba } from "./color";
 import { haptic } from "./haptics";
 
@@ -72,6 +73,7 @@ export function IntensitySlider({ emotion }: { emotion: Emotion }) {
       lastInt.current = v;
       setValue(v);
       haptic(6);
+      playTick(v);
     }
   });
 
@@ -85,6 +87,7 @@ export function IntensitySlider({ emotion }: { emotion: Emotion }) {
 
   function onPointerDown(e: React.PointerEvent) {
     e.currentTarget.setPointerCapture(e.pointerId);
+    primeAudio(); // unlock Web Audio on the first gesture
     grabbedRef.current = true;
     setGrabbed(true);
     haptic(12);
@@ -97,6 +100,7 @@ export function IntensitySlider({ emotion }: { emotion: Emotion }) {
     if (!grabbedRef.current) return;
     grabbedRef.current = false;
     setGrabbed(false);
+    playCommitSwell(lastInt.current); // gentle rising swell on release
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
@@ -108,6 +112,7 @@ export function IntensitySlider({ emotion }: { emotion: Emotion }) {
           : 0;
     if (!dir) return;
     e.preventDefault();
+    primeAudio();
     const next = Math.min(MAX, Math.max(MIN, value + dir));
     progress.set((next - MIN) / (MAX - MIN));
     haptic(6);
