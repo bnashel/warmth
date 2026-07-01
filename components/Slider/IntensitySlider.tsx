@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  animate,
   motion,
   useMotionValueEvent,
   useTransform,
@@ -25,15 +26,18 @@ const clamp = (n: number, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, n));
 export function IntensitySlider({
   emotion,
   progress,
+  onCommit,
 }: {
   emotion: Emotion;
   progress: MotionValue<number>;
+  onCommit?: (value: number) => void;
 }) {
   const hue = EMOTION_HUES[emotion];
 
   const elRef = useRef<HTMLDivElement | null>(null);
   const [trackW, setTrackW] = useState(0);
   const grabbedRef = useRef(false);
+  const resettingRef = useRef(false);
   const lastInt = useRef(DEFAULT);
 
   const [value, setValue] = useState(DEFAULT);
@@ -77,8 +81,10 @@ export function IntensitySlider({
     if (v !== lastInt.current) {
       lastInt.current = v;
       setValue(v);
-      haptic(6);
-      playTick(v);
+      if (!resettingRef.current) {
+        haptic(6);
+        playTick(v);
+      }
     }
   });
 
@@ -105,7 +111,19 @@ export function IntensitySlider({
     if (!grabbedRef.current) return;
     grabbedRef.current = false;
     setGrabbed(false);
-    playCommitSwell(lastInt.current); // gentle rising swell on release
+    const committed = lastInt.current;
+    playCommitSwell(committed); // gentle rising swell on release
+    onCommit?.(committed); // parent launches the orb toward the map
+    // Reset the bar for the next rating — glide back silently (no ticks).
+    resettingRef.current = true;
+    animate(progress, (DEFAULT - MIN) / (MAX - MIN), {
+      ...SPRING.settle,
+      onComplete: () => {
+        resettingRef.current = false;
+        lastInt.current = DEFAULT;
+        setValue(DEFAULT);
+      },
+    });
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
