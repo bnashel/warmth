@@ -5,23 +5,16 @@ import { Inter } from "next/font/google";
 import { motion, useMotionValue, useTransform } from "framer-motion";
 import { ORB, TEXT } from "@/lib/feel";
 import { isMuted, panic, setMuted, unlockAudio } from "@/lib/sound";
-import { RestingOrb } from "./RestingOrb";
-import { VariantPull } from "./VariantPull";
+import { OrbFlow } from "./OrbFlow";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
 
-export type VariantId = "A" | "B" | "C";
-const HINT_WORD: Record<VariantId, string> = { A: "hold", B: "hold", C: "tap" };
-
 /**
  * The lab: a full-viewport void (#0A0B0F) with one living orb bottom-center.
- * Chrome is three whispers — variant switcher (top-center), mute (top-right),
- * a one-word hint below the orb. Everything else is light on darkness.
- *
- * Variants mount here. Foundation ships the resting orb; A/B/C land next.
+ * Chrome is two whispers — mute (top-right) and a one-word hint. Everything
+ * else is light on darkness.
  */
 export default function LabShell() {
-  const [variant, setVariant] = useState<VariantId>("A");
   const [muted, setMutedState] = useState(false);
   // 0 = idle chrome, 1 = mid-gesture (chrome fades to gestureOpacity).
   const gestureDepth = useMotionValue(0);
@@ -57,42 +50,6 @@ export default function LabShell() {
         overscrollBehavior: "none",
       }}
     >
-      {/* Variant switcher — top-center, whisper-quiet. */}
-      <motion.div
-        style={{
-          position: "absolute",
-          top: "max(env(safe-area-inset-top), 20px)",
-          left: 0,
-          right: 0,
-          display: "flex",
-          justifyContent: "center",
-          gap: 22,
-          opacity: chromeOpacity,
-          zIndex: 10,
-        }}
-      >
-        {(["A", "B", "C"] as const).map((v) => (
-          <button
-            key={v}
-            type="button"
-            onClick={() => setVariant(v)}
-            style={{
-              fontSize: TEXT.chrome.sizePx,
-              letterSpacing: "0.1em",
-              color: `rgba(255,255,255,${
-                v === variant ? TEXT.chrome.activeOpacity : TEXT.chrome.idleOpacity
-              })`,
-              background: "none",
-              border: "none",
-              padding: "8px 6px",
-              cursor: "pointer",
-            }}
-          >
-            {v}
-          </button>
-        ))}
-      </motion.div>
-
       {/* Mute — top-right, tiny hand-drawn speaker glyph. */}
       <motion.button
         type="button"
@@ -121,7 +78,7 @@ export default function LabShell() {
         <SpeakerGlyph muted={muted} />
       </motion.button>
 
-      {/* The orb (active variant), bottom-center above the safe area. */}
+      {/* The orb flow, bottom-center above the safe area. */}
       <div
         style={{
           position: "absolute",
@@ -131,21 +88,7 @@ export default function LabShell() {
           zIndex: 5,
         }}
       >
-        {variant === "A" ? (
-          <VariantPull
-            key={variant}
-            variant={variant}
-            hintWord={HINT_WORD[variant]}
-            gestureDepth={gestureDepth}
-          />
-        ) : (
-          <RestingOrb
-            key={variant}
-            variant={variant}
-            hintWord={HINT_WORD[variant]}
-            gestureDepth={gestureDepth}
-          />
-        )}
+        <OrbFlow hintWord="hold" gestureDepth={gestureDepth} />
       </div>
     </div>
   );

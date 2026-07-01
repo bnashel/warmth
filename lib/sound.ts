@@ -1,12 +1,17 @@
 /**
  * lib/sound.ts — hand-rolled Web Audio for the orb lab. No dependencies.
  *
- * Sound substitutes for haptics on the web: felt more than heard. All
- * frequencies/gains/envelopes live in lib/feel.ts (SOUND). Every entry point
- * is guarded — this module never throws and never blocks a gesture.
+ * Sound substitutes for haptics: felt more than heard. All frequencies/
+ * gains/envelopes live in lib/feel.ts (SOUND). Every entry point is guarded —
+ * this module never throws and never blocks a gesture.
  *
- * iOS: the AudioContext is a lazy singleton resumed on the first pointerdown
- * (call `unlockAudio()` from the gesture handler).
+ * iPhone notes (from Ben's thumb test):
+ * - The context is a lazy singleton resumed on first pointerdown.
+ * - iOS mutes Web Audio when the ring/silent switch is on silent. We flip the
+ *   page's audio session into "playback" mode by looping a silent <audio>
+ *   element on unlock — the standard web-game workaround.
+ * - Tick v2 is a mechanical DETENT (filtered click + tiny tonal body), not a
+ *   sine beep; master gain raised — v1 was inaudible on phone speakers.
  */
 import { SOUND, tickHzForStep } from "./feel";
 import type { Emotion } from "./theme";
@@ -14,6 +19,7 @@ import type { Emotion } from "./theme";
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let noiseBuffer: AudioBuffer | null = null;
+let silentUnlocker: HTMLAudioElement | null = null;
 
 /* ---------------------------------------------------------------- */
 /* Mute (persisted)                                                  */
@@ -38,7 +44,6 @@ export function setMuted(next: boolean): void {
     /* ignore */
   }
   if (master && ctx) {
-    // Fast but click-free.
     master.gain.setTargetAtTime(next ? 0 : SOUND.masterGain, ctx.currentTime, 0.01);
   }
 }
@@ -46,6 +51,12 @@ export function setMuted(next: boolean): void {
 /* ---------------------------------------------------------------- */
 /* Context lifecycle                                                 */
 /* ---------------------------------------------------------------- */
+
+/** ~50ms of silence as a WAV data URI — loops to hold iOS's audio session in
+ *  "playback" mode so Web Audio stays audible with the silent switch on. */
+const SILENT_WAV =
+  "data:audio/wav;base64,UklGRuQLAABXQVZFZm10IBAAAAABAAEAgLsAAAB3AQACABAAZGF0YcALAAAA" +
+  "AAAA".repeat(64);
 
 /** Create/resume the context. Call on first pointerdown. Never throws. */
 export function unlockAudio(): void {
@@ -62,6 +73,17 @@ export function unlockAudio(): void {
       master.connect(ctx.destination);
     }
     if (ctx.state === "suspended") void ctx.resume();
+
+    // iOS silent-switch bypass — best-effort, once.
+    if (!silentUnlocker) {
+      silentUnlocker = new Audio(SILENT_WAV);
+      silentUnlocker.loop = true;
+      silentUnlocker.setAttribute("playsinline", "");
+      silentUnlocker.volume = 0.01;
+      void silentUnlocker.play().catch(() => {
+        silentUnlocker = null; // retry on the next gesture
+      });
+    }
   } catch {
     ctx = null;
     master = null;
@@ -87,20 +109,36 @@ function whiteNoise(ac: AudioContext): AudioBuffer {
 /* ---------------------------------------------------------------- */
 
 /**
- * The step tick: short sine, C5 + 1 semitone per step. `soft` drops it −6dB
- * (Variant A dot-crossings, Variant B's felt-not-heard steps).
+ * Detent tick v2: a bandpassed noise click (the mechanical "knock") + a tiny
+ * sine body whose pitch rises with the step. `soft` = −6dB (wheel crossings).
  */
 export function tick(step: number, opts?: { soft?: boolean }): void {
   try {
     if (!ready() || !ctx || !master) return;
     const t = ctx.currentTime;
+    const vol = opts?.soft ? 0.5 : 1;
+
+    // The knock — filtered noise transient.
+    const click = ctx.createBufferSource();
+    click.buffer = whiteNoise(ctx);
+    const band = ctx.createBiquadFilter();
+    band.type = "bandpass";
+    band.frequency.value = SOUND.tick.clickBandHz;
+    band.Q.value = 1.4;
+    const cg = ctx.createGain();
+    cg.gain.setValueAtTime(SOUND.tick.clickGain * vol, t);
+    cg.gain.exponentialRampToValueAtTime(0.0001, t + SOUND.tick.clickDecayS);
+    click.connect(band).connect(cg).connect(master);
+    click.start(t);
+    click.stop(t + SOUND.tick.clickDecayS + 0.01);
+
+    // The body — short tonal thump, pitch ladder intact.
     const osc = ctx.createOscillator();
     const g = ctx.createGain();
     osc.type = "sine";
     osc.frequency.value = tickHzForStep(step);
-    const peak = SOUND.tick.gain * (opts?.soft ? 0.5 : 1);
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(peak, t + SOUND.tick.attackS);
+    g.gain.exponentialRampToValueAtTime(SOUND.tick.gain * vol, t + SOUND.tick.attackS);
     g.gain.exponentialRampToValueAtTime(0.0001, t + SOUND.tick.attackS + SOUND.tick.decayS);
     osc.connect(g).connect(master);
     osc.start(t);
@@ -132,14 +170,13 @@ export function cancelTick(lastStep: number): void {
 
 /**
  * Commit swell: per-emotion pentatonic root + fifth, swelling through an
- * opening lowpass, gentle noise whoosh underneath. `breathy` = Variant B
- * (slower, airier). Returns immediately; audio schedules itself.
+ * opening lowpass, gentle noise whoosh underneath.
  */
-export function commitSwell(emotion: Emotion, opts?: { breathy?: boolean }): void {
+export function commitSwell(emotion: Emotion): void {
   try {
     if (!ready() || !ctx || !master) return;
     const t = ctx.currentTime;
-    const durS = (opts?.breathy ? SOUND.swell.breathyMs : SOUND.swell.ms) / 1000;
+    const durS = SOUND.swell.ms / 1000;
     const root = SOUND.emotionRootHz[emotion];
 
     const bus = ctx.createGain();
@@ -170,11 +207,9 @@ export function commitSwell(emotion: Emotion, opts?: { breathy?: boolean }): voi
     noise.buffer = whiteNoise(ctx);
     noise.loop = true;
     const ng = ctx.createGain();
-    const whooshS =
-      (SOUND.swell.whooshMs / 1000) * (opts?.breathy ? SOUND.swell.breathyNoiseBoost : 1);
-    const noiseGain = 0.02 * (opts?.breathy ? SOUND.swell.breathyNoiseBoost : 1);
+    const whooshS = SOUND.swell.whooshMs / 1000;
     ng.gain.setValueAtTime(0.0001, t);
-    ng.gain.exponentialRampToValueAtTime(noiseGain, t + whooshS * 0.4);
+    ng.gain.exponentialRampToValueAtTime(0.02, t + whooshS * 0.4);
     ng.gain.exponentialRampToValueAtTime(0.0001, t + whooshS * 1.4);
     noise.connect(ng).connect(bus);
     noise.start(t);
@@ -184,28 +219,8 @@ export function commitSwell(emotion: Emotion, opts?: { breathy?: boolean }): voi
   }
 }
 
-/** Variant C's commit adds this low, soft kick (pitch-dropping thump). */
-export function kick(): void {
-  try {
-    if (!ready() || !ctx || !master) return;
-    const t = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    const g = ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(SOUND.kick.fromHz, t);
-    osc.frequency.exponentialRampToValueAtTime(SOUND.kick.toHz, t + SOUND.kick.ms / 1000);
-    g.gain.setValueAtTime(SOUND.kick.gain, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + SOUND.kick.ms / 1000);
-    osc.connect(g).connect(master);
-    osc.start(t);
-    osc.stop(t + SOUND.kick.ms / 1000 + 0.02);
-  } catch {
-    /* silent degrade */
-  }
-}
-
 /* ---------------------------------------------------------------- */
-/* Charge / bloom hum (continuous, level-driven)                     */
+/* Charge hum (continuous, level-driven)                             */
 /* ---------------------------------------------------------------- */
 let humOsc: OscillatorNode | null = null;
 let humOsc2: OscillatorNode | null = null;

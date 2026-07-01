@@ -5,8 +5,11 @@
  * commented with what it does to the FEEL when you raise or lower it, so a
  * note like "snappier" or "warmer" is a one-line edit.
  *
- * Springs follow the design system (lib/theme.ts): snappy(400,32) for press
- * response and impacts, settle(140,22) for returns and cancels.
+ * THE FLOW (post thumb-test v2): press the orb → six hue dots fan into a
+ * half-circle WHEEL → your finger's ANGLE around the orb chooses (true radial
+ * tracking) → hold a beat → the wheel swoops into a round ARC BAR → swipe
+ * along it to rate 1–10 → release to commit. Return to the orb's center to
+ * cancel, any time, free.
  */
 import type { Emotion } from "./theme";
 
@@ -18,8 +21,7 @@ export const ORB = {
   size: 72,
   /** Invisible hit target, px. Never below 96 — small = missed grabs = rage. */
   hitTarget: 110,
-  /** Orb center sits this far above the bottom safe-area inset, px.
-   *  Higher = easier thumb reach on big phones, but more dead space below. */
+  /** Orb center sits this far above the bottom safe-area inset, px. */
   bottomOffset: 140,
   /** Resting glow color before an emotion is chosen (soft warm off-white). */
   restHue: "#F5F1E8",
@@ -29,35 +31,30 @@ export const ORB = {
 
 /* Glow construction — three stacked radial layers, transform/opacity only. */
 export const GLOW = {
-  /** White-hot core, as a fraction of orb size. Bigger = hotter center. */
   coreFrac: 0.2,
-  /** Mid body in the emotion hue. This IS the visible ball. */
   midFrac: 0.6,
-  /** Outer halo reach. Bigger = more light spills into the void. */
   haloFrac: 1.4,
   /** Halo alpha at rest → at max intensity. Higher = louder room glow. */
   haloAlpha: { rest: 0.14, max: 0.38 },
-  /** Mid-layer alpha. Lower = ghostlier orb. */
   midAlpha: 0.85,
 } as const;
 
 /* ------------------------------------------------------------------ */
-/* Intensity (the orb IS the readout — no numbers anywhere)            */
+/* Intensity — 1..10, the orb + arc are the readout                    */
 /* ------------------------------------------------------------------ */
 export const INTENSITY = {
-  /** Step count. More steps = finer control, longer gesture to max. */
-  steps: 7,
-  /** Orb scale at step 1 → step 7. Widen the range = more drama per step. */
+  /** Step count (Ben: rate 1 out of 10). More steps = finer, longer swipe. */
+  steps: 10,
+  /** Orb scale at step 1 → max. Widen = more drama per step. */
   scaleAt1: 1.12,
   scaleAtMax: 1.6,
-  /** Pulse period at step 1 → 7, seconds. Shorter at max = more urgency. */
+  /** Pulse period at step 1 → max, s. Shorter at max = more urgency. */
   pulsePeriodAt1: 2.5,
   pulsePeriodAtMax: 0.9,
-  /** Pulse amplitude (±fraction of scale) at step 1 → 7. */
+  /** Pulse amplitude (±fraction) at step 1 → max. */
   pulseAmpAt1: 0.02,
   pulseAmpAtMax: 0.05,
-  /** Spring driving scale between steps. Stiffer = snappier steps,
-   *  lower damping = more overshoot/wobble per step. */
+  /** Spring chasing the per-step orb scale. Stiffer = snappier steps. */
   spring: { type: "spring", stiffness: 300, damping: 26 } as const,
 } as const;
 
@@ -70,73 +67,61 @@ export const SPRINGS = {
 } as const;
 
 /* ------------------------------------------------------------------ */
-/* Variant A — PULL (tension & release)                                */
+/* The WHEEL — six hue dots on a half-circle; finger ANGLE chooses     */
 /* ------------------------------------------------------------------ */
-export const PULL = {
-  /** Press-down scale before anything else. More = heavier first contact. */
+export const WHEEL = {
+  /** Press-down orb scale before anything else. More = heavier contact. */
   pressScale: 1.12,
-  /** Dot fan: arc width (deg) and radius (px) above the orb.
-   *  Wider/farther = grander reveal, longer thumb travel. */
+  /** Arc width (deg) and radius (px). Wider/farther = grander, longer reach. */
   arcDegrees: 150,
   arcRadiusPx: 110,
   /** Dot size, px. */
   dotSizePx: 10,
-  /** Per-dot reveal stagger, s. More = slower, showier fan-out. */
+  /** Per-dot reveal stagger, s (fan-out only — never on select response). */
   dotStaggerS: 0.025,
-  /** Active dot scale vs dimmed others. More contrast = clearer choice. */
+  /** Active dot scale vs the dimmed rest. More contrast = clearer choice. */
   activeDotScale: 1.5,
   inactiveDotOpacity: 0.4,
-  /** Dot opacity once shaping starts (they get out of the way). */
-  shapingDotOpacity: 0.15,
-  /** Hold an emotion this long (s) before upward drag starts shaping.
-   *  Longer = fewer accidental shapes, laggier feel. */
-  holdBeforeShapeS: 0.12,
-  /** Vertical px per intensity step. Fewer px = faster to max, twitchier. */
-  pxPerStep: 44,
-  /** Movement multiplier past step 7 (rubber band). Lower = firmer wall. */
-  rubberBand: 0.25,
+  /**
+   * Radial dead zone, px. Inside this distance from the orb's center the
+   * finger is "home" (no dot active / cancel-armed). Bigger = easier cancel,
+   * harder to choose without reaching.
+   */
+  homeRadiusPx: 48,
+  /**
+   * Hold the same dot this long (s) to morph wheel → bar. Ben: "hold it for
+   * a second". Longer = more deliberate, laggier. Shorter = hair-trigger.
+   */
+  holdToBarS: 0.55,
 } as const;
 
 /* ------------------------------------------------------------------ */
-/* Variant B — BLOOM (exhale)                                          */
+/* The ARC BAR — the wheel becomes a round bar; swipe along it, 1..10  */
 /* ------------------------------------------------------------------ */
-export const BLOOM = {
-  /** Time (s from hold start) at which each step 1..7 arrives.
-   *  Stretch the tail = more anticipation at high intensity. */
-  stepTimesS: [0, 0.2, 0.45, 0.75, 1.1, 1.5, 2.0],
-  /** Slide down this many px before lifting to cancel. */
-  cancelSlidePx: 60,
-  /** B's burst is an exhale: slower ring, longer afterglow. */
-  ringMs: 900,
-  afterglowS: 1.6,
-  /** Horizontal px to travel the full six-emotion spectrum.
-   *  Smaller = more sensitive hue drift. */
-  spectrumWidthPx: 260,
+export const BAR = {
+  /** Same geometry as the wheel so the morph reads as one object changing. */
+  arcDegrees: 150,
+  radiusPx: 110,
+  /** Track stroke width, px. Thicker = bolder, less delicate. */
+  thicknessPx: 10,
+  /** Unfilled track opacity (white). Quieter = more void. */
+  trackOpacity: 0.14,
+  /** Wheel→bar morph: dots collapse + track draws in, ms. */
+  morphMs: 340,
+  /** Knob (the swipe handle riding the fill's leading edge), px. */
+  knobPx: 24,
+  /** Knob swell while swiping (spring: SPRINGS.snappy). */
+  knobActiveScale: 1.25,
+  /** Fill glow strength at step 1 → 10 (arc's own light). */
+  fillGlow: { min: 0.25, max: 0.8 },
+  /** Finger within this distance of the orb center = cancel-armed. */
+  cancelRadiusPx: 55,
+  /** While cancel-armed the bar dims to this fraction — "let go, it's free". */
+  cancelDim: 0.35,
 } as const;
 
 /* ------------------------------------------------------------------ */
-/* Variant C — PULSE (heartbeat)                                       */
-/* ------------------------------------------------------------------ */
-export const PULSE = {
-  /** Ambient dot opacity when idle. Quieter = more mysterious. */
-  ambientDotOpacity: 0.25,
-  /** Tap squash: scaleY dip and duration. Deeper/longer = squishier drum. */
-  squashScaleY: 0.94,
-  squashMs: 60,
-  /** How strongly the orb's pulse tempo drifts toward your tapping tempo
-   *  per tap (0..1). Higher = locks onto you faster. */
-  entrainRate: 0.35,
-  /** Stillness window before auto-commit, ms. Shorter = hastier commit. */
-  commitPauseMs: 900,
-  /** While holding its breath the glow tightens by this fraction. */
-  breathHoldTighten: 0.05,
-  /** Tapping past max: wobble amplitude (±fraction) and cycle count. */
-  wobbleAmp: 0.015,
-  wobbleCycles: 3,
-} as const;
-
-/* ------------------------------------------------------------------ */
-/* Commit burst (shared skeleton; every commit randomized in bounds)   */
+/* Commit burst (every commit randomized within bounds)                */
 /* ------------------------------------------------------------------ */
 export const BURST = {
   /** Overshoot multiplier on current scale at commit. More = bigger pop. */
@@ -149,24 +134,21 @@ export const BURST = {
     ms: 600,
     ease: [0.22, 1, 0.36, 1] as [number, number, number, number],
   },
-  /** VARIABLE REWARD — randomization bounds. Every commit must differ.
-   *  ringJitter: ±fraction on ring timing/scale. flicker: glow flicker depth.
-   *  Wider bounds = more chaos; too wide reads as broken. */
+  /** VARIABLE REWARD — jitter bounds. Wider = more chaos; too wide = broken. */
   ringJitterPct: 0.05,
   glowFlicker: { min: 0.92, max: 1.08 },
-  /** Spark particles: count and drift ranges (px), seeded per commit.
-   *  Distances must clear the orb's own glow (~100px) or sparks drown in it. */
+  /** Spark particles: seeded per commit; distances scale with committed size
+   *  so a max-intensity commit throws farther (reward scales with investment). */
   sparks: {
     count: 6,
     distancePx: { min: 90, max: 150 },
     sizePx: { min: 3, max: 5 },
     durationMs: { min: 500, max: 750 },
   },
-  /** Afterglow: committed hue tint kept on the resting orb, fading out. */
+  /** Afterglow ember: committed-hue tint kept on the resting orb, fading. */
   afterglowTint: 0.2,
   afterglowS: 1.2,
-  /** Input re-enabled this long after commit, ms. Keep ≤1000 — the
-   *  "one more time" pull dies if we make people wait. */
+  /** Input re-enabled this long after commit, ms. Keep ≤1000. */
   rearmMs: 900,
 } as const;
 
@@ -174,17 +156,12 @@ export const BURST = {
 /* Labels, hint, chrome                                                */
 /* ------------------------------------------------------------------ */
 export const TEXT = {
-  /** Emotion label above the orb while shaping. */
   label: { sizePx: 13, letterSpacing: "0.12em", opacity: 0.7, offsetPx: 24, fadeInMs: 120 },
-  /** The hint word below the orb (per-variant word lives in the variant). */
   hint: { sizePx: 13, opacity: 0.35, offsetPx: 16 },
-  /** Variant switcher + mute. Dim hard during gestures — chrome disappears. */
+  /** Mute glyph. Dims hard during gestures — chrome disappears. */
   chrome: { sizePx: 11, idleOpacity: 0.3, activeOpacity: 0.7, gestureOpacity: 0.12 },
 } as const;
 
-/* ------------------------------------------------------------------ */
-/* Color                                                               */
-/* ------------------------------------------------------------------ */
 export const COLOR = {
   /** Emotion crossfade duration, ms — interpolated in OKLCH, never RGB. */
   crossfadeMs: 150,
@@ -194,24 +171,33 @@ export const COLOR = {
 /* Sound (lib/sound.ts reads everything from here)                     */
 /* ------------------------------------------------------------------ */
 export const SOUND = {
-  /** Master gain. The whole mix is felt-more-than-heard; keep conservative. */
-  masterGain: 0.25,
-  /** Step tick: C5 base, +1 semitone per step. Longer decay = wetter tick. */
-  tick: { baseHz: 523.25, attackS: 0.002, decayS: 0.09, gain: 0.15 },
-  /** Charge/bloom hum: root + octave at half gain. maxGain = hum ceiling. */
-  hum: { baseHz: 110, maxGain: 0.04, stopMs: 100 },
-  /** Commit swell: dyad (root+fifth) through an opening lowpass + whoosh. */
+  /** Master gain. Raised after iPhone test — ticks were inaudible at 0.25. */
+  masterGain: 0.4,
+  /**
+   * Step tick v2 — a soft mechanical DETENT (iOS-picker feel), not a beep:
+   * a filtered noise click + a tiny sine body. Pitch of the body still rises
+   * with the step so climbing feels like going up.
+   */
+  tick: {
+    baseHz: 523.25,
+    attackS: 0.001,
+    decayS: 0.05, // drier than v1 — a knock, not a chime
+    gain: 0.2,
+    /** The click transient: bandpassed noise. More gain = clackier. */
+    clickGain: 0.12,
+    clickBandHz: 2400,
+    clickDecayS: 0.018,
+  },
+  /** Charge hum: root + octave at half gain. maxGain = hum ceiling. */
+  hum: { baseHz: 110, maxGain: 0.05, stopMs: 100 },
+  /** Commit swell: dyad through an opening lowpass + noise whoosh. */
   swell: {
     ms: 350,
-    breathyMs: 550, // Variant B: slower, airier
-    lowpassFromHz: 800,
-    lowpassToHz: 6000,
+    lowpassFromHz: 700,
+    lowpassToHz: 4800, // warmer ceiling than v1's 6k
     whooshMs: 250,
-    gain: 0.18,
-    breathyNoiseBoost: 1.8,
+    gain: 0.22,
   },
-  /** Variant C commit kick: pitch-dropping soft thump. */
-  kick: { fromHz: 80, toHz: 40, ms: 120, gain: 0.2 },
   /** Cancel: one tick this many semitones below the last step's pitch. */
   cancelSemitonesBelow: 2,
   /** Per-emotion swell root notes (C-major pentatonic). Reassign to taste. */
@@ -234,7 +220,7 @@ export const REDUCED_MOTION = {
 } as const;
 
 /* ------------------------------------------------------------------ */
-/* Helpers (pure; used by every variant)                               */
+/* Helpers (pure)                                                      */
 /* ------------------------------------------------------------------ */
 
 /** Orb scale for a (possibly fractional) intensity step 1..steps. */
