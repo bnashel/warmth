@@ -9,11 +9,14 @@ export const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 /** Dark base so color reads only from the emotional glow. */
 export const MAP_STYLE = "mapbox://styles/mapbox/dark-v11";
 
-/** Opening camera (placeholder — NYC). */
+/**
+ * Opening camera — Manhattan, tilted. The pitch + slight bearing give the map
+ * weight the moment it loads (Apple-Maps-at-night feel).
+ */
 export const INITIAL_VIEW_STATE = {
-  longitude: -73.9857,
-  latitude: 40.7484,
-  zoom: 11,
-  pitch: 0,
-  bearing: 0,
+  longitude: -73.98,
+  latitude: 40.75,
+  zoom: 11.2,
+  pitch: 45,
+  bearing: -18,
 } as const;
