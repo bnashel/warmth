@@ -46,7 +46,7 @@ const START_DEG = -90 - WHEEL.arcDegrees / 2; // -165° (left-low)
 const SWEEP_DEG = WHEEL.arcDegrees; // 150°, over the top
 const R = WHEEL.arcRadiusPx;
 
-function polar(deg: number, r = R): { x: number; y: number } {
+function polar(deg: number, r: number = R): { x: number; y: number } {
   const rad = (deg * Math.PI) / 180;
   return { x: Math.cos(rad) * r, y: Math.sin(rad) * r };
 }
@@ -67,11 +67,32 @@ function paramFromPoint(dx: number, dy: number): number {
 }
 
 /* SVG canvas for the arc bar. */
-const S = 2 * (R + 40); // enough margin for knob + glow
+const S = 2 * (R + 48); // enough margin for tube + bloom + knob
 const C = S / 2;
 const a0 = polar(START_DEG);
 const a1 = polar(START_DEG + SWEEP_DEG);
 const ARC_D = `M ${C + a0.x} ${C + a0.y} A ${R} ${R} 0 0 1 ${C + a1.x} ${C + a1.y}`;
+
+/** The glass tube: an annular arc with round end caps — frosted body + rim,
+ *  built as one closed path so the light inside can be clipped to it. */
+const TUBE_D = (() => {
+  const hw = BAR.tube.halfWidthPx;
+  const Ro = R + hw;
+  const Ri = R - hw;
+  const e1 = START_DEG + SWEEP_DEG;
+  const o0 = polar(START_DEG, Ro);
+  const o1 = polar(e1, Ro);
+  const i0 = polar(START_DEG, Ri);
+  const i1 = polar(e1, Ri);
+  return [
+    `M ${C + o0.x} ${C + o0.y}`,
+    `A ${Ro} ${Ro} 0 0 1 ${C + o1.x} ${C + o1.y}`, // outer edge, clockwise
+    `A ${hw} ${hw} 0 0 1 ${C + i1.x} ${C + i1.y}`, // rounded end cap
+    `A ${Ri} ${Ri} 0 0 0 ${C + i0.x} ${C + i0.y}`, // inner edge, back
+    `A ${hw} ${hw} 0 0 1 ${C + o0.x} ${C + o0.y}`, // rounded start cap
+    "Z",
+  ].join(" ");
+})();
 
 type Phase = "idle" | "wheel" | "bar" | "bursting";
 
@@ -121,15 +142,16 @@ export function OrbFlow({
   const knobX = useMotionValue(0);
   const knobY = useMotionValue(0);
   const knobScale = useMotionValue(0);
-  const trackOpacity = useTransform(() => BAR.trackOpacity * barDim.get());
-  const fillOpacity = useTransform(() => 0.95 * barDim.get());
-  // Glow under-stroke breathes with intensity (fill position) and dims on cancel-arm.
-  const glowStrokeOpacity = useTransform(
+  // Tube + light opacities — all dim together when cancel-armed.
+  const tubeOpacity = useTransform(() => barDim.get());
+  const bloomOpacity = useTransform(
     () =>
+      BAR.fill.bloomAlpha *
       (BAR.fillGlow.min + (BAR.fillGlow.max - BAR.fillGlow.min) * fill.get()) *
-      0.35 *
       barDim.get(),
   );
+  const midOpacity = useTransform(() => BAR.fill.midAlpha * barDim.get());
+  const coreOpacity = useTransform(() => BAR.fill.coreAlpha * barDim.get());
 
   /* ---------- gesture refs ---------- */
   const g = useRef({
@@ -424,6 +446,8 @@ export function OrbFlow({
         ? EMOTIONS[activeIdx]
         : null;
   const fillHex = lockedEmotion ? EMOTION_HUES[lockedEmotion] : ORB.restHue;
+  // Hot filament color: the hue pulled 35% toward white (OKLCH, stays vivid).
+  const coreRgb = mixHexRgbString(fillHex, "#FFFFFF", 0.35);
 
   return (
     <div
@@ -465,36 +489,51 @@ export function OrbFlow({
               overflow: "visible",
             }}
           >
-            {/* Unfilled track — a whisper of a rail. */}
+            <defs>
+              {/* The light inside the glass is clipped to the tube's shape. */}
+              <clipPath id="orb-tube-clip">
+                <path d={TUBE_D} />
+              </clipPath>
+            </defs>
+
+            {/* THE GLASS TUBE — frosted translucent body + thin rim. */}
             <motion.path
-              d={ARC_D}
-              fill="none"
-              stroke="#FFFFFF"
-              strokeWidth={BAR.thicknessPx}
-              strokeLinecap="round"
-              initial={{ pathLength: 0 }}
-              animate={{ pathLength: 1 }}
-              transition={{ duration: BAR.morphMs / 1000, ease: "easeOut" }}
-              style={{ opacity: trackOpacity }}
+              d={TUBE_D}
+              fill={`rgba(255,255,255,${BAR.tube.bodyAlpha})`}
+              stroke={`rgba(255,255,255,${BAR.tube.rimAlpha})`}
+              strokeWidth={1}
+              style={{ opacity: tubeOpacity }}
             />
-            {/* Fill glow — a wide soft under-stroke (NO SVG filters: a
-                drop-shadow here re-rasterizes every frame and eats 60fps). */}
+
+            {/* Soft bloom — the light's fluff, allowed to spill past the glass.
+                (NO SVG filters: a drop-shadow re-rasterizes per frame.) */}
             <motion.path
               d={ARC_D}
               fill="none"
               stroke={fillHex}
-              strokeWidth={BAR.thicknessPx * 2.6}
+              strokeWidth={BAR.fill.bloomWidthPx}
               strokeLinecap="round"
-              style={{ pathLength: fill, opacity: glowStrokeOpacity }}
+              style={{ pathLength: fill, opacity: bloomOpacity }}
             />
-            {/* The fill — the emotion's light pouring around the arc. */}
+            {/* Body of light, living inside the tube. */}
             <motion.path
               d={ARC_D}
               fill="none"
               stroke={fillHex}
-              strokeWidth={BAR.thicknessPx}
+              strokeWidth={BAR.fill.midWidthPx}
               strokeLinecap="round"
-              style={{ pathLength: fill, opacity: fillOpacity }}
+              clipPath="url(#orb-tube-clip)"
+              style={{ pathLength: fill, opacity: midOpacity }}
+            />
+            {/* Hot core line — the filament. */}
+            <motion.path
+              d={ARC_D}
+              fill="none"
+              stroke={`rgb(${coreRgb})`}
+              strokeWidth={BAR.fill.coreWidthPx}
+              strokeLinecap="round"
+              clipPath="url(#orb-tube-clip)"
+              style={{ pathLength: fill, opacity: coreOpacity }}
             />
           </motion.svg>
         )}

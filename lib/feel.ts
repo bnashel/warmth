@@ -102,17 +102,42 @@ export const BAR = {
   /** Same geometry as the wheel so the morph reads as one object changing. */
   arcDegrees: 150,
   radiusPx: 110,
-  /** Track stroke width, px. Thicker = bolder, less delicate. */
-  thicknessPx: 10,
-  /** Unfilled track opacity (white). Quieter = more void. */
-  trackOpacity: 0.14,
-  /** Wheel→bar morph: dots collapse + track draws in, ms. */
+  /**
+   * THE GLASS TUBE (Ben: "bigger tube-like shape... transparent in the
+   * middle... fluffier"). The track is a translucent tube: faint frosted
+   * body + a thin rim, with the emotion's light glowing inside it.
+   */
+  tube: {
+    /** Half-width, px — the tube is 2× this wide. Wider = chunkier tube. */
+    halfWidthPx: 14,
+    /** Frosted interior alpha. Higher = milkier glass, less see-through. */
+    bodyAlpha: 0.045,
+    /** Rim (outline) alpha. Higher = harder glass edge. */
+    rimAlpha: 0.16,
+  },
+  /**
+   * The light inside the tube — three stacked strokes, all riding the same
+   * fill position. FLUFFY comes from the falloff between them, not blur
+   * (SVG filters are banned for perf).
+   */
+  fill: {
+    /** Soft outer bloom that spills past the glass. Wider/brighter = fluffier. */
+    bloomWidthPx: 40,
+    bloomAlpha: 0.14,
+    /** The body of light inside the tube (clipped to the glass). */
+    midWidthPx: 24,
+    midAlpha: 0.38,
+    /** Hot core line. Higher alpha = more neon; lower = more gas. */
+    coreWidthPx: 9,
+    coreAlpha: 0.85,
+  },
+  /** Wheel→bar morph: dots collapse + tube draws in, ms. */
   morphMs: 340,
   /** Knob (the swipe handle riding the fill's leading edge), px. */
-  knobPx: 24,
-  /** Knob swell while swiping (spring: SPRINGS.snappy). */
+  knobPx: 26,
+  /** Knob swell on a detent crossing (spring: SPRINGS.snappy). */
   knobActiveScale: 1.25,
-  /** Fill glow strength at step 1 → 10 (arc's own light). */
+  /** Fill glow strength at low → max intensity (scales the bloom). */
   fillGlow: { min: 0.25, max: 0.8 },
   /** Finger within this distance of the orb center = cancel-armed. */
   cancelRadiusPx: 55,
