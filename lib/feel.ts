@@ -141,10 +141,11 @@ export const PULSE = {
 export const BURST = {
   /** Overshoot multiplier on current scale at commit. More = bigger pop. */
   overshootScale: 1.15,
-  /** Expanding ring: end scale, start opacity, duration, ease. */
+  /** Expanding ring: end scale, start opacity, duration, ease.
+   *  opacityFrom must survive against the bright core — below ~0.5 it drowns. */
   ring: {
     scaleTo: 2.2,
-    opacityFrom: 0.5,
+    opacityFrom: 0.65,
     ms: 600,
     ease: [0.22, 1, 0.36, 1] as [number, number, number, number],
   },
@@ -153,10 +154,11 @@ export const BURST = {
    *  Wider bounds = more chaos; too wide reads as broken. */
   ringJitterPct: 0.05,
   glowFlicker: { min: 0.92, max: 1.08 },
-  /** Spark particles: count and drift ranges (px), seeded per commit. */
+  /** Spark particles: count and drift ranges (px), seeded per commit.
+   *  Distances must clear the orb's own glow (~100px) or sparks drown in it. */
   sparks: {
     count: 6,
-    distancePx: { min: 46, max: 96 },
+    distancePx: { min: 90, max: 150 },
     sizePx: { min: 3, max: 5 },
     durationMs: { min: 500, max: 750 },
   },

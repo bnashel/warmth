@@ -6,6 +6,7 @@ import { motion, useMotionValue, useTransform } from "framer-motion";
 import { ORB, TEXT } from "@/lib/feel";
 import { isMuted, panic, setMuted, unlockAudio } from "@/lib/sound";
 import { RestingOrb } from "./RestingOrb";
+import { VariantPull } from "./VariantPull";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
 
@@ -130,12 +131,21 @@ export default function LabShell() {
           zIndex: 5,
         }}
       >
-        <RestingOrb
-          key={variant}
-          variant={variant}
-          hintWord={HINT_WORD[variant]}
-          gestureDepth={gestureDepth}
-        />
+        {variant === "A" ? (
+          <VariantPull
+            key={variant}
+            variant={variant}
+            hintWord={HINT_WORD[variant]}
+            gestureDepth={gestureDepth}
+          />
+        ) : (
+          <RestingOrb
+            key={variant}
+            variant={variant}
+            hintWord={HINT_WORD[variant]}
+            gestureDepth={gestureDepth}
+          />
+        )}
       </div>
     </div>
   );
