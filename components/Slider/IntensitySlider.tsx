@@ -127,16 +127,15 @@ export function IntensitySlider({
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
-    const dir =
-      e.key === "ArrowRight" || e.key === "ArrowUp"
-        ? 1
-        : e.key === "ArrowLeft" || e.key === "ArrowDown"
-          ? -1
-          : 0;
-    if (!dir) return;
+    let next: number | null = null;
+    if (e.key === "ArrowRight" || e.key === "ArrowUp") next = value + 1;
+    else if (e.key === "ArrowLeft" || e.key === "ArrowDown") next = value - 1;
+    else if (e.key === "Home") next = MIN;
+    else if (e.key === "End") next = MAX;
+    if (next === null) return;
     e.preventDefault();
     primeAudio();
-    const next = Math.min(MAX, Math.max(MIN, value + dir));
+    next = Math.min(MAX, Math.max(MIN, next));
     progress.set((next - MIN) / (MAX - MIN));
     haptic(6);
   }
@@ -163,7 +162,7 @@ export function IntensitySlider({
         onPointerUp={endGrab}
         onPointerCancel={endGrab}
         onKeyDown={onKeyDown}
-        className="relative flex h-11 w-full cursor-pointer touch-none select-none items-center outline-none"
+        className="relative flex h-11 w-full cursor-pointer touch-none select-none items-center rounded-full outline-none [-webkit-tap-highlight-color:transparent] focus-visible:ring-2 focus-visible:ring-white/25"
       >
         {/* slim visible track */}
         <div className="relative h-2.5 w-full rounded-full bg-white/[0.06] ring-1 ring-inset ring-white/10">
@@ -182,6 +181,7 @@ export function IntensitySlider({
             width: HANDLE,
             height: HANDLE,
             boxShadow: handleShadow,
+            willChange: "transform",
           }}
           animate={{ scale: grabbed ? 1.18 : 1 }}
           transition={grabbed ? SPRING.snappy : SPRING.settle}

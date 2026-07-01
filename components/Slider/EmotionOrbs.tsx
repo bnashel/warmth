@@ -27,7 +27,7 @@ export function EmotionOrbs({
   onSelect: (e: Emotion) => void;
 }) {
   return (
-    <div className="flex items-center justify-center gap-4 sm:gap-5">
+    <div className="flex items-center justify-center gap-2.5 sm:gap-4">
       {EMOTIONS.map((emotion) => {
         const isSelected = emotion === selected;
         const hue = EMOTION_HUES[emotion];
@@ -41,7 +41,7 @@ export function EmotionOrbs({
               onSelect(emotion);
               haptic(12);
             }}
-            className="relative h-12 w-12 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+            className="relative h-9 w-9 select-none rounded-full outline-none [-webkit-tap-highlight-color:transparent] focus-visible:ring-2 focus-visible:ring-white/40 sm:h-11 sm:w-11"
             animate={{
               scale: isSelected ? 1.25 : 0.86,
               opacity: isSelected ? 1 : 0.38,

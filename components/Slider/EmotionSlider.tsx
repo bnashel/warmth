@@ -1,7 +1,13 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { AnimatePresence, motion, useMotionValue, useTransform } from "framer-motion";
+import {
+  AnimatePresence,
+  motion,
+  useMotionValue,
+  useReducedMotion,
+  useTransform,
+} from "framer-motion";
 import { EMOTION_HUES, type Emotion } from "@/lib/theme";
 import { EmotionOrbs, LABELS } from "./EmotionOrbs";
 import { IntensitySlider } from "./IntensitySlider";
@@ -16,6 +22,7 @@ import { rgba } from "./color";
 export default function EmotionSlider() {
   const [emotion, setEmotion] = useState<Emotion>("calm");
   const hue = EMOTION_HUES[emotion];
+  const reduce = useReducedMotion();
 
   const progress = useMotionValue((5 - 1) / 9);
   const glowOpacity = useTransform(progress, [0, 1], [0.1, 0.55]);
@@ -42,6 +49,7 @@ export default function EmotionSlider() {
           background: `radial-gradient(circle, ${rgba(hue, 0.55)}, transparent 70%)`,
           opacity: glowOpacity,
           scale: glowScale,
+          willChange: "transform, opacity",
         }}
       />
 
@@ -53,15 +61,26 @@ export default function EmotionSlider() {
             aria-hidden
             className="pointer-events-none absolute left-1/2 top-1/2 h-12 w-12 rounded-full"
             style={{
+              marginLeft: -24,
+              marginTop: -24,
               background: `radial-gradient(circle at 50% 38%, ${rgba(
                 EMOTION_HUES[flying.emotion],
                 0.98,
               )}, ${rgba(EMOTION_HUES[flying.emotion], 0.5)} 55%, transparent 82%)`,
               boxShadow: `0 0 34px 8px ${rgba(EMOTION_HUES[flying.emotion], 0.6)}`,
+              willChange: "transform, opacity",
             }}
-            initial={{ x: "-50%", y: "-50%", scale: 1, opacity: 1 }}
-            animate={{ x: "-50%", y: -380, scale: 0.3, opacity: 0 }}
-            transition={{ type: "spring", stiffness: 210, damping: 24 }}
+            initial={{ y: 0, scale: 1, opacity: 1 }}
+            animate={{
+              y: reduce ? -60 : -380,
+              scale: reduce ? 0.6 : 0.3,
+              opacity: 0,
+            }}
+            transition={
+              reduce
+                ? { duration: 0.45, ease: "easeOut" }
+                : { type: "spring", stiffness: 210, damping: 24 }
+            }
             onAnimationComplete={() => setFlying(null)}
           />
         )}
