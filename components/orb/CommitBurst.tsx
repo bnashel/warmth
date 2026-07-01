@@ -15,11 +15,15 @@ import { BURST, ORB, seededRandom } from "@/lib/feel";
 export function CommitBurst({
   seed,
   rgb,
+  sizeScale = 1,
   slowMs,
   onDone,
 }: {
   seed: number;
   rgb: string; // "R,G,B" of the committed hue
+  /** Committed orb scale — the reward must scale WITH the investment: a
+   *  max-intensity commit throws its ring/sparks past the bigger glow. */
+  sizeScale?: number;
   slowMs?: number;
   onDone?: () => void;
 }) {
@@ -33,8 +37,9 @@ export function CommitBurst({
       const angle =
         (i / BURST.sparks.count) * Math.PI * 2 + rand() * ((Math.PI * 2) / BURST.sparks.count);
       const dist =
-        BURST.sparks.distancePx.min +
-        rand() * (BURST.sparks.distancePx.max - BURST.sparks.distancePx.min);
+        (BURST.sparks.distancePx.min +
+          rand() * (BURST.sparks.distancePx.max - BURST.sparks.distancePx.min)) *
+        sizeScale;
       return {
         x: Math.cos(angle) * dist,
         y: Math.sin(angle) * dist * 0.9 - 8, // slight upward bias — it "lifts"
@@ -47,7 +52,7 @@ export function CommitBurst({
       };
     });
     return { ringMs, ringScale, sparks };
-  }, [seed, slowMs]);
+  }, [seed, slowMs, sizeScale]);
 
   return (
     <div
@@ -61,16 +66,16 @@ export function CommitBurst({
         pointerEvents: "none",
       }}
     >
-      {/* Expanding ring — the hue washing outward. */}
+      {/* Expanding ring — born at the committed orb's edge, washing outward. */}
       <motion.div
         style={{
           position: "absolute",
           left: "50%",
           top: "50%",
-          width: ORB.size,
-          height: ORB.size,
-          marginLeft: -ORB.size / 2,
-          marginTop: -ORB.size / 2,
+          width: ORB.size * sizeScale,
+          height: ORB.size * sizeScale,
+          marginLeft: (-ORB.size * sizeScale) / 2,
+          marginTop: (-ORB.size * sizeScale) / 2,
           borderRadius: "50%",
           border: `1.5px solid rgba(${rgb},0.9)`,
           boxShadow: `0 0 24px rgba(${rgb},0.35), inset 0 0 18px rgba(${rgb},0.25)`,
@@ -92,8 +97,9 @@ export function CommitBurst({
             width: s.size,
             height: s.size,
             borderRadius: "50%",
-            background: `rgba(${rgb},0.9)`,
-            boxShadow: `0 0 8px rgba(${rgb},0.7)`,
+            // White-hot core with a hue corona — reads even against same-hue glow.
+            background: `rgba(255,255,255,0.95)`,
+            boxShadow: `0 0 10px 2px rgba(${rgb},0.8)`,
             willChange: "transform, opacity",
           }}
           initial={{ x: 0, y: 0, scale: 1, opacity: 0.9 }}

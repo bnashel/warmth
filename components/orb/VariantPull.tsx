@@ -77,7 +77,9 @@ export function VariantPull({
   /* ---------- discrete React state ---------- */
   const [phase, setPhase] = useState<Phase>("idle");
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
-  const [burst, setBurst] = useState<{ seed: number; rgb: string } | null>(null);
+  const [burst, setBurst] = useState<{ seed: number; rgb: string; scale: number } | null>(
+    null,
+  );
   const [hintDead, setHintDead] = useState(false);
   const [getHintFlag, setHintFlag] = useSessionFlag("warmth-lab-committed");
   useEffect(() => setHintDead(getHintFlag()), [getHintFlag]);
@@ -94,6 +96,7 @@ export function VariantPull({
 
   /* ---------- gesture refs (never trigger renders) ---------- */
   const g = useRef({
+    pointerId: null as number | null, // one finger owns the gesture; others ignored
     startX: 0,
     startY: 0,
     activeIdx: null as number | null,
@@ -115,9 +118,12 @@ export function VariantPull({
   /* ---------- gesture machine ---------- */
   function onPointerDown(e: React.PointerEvent) {
     if (phase === "bursting") return; // re-armed via BURST.rearmMs
+    const st = g.current;
+    if (st.pointerId !== null) return; // a second finger never steals the gesture
+    st.pointerId = e.pointerId;
     e.currentTarget.setPointerCapture(e.pointerId);
     unlockAudio();
-    const st = g.current;
+    colorAnim.current?.stop(); // fast re-press: afterglow must not fight the new hue
     st.startX = e.clientX;
     st.startY = e.clientY;
     st.locked = false;
@@ -151,6 +157,7 @@ export function VariantPull({
 
   function onPointerMove(e: React.PointerEvent) {
     const st = g.current;
+    if (e.pointerId !== st.pointerId) return;
     if (phase !== "engaged" && phase !== "shaping") return;
 
     updateChoice(e.clientX);
@@ -195,6 +202,7 @@ export function VariantPull({
 
   function onPointerEnd(e: React.PointerEvent) {
     const st = g.current;
+    if (e.pointerId !== st.pointerId) return;
     if (phase !== "engaged" && phase !== "shaping") return;
     const dy = st.startY - e.clientY;
     const nearOrigin = Math.abs(e.clientX - st.startX) < ORB.size * 0.6 && dy < 12;
@@ -206,6 +214,7 @@ export function VariantPull({
 
   function commit() {
     const st = g.current;
+    st.pointerId = null; // gesture complete — release ownership
     const emotion: Emotion = EMOTIONS[st.activeIdx ?? 0];
     const committedRgb = rgb.get();
     const step = st.step;
@@ -244,7 +253,11 @@ export function VariantPull({
     animate(haloAlpha, GLOW.haloAlpha.rest, { duration: 0.4 });
     animate(gestureDepth, 0, { duration: 0.25 });
 
-    setBurst({ seed: (performance.now() * 997 + ++st.burstSeq) & 0xffffff, rgb: committedRgb });
+    setBurst({
+      seed: (performance.now() * 997 + ++st.burstSeq) & 0xffffff,
+      rgb: committedRgb,
+      scale: scaleForStep(step),
+    });
     setActiveIdx(null);
     st.activeIdx = null;
 
@@ -254,6 +267,7 @@ export function VariantPull({
 
   function cancel() {
     const st = g.current;
+    st.pointerId = null; // gesture over — release ownership
     stopHum();
     cancelTick(st.step); // one soft descending tick
     setPhase("idle");
@@ -288,7 +302,9 @@ export function VariantPull({
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerEnd}
-      onPointerCancel={() => cancel()}
+      onPointerCancel={(e) => {
+        if (e.pointerId === g.current.pointerId) cancel();
+      }}
       style={{
         position: "relative",
         width: ORB.hitTarget,
@@ -335,7 +351,14 @@ export function VariantPull({
                   opacity: dotOpacity,
                 }}
                 exit={{ x: 0, y: 0, scale: 0, opacity: 0, transition: spring(SPRINGS.settle) }}
-                transition={{ ...spring(SPRINGS.snappy), delay: i * PULL.dotStaggerS }}
+                transition={{
+                  // Stagger belongs to the fan-out (x/y, set once at mount);
+                  // select/dim (scale/opacity) must answer the thumb same-frame.
+                  x: { ...spring(SPRINGS.snappy), delay: i * PULL.dotStaggerS },
+                  y: { ...spring(SPRINGS.snappy), delay: i * PULL.dotStaggerS },
+                  scale: spring(SPRINGS.snappy),
+                  opacity: spring(SPRINGS.snappy),
+                }}
               />
             );
           })}
@@ -376,6 +399,7 @@ export function VariantPull({
           key={burst.seed}
           seed={burst.seed}
           rgb={burst.rgb}
+          sizeScale={burst.scale}
           onDone={() => setBurst(null)}
         />
       )}
