@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   motion,
-  useMotionValue,
   useMotionValueEvent,
   useTransform,
+  type MotionValue,
 } from "framer-motion";
 import { EMOTION_HUES, SPRING, type Emotion } from "@/lib/theme";
 import { primeAudio, playCommitSwell, playTick } from "@/lib/audio";
@@ -22,7 +22,13 @@ const clamp = (n: number, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, n));
  * stays fully inside the ends; the fill warms white → the emotion's color as
  * intensity climbs. Position is a GPU transform driven by a motion value, so
  * the drag stays clean at 60fps. Touch + mouse + keyboard. */
-export function IntensitySlider({ emotion }: { emotion: Emotion }) {
+export function IntensitySlider({
+  emotion,
+  progress,
+}: {
+  emotion: Emotion;
+  progress: MotionValue<number>;
+}) {
   const hue = EMOTION_HUES[emotion];
 
   const elRef = useRef<HTMLDivElement | null>(null);
@@ -30,7 +36,6 @@ export function IntensitySlider({ emotion }: { emotion: Emotion }) {
   const grabbedRef = useRef(false);
   const lastInt = useRef(DEFAULT);
 
-  const progress = useMotionValue((DEFAULT - MIN) / (MAX - MIN));
   const [value, setValue] = useState(DEFAULT);
   const [grabbed, setGrabbed] = useState(false);
 
