@@ -3,8 +3,9 @@
 import { motion } from "framer-motion";
 import { EMOTION_HUES, EMOTIONS, SPRING, type Emotion } from "@/lib/theme";
 import { rgba } from "./color";
+import { haptic } from "./haptics";
 
-const LABELS: Record<Emotion, string> = {
+export const LABELS: Record<Emotion, string> = {
   joy: "Joy",
   energy: "Energy",
   love: "Love",
@@ -14,8 +15,9 @@ const LABELS: Record<Emotion, string> = {
 };
 
 /**
- * The six-emotion picker. Tapping an orb selects it — it swells and brightens
- * (snappy spring) while the others dim. Selection state is owned by the parent.
+ * The six-emotion picker — simplified to just the orbs (the selected emotion's
+ * name is shown once, by the parent). Tapping swells + brightens the orb on a
+ * snappy spring, dims the others, and fires a haptic tick.
  */
 export function EmotionOrbs({
   selected,
@@ -25,48 +27,42 @@ export function EmotionOrbs({
   onSelect: (e: Emotion) => void;
 }) {
   return (
-    <div className="flex items-start justify-center gap-2 sm:gap-4">
+    <div className="flex items-center justify-center gap-4 sm:gap-5">
       {EMOTIONS.map((emotion) => {
         const isSelected = emotion === selected;
         const hue = EMOTION_HUES[emotion];
         return (
-          <div key={emotion} className="flex w-12 flex-col items-center gap-2">
-            <motion.button
-              type="button"
-              aria-label={LABELS[emotion]}
-              aria-pressed={isSelected}
-              onClick={() => onSelect(emotion)}
-              className="relative h-11 w-11 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-              animate={{
-                scale: isSelected ? 1.22 : 0.9,
-                opacity: isSelected ? 1 : 0.4,
+          <motion.button
+            key={emotion}
+            type="button"
+            aria-label={LABELS[emotion]}
+            aria-pressed={isSelected}
+            onClick={() => {
+              onSelect(emotion);
+              haptic(12);
+            }}
+            className="relative h-12 w-12 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+            animate={{
+              scale: isSelected ? 1.25 : 0.86,
+              opacity: isSelected ? 1 : 0.38,
+            }}
+            transition={SPRING.snappy}
+            whileTap={{ scale: isSelected ? 1.12 : 0.96 }}
+          >
+            <span
+              aria-hidden
+              className="absolute inset-0 rounded-full"
+              style={{
+                background: `radial-gradient(circle at 50% 38%, ${rgba(
+                  hue,
+                  0.98,
+                )}, ${rgba(hue, 0.6)} 52%, ${rgba(hue, 0.12)} 82%)`,
+                boxShadow: isSelected
+                  ? `0 0 28px 6px ${rgba(hue, 0.6)}`
+                  : `0 0 12px 1px ${rgba(hue, 0.22)}`,
               }}
-              transition={SPRING.snappy}
-              whileTap={{ scale: isSelected ? 1.12 : 0.98 }}
-            >
-              <span
-                aria-hidden
-                className="absolute inset-0 rounded-full"
-                style={{
-                  background: `radial-gradient(circle at 50% 38%, ${rgba(
-                    hue,
-                    0.98,
-                  )}, ${rgba(hue, 0.6)} 52%, ${rgba(hue, 0.12)} 82%)`,
-                  boxShadow: isSelected
-                    ? `0 0 26px 5px ${rgba(hue, 0.6)}`
-                    : `0 0 12px 1px ${rgba(hue, 0.22)}`,
-                }}
-              />
-            </motion.button>
-            <motion.span
-              className="select-none text-[10px] tracking-wide"
-              animate={{ opacity: isSelected ? 0.85 : 0.3 }}
-              transition={SPRING.snappy}
-              style={{ color: isSelected ? hue : "var(--foreground)" }}
-            >
-              {LABELS[emotion]}
-            </motion.span>
-          </div>
+            />
+          </motion.button>
         );
       })}
     </div>
