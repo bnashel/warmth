@@ -134,6 +134,51 @@ export const GLOW = {
 } as const;
 
 /* ------------------------------------------------------------------ */
+/* THE FIELD — emotion as standing weather over the city (public map)  */
+/* Contributions pool into a continuous field: hue = locally dominant  */
+/* emotion, brightness = amount of feeling. No individual points.      */
+/* ------------------------------------------------------------------ */
+export const FIELD = {
+  /** Kernel footprint in METERS (geographic; a feeling warms its area). */
+  radiusM: 900,
+  /** + meters per unit intensity (1..10 → up to ~60% wider). */
+  radiusPerIntensityM: 55,
+  /** Pixel clamps: min keeps one lonely commit a NEIGHBORHOOD bloom at
+   *  every zoom (never a pin); max protects DPR-3 fill-rate. CSS px. */
+  minRadiusPx: 92,
+  maxRadiusPx: 300,
+  /** Kernel falloff exponent on (1 − t²): higher = tighter heart,
+   *  longer relative skirt. The edge ALWAYS reaches zero — no rims. */
+  kernelSoftness: 2.0,
+  /** Filmic knee: brightness = 1 − exp(−exposure · pooledWeight).
+   *  Raises how fast pooled feeling brightens; never clips to white. */
+  exposure: 0.62,
+  /** Dominance power (the mud rule knob): hues mix by Iᵖ share in OKLab.
+   *  Higher p = dominant emotion snaps harder, narrower weather fronts. */
+  dominance: 4.0,
+  /** Overall field gain on the additive composite. */
+  gain: 0.88,
+  /** Living tide: subtle brightness breath. */
+  breath: { periodMs: 2500, amp: 0.045 },
+  /** Streetlight signature: the field multiplied onto the base map so
+   *  streets inside a feeling catch its color. 0 kills it. */
+  streetlightGain: 0.55,
+  /** Internal render-target scale (0.5 = half res — soft field, 4× cheaper). */
+  resolutionScale: 0.5,
+} as const;
+
+/* ------------------------------------------------------------------ */
+/* Device performance                                                  */
+/* ------------------------------------------------------------------ */
+export const PERF = {
+  /** Cap the map canvas DPR: 3× iPhones render 2.25× fewer pixels at 2×,
+   *  visually near-identical on a dark map. Ben's lag report, honored. */
+  maxPixelRatio: 2,
+  /** rAF cadence at rest (ms between pushes) — breath stays smooth. */
+  restFrameMs: 66,
+} as const;
+
+/* ------------------------------------------------------------------ */
 /* The commit choreography — orb burst → a beat → the city receives it */
 /* ------------------------------------------------------------------ */
 export const CHOREO = {

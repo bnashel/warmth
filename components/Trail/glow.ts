@@ -12,7 +12,7 @@ import {
   type GlowDatum,
 } from "./GlowLayer";
 import type { LivePoint } from "@/lib/momentsStore";
-import { GLOW } from "./tune";
+import { GLOW } from "@/components/Map/tune";
 
 /** Radius growth as the camera approaches — light gets room to breathe. */
 const zoomScale = (zoom: number) => Math.pow(GLOW.zoomGrowth, zoom - 12);

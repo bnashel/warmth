@@ -12,7 +12,7 @@
  * All look-tunables live in tune.ts (GLOW); this file is the machinery.
  */
 import { ScatterplotLayer, type ScatterplotLayerProps } from "deck.gl";
-import { GLOW } from "./tune";
+import { GLOW } from "@/components/Map/tune";
 
 /* Extra uniform block (deck 9 shader-module pattern — see TripsLayer). */
 const glowUniforms = {
