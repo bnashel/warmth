@@ -7,8 +7,9 @@ import type { MapRef } from "react-map-gl/mapbox";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { MAPBOX_TOKEN } from "@/lib/map";
 import { momentsStore } from "@/lib/momentsStore";
-import { CAMERA, INK, MOTION, PERF } from "./tune";
+import { CAMERA, INK, MOTION, PERF, SOLAR } from "./tune";
 import { buildStyle } from "./styles";
+import { applySolarInk } from "./solar";
 import { FieldLayer } from "./FieldLayer";
 import { buildLabelLayers, loadLabels } from "./neighborhoods";
 import type { Map as MapboxMap } from "mapbox-gl";
@@ -73,6 +74,23 @@ export default function MapStage({
     });
   }, []);
 
+  // Solar drift: the ink follows the real sun. First coat lands in onLoad;
+  // after that, re-check once a minute and whenever the tab comes back —
+  // paint changes ride their own slow transitions, so nothing ever steps.
+  useEffect(() => {
+    const apply = () => {
+      if (document.visibilityState !== "visible") return;
+      const map = mapRef.current?.getMap();
+      if (map && loaded.current) applySolarInk(map);
+    };
+    const iv = setInterval(apply, SOLAR.updateMs);
+    document.addEventListener("visibilitychange", apply);
+    return () => {
+      clearInterval(iv);
+      document.removeEventListener("visibilitychange", apply);
+    };
+  }, []);
+
   // The heartbeat: advance the store; hand data + repaints to the field.
   useEffect(() => {
     let raf = 0;
@@ -128,6 +146,8 @@ export default function MapStage({
           const field = new FieldLayer();
           map.addLayer(field);
           fieldRef.current = field;
+          // First coat of solar ink (real sun, or ?solarHour= lab preview).
+          applySolarInk(map);
           // Lab-only hook so the screenshot/perf harness can set exact cameras.
           (window as unknown as { __warmthMap?: typeof map }).__warmthMap = map;
           loaded.current = true;

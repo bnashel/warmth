@@ -220,6 +220,46 @@ export const ATMOSPHERE = {
 } as const;
 
 /* ------------------------------------------------------------------ */
+/* Solar drift — the ink follows the real sun. Always dark; the sun    */
+/* only changes the TEMPERATURE of the ink: cooler and a hair lifted   */
+/* at midday, a faint ember cast at dawn/dusk, deepest black at night. */
+/* Night is INK itself, untouched.                                     */
+/* ------------------------------------------------------------------ */
+export const SOLAR = {
+  /** Master dial: 0 kills the effect entirely, 1 = full (still subtle). */
+  strength: 1,
+  /** Sun elevation (deg) across which night becomes day. Starts at civil
+   *  twilight (−6°), lands at mid-morning sun (10°) — the blend spans the
+   *  real dawn, so there is never a moment of switching. */
+  dayRamp: { from: -6, to: 10 },
+  /** The ember rises through late twilight and burns off as the sun
+   *  climbs — nonzero only around sunrise and sunset. */
+  emberRamp: { rise: { from: -8, to: -1 }, fade: { from: 3, to: 11 } },
+  /** Re-check the sun this often; paint eases over transitionMs so even
+   *  a stale backgrounded tab never visibly steps. */
+  updateMs: 60_000,
+  transitionMs: 1_500,
+  /** MIDDAY — the city under a high sun: cooler, a hair lifted. Still
+   *  ink; every value obeys the brightness law. */
+  day: {
+    bg: "#0B0D13",
+    water: "#070910",
+    park: "#0E1118",
+    building: "#131724",
+    road: "#CDD4E4",
+  },
+  /** DAWN/DUSK — warmth low on the horizon, a faint ember cast. The roads
+   *  carry it: land shifts are whispers, the hairlines visibly warm. */
+  ember: {
+    bg: "#0D0A0C",
+    water: "#090607",
+    park: "#110E0D",
+    building: "#191216",
+    road: "#DFCFB2",
+  },
+} as const;
+
+/* ------------------------------------------------------------------ */
 /* THE palette — Ink & Glow, Ben's pick. All ink, zero saturation.     */
 /*                                                                     */
 /* THE BRIGHTNESS LAW: nothing on the base may outshine the dimmest    */
