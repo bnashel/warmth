@@ -112,6 +112,7 @@ uniform sampler2D uField1;
 uniform vec3 uHueLab[6];
 uniform float uExposure;
 uniform float uDominance;
+uniform float uChromaFloor;
 uniform float uGain;
 uniform float uTimeSec;
 uniform float uBreathPeriod;
@@ -148,17 +149,29 @@ void main() {
   if (total < 0.002) discard;
 
   // THE MUD RULE: hues mix by dominance share (I^p), never sum. Any local
-  // majority snaps the area to its hue; fronts blend over a narrow band;
-  // a six-way pile CANNOT collapse to gray because color is a weighted
-  // average of saturated anchors, weighted almost entirely by the winner.
+  // majority snaps the area to its hue and fronts blend over a narrow band.
+  // Where near-complementary fields TIE, the average alone would pass
+  // through neutral — so a chroma floor below re-saturates the front: hue
+  // still rotates through the boundary, but it can never wash to gray.
   vec3 lab = vec3(0.0);
   float wsum = 0.0;
+  float anchorChroma = 0.0;
+  int top = 0;
+  float topW = -1.0;
   for (int i = 0; i < 6; i++) {
     float w = pow(I[i], uDominance);
     lab += w * uHueLab[i];
+    anchorChroma += w * length(uHueLab[i].yz);
     wsum += w;
+    if (w > topW) { topW = w; top = i; }
   }
   lab /= max(wsum, 1e-6);
+  anchorChroma /= max(wsum, 1e-6);
+  float c = length(lab.yz);
+  float cMin = uChromaFloor * anchorChroma;
+  // Direction is unstable at an exact tie — lean on the local winner.
+  vec2 dir = c > 1e-4 ? lab.yz / c : normalize(uHueLab[top].yz);
+  lab.yz = dir * max(c, cMin);
 
   // Pooled feeling → light through a filmic knee: more feeling = brighter,
   // asymptotically — never white. The low end is linear: the long fade.
@@ -232,8 +245,11 @@ export class FieldLayer implements CustomLayerInterface {
 
   constructor() {
     EMOTIONS.forEach((e, i) => {
-      const [L, a, b] = hexToOklab(EMOTION_HUES[e]);
-      this.hueLab[i * 3] = L;
+      const [, a, b] = hexToOklab(EMOTION_HUES[e]);
+      // Equal feeling = equal light: anchors share one OKLab lightness
+      // (raw hues span L .62–.87, which made Awe glow half as bright as
+      // Joy for the same intensity). Hue/chroma stay the brand's.
+      this.hueLab[i * 3] = FIELD.anchorL;
       this.hueLab[i * 3 + 1] = a;
       this.hueLab[i * 3 + 2] = b;
     });
@@ -396,6 +412,7 @@ export class FieldLayer implements CustomLayerInterface {
   }
   private clamped = new Float32Array(0);
   private clampMin = -1;
+  private uniformCache = new Map<string, WebGLUniformLocation | null>();
 
   render(gl: WebGL2RenderingContext) {
     if (!this.resolveProgram || this.count === 0) return;
@@ -405,7 +422,14 @@ export class FieldLayer implements CustomLayerInterface {
 
     gl.useProgram(this.resolveProgram);
     gl.bindVertexArray(this.resolveVao);
-    const u = (name: string) => gl.getUniformLocation(this.resolveProgram!, name);
+    const u = (name: string) => {
+      let loc = this.uniformCache.get(name);
+      if (loc === undefined) {
+        loc = gl.getUniformLocation(this.resolveProgram!, name);
+        this.uniformCache.set(name, loc);
+      }
+      return loc;
+    };
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.tex[0]);
     gl.activeTexture(gl.TEXTURE1);
@@ -415,6 +439,7 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform3fv(u("uHueLab"), this.hueLab);
     gl.uniform1f(u("uExposure"), FIELD.exposure);
     gl.uniform1f(u("uDominance"), FIELD.dominance);
+    gl.uniform1f(u("uChromaFloor"), FIELD.chromaFloor);
     gl.uniform1f(u("uTimeSec"), timeSec);
     gl.uniform1f(u("uBreathPeriod"), periodSec);
     gl.uniform1f(u("uBreathAmp"), FIELD.breath.amp);

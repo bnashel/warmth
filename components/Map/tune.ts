@@ -152,10 +152,16 @@ export const FIELD = {
   kernelSoftness: 2.0,
   /** Filmic knee: brightness = 1 − exp(−exposure · pooledWeight).
    *  Raises how fast pooled feeling brightens; never clips to white. */
-  exposure: 0.62,
+  exposure: 0.78,
   /** Dominance power (the mud rule knob): hues mix by Iᵖ share in OKLab.
    *  Higher p = dominant emotion snaps harder, narrower weather fronts. */
-  dominance: 4.0,
+  dominance: 5.0,
+  /** Minimum front chroma as a fraction of the anchors' own chroma —
+   *  fronts rotate hue but can never wash to gray (design-review fix). */
+  chromaFloor: 0.62,
+  /** Shared OKLab lightness for all six anchors: equal feeling = equal
+   *  light (raw brand hues span L .62–.87). */
+  anchorL: 0.76,
   /** Overall field gain on the additive composite. */
   gain: 0.88,
   /** Living tide: subtle brightness breath. */
@@ -184,8 +190,9 @@ export const PERF = {
 export const CHOREO = {
   /** Silence between the orb's burst igniting and the map bloom starting. */
   beatMs: 180,
-  /** The bloom: light turning on — rise past full, then settle into breath. */
-  arrival: { durationMs: 1400, overshoot: 1.18, peakAt: 0.55 },
+  /** The bloom: light turning on — rise past full, then settle into breath.
+   *  Overshoot is big on purpose: the field's filmic knee flattens it. */
+  arrival: { durationMs: 1400, overshoot: 1.7, peakAt: 0.55 },
   /** Camera: glide to your bloom ONLY if it's off-screen (Ben's call). */
   glide: { marginPct: 0.1, durationMs: 1400 },
 } as const;

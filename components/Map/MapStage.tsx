@@ -52,12 +52,19 @@ export default function MapStage({
   const [rotated, setRotated] = useState(false);
 
   const style = useMemo(() => buildStyle(INK, "ink-and-glow"), []);
-  // DPR cap: 3× phones render near-identically at 2× on a dark map,
-  // for 2.25× less fill — Ben's lag report, honored.
-  const pixelRatio = useMemo(
-    () => Math.min(typeof window === "undefined" ? 1 : window.devicePixelRatio, PERF.maxPixelRatio),
-    [],
-  );
+  // DPR cap: 3× phones render near-identically at 2× on a dark map, for
+  // 2.25× less fill — Ben's lag report, honored. Mapbox v3 sizes its canvas
+  // through window.devicePixelRatio (its constructor option is vestigial),
+  // so the cap is a scoped override BEFORE the map mounts. DOM stays crisp
+  // (layout never reads this); only canvas sizing consumers do.
+  useMemo(() => {
+    if (typeof window !== "undefined" && window.devicePixelRatio > PERF.maxPixelRatio) {
+      Object.defineProperty(window, "devicePixelRatio", {
+        get: () => PERF.maxPixelRatio,
+        configurable: true,
+      });
+    }
+  }, []);
 
   useEffect(() => {
     void loadLabels().then((d) => {
@@ -110,7 +117,6 @@ export default function MapStage({
         pitchWithRotate={false}
         touchPitch={false}
         fadeDuration={MOTION.fadeDurationMs}
-        {...({ pixelRatio } as Record<string, unknown>)}
         onLoad={(e) => {
           const map = e.target;
           // Motion is a choice, not a default: heavy-glass pan, anchored
