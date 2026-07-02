@@ -73,10 +73,10 @@ export const LABELS = {
 /* Fake glow — TEST SCAFFOLDING for judging candidates (not Phase 3)   */
 /* ------------------------------------------------------------------ */
 export const GLOW_TEST = {
-  radiusPx: 62, // bigger = softer, more aurora
-  intensity: 1.1,
-  threshold: 0.035, // lower = wider soft skirt
-  opacity: 0.9,
+  radiusPx: 96, // bigger = softer, more aurora (dots read as fields, not dabs)
+  intensity: 1.15,
+  threshold: 0.018, // lower = wider soft skirt
+  opacity: 0.85,
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -88,7 +88,9 @@ export const INK = {
   bg: "#0A0B0F", // the void itself — land is the absence of feature
   water: "#06070A", // water darker than land: rivers as deep cuts
   park: "#0D0F13", // parks: the faintest lift above land (a held breath)
-  plateBase: 0.016, // neighborhood tonal plates: whisper-white fills…
+  building: "#12141B", // human-scale mass at street zoom — still ink
+  buildingAlpha: 0.6,
+  plateBase: 0.03, // neighborhood tonal plates: lift land off the water…
   plateStep: 0.011, // …varied per-plate so the city reads as patchwork
   boundary: "rgba(233,236,244,0.075)", // hand-drawn seams between places
   boundaryWidth: 1.0,
@@ -104,8 +106,8 @@ export const GRAPHITE = {
   park: "#0E1013", // carved hollows
   building: "#1A1D22", // the volume texture (fades in via JOURNEY)
   buildingAlpha: 0.85,
-  plateBase: 0.0, // no plates — mass does the work
-  plateStep: 0.0,
+  plateBase: 0.012, // faint plates so places exist at rest, not just labels
+  plateStep: 0.008,
   boundary: "rgba(0,0,0,0.42)", // seams carved INTO the block
   boundaryWidth: 1.2,
   road: "#07080B", // streets as dark channels cut from the mass
@@ -116,11 +118,12 @@ export const GRAPHITE = {
 /** C3 — FOG & VOID: land is luminous haze; water/parks are pure void;
  *  streets are etchings through the fog. Structure by absence. */
 export const FOG = {
-  bg: "#16181D", // the haze — the city's own dim breath
-  water: "#040507", // the deepest void on screen
-  park: "#0A0C10", // voids carved out of the fog
-  building: "#1C1F25", // denser fog clumps (density texture)
-  buildingAlpha: 0.5,
+  bg: "#1C1F26", // the haze — lifted well above graphite so the thesis reads:
+  // land glows faintly, and water/parks/streets are absences cut from it
+  water: "#030406", // the deepest void on screen — THE void, singular
+  park: "#12141A", // parks recede quietly; they must not out-shout the glow
+  building: "#252932", // denser fog clumps (density texture)
+  buildingAlpha: 0.55,
   plateBase: 0.012, // plates as gentle pressure differences in the fog
   plateStep: 0.008,
   boundary: "rgba(4,5,7,0.35)", // darker seams pressed into the haze

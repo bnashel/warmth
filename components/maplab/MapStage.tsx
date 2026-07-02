@@ -86,6 +86,8 @@ export default function MapStage({ candidate }: { candidate: CandidateId }) {
         map.touchZoomRotate.disableRotation();
         map.dragPan.enable(MOTION.dragPan);
         map.scrollZoom.setWheelZoomRate(MOTION.wheelZoomRate);
+        // Lab-only hook so the screenshot/perf harness can set exact cameras.
+        (window as unknown as { __warmthMap?: typeof map }).__warmthMap = map;
         syncOverlay();
       }}
       onMove={syncOverlay}

@@ -91,13 +91,9 @@ export function buildStyle(p: CandidatePalette, name: string): StyleSpecificatio
       type: "fill",
       source: "streets",
       "source-layer": "landuse",
-      filter: [
-        "match",
-        ["get", "class"],
-        ["park", "grass", "wood", "cemetery", "pitch", "scrub"],
-        true,
-        false,
-      ],
+      // No pitch/scrub: playground-sized rectangles read as glitches, not
+      // places, and their contrast competes with the glow.
+      filter: ["match", ["get", "class"], ["park", "grass", "wood", "cemetery"], true, false],
       paint: { "fill-color": p.park },
     },
     // Water — its own darkness, never blue.

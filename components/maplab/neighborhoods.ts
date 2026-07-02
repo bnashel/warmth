@@ -12,29 +12,78 @@ import { LABELS } from "./tune";
 
 type LabelDatum = { name: string; anchor: [number, number]; tier: 0 | 1 | 2 };
 
+/* Census NTAs chain neighborhoods with hyphens ("Carroll Gardens-Cobble
+ * Hill-Gowanus-Red Hook") — bureaucracy, not a place. A label is ONE name:
+ * the first segment, which the census orders as the dominant neighborhood.
+ * KEEP_WHOLE marks real hyphenated names; RENAME is the hand-curation slot
+ * for anything where the first segment is the wrong artistic choice. */
+const KEEP_WHOLE = new Set(["Bedford-Stuyvesant", "Co-op City"]);
+const RENAME: Record<string, string> = {
+  "Midtown South-Flatiron-Union Square": "Flatiron",
+};
+
+/* Area decides tier by default — which crowns Staten Island acreage and
+ * leaves all of Manhattan nameless at rest. Cultural weight beats acreage:
+ * a few icons anchor each borough at the wide shot (tier 0), the rest of
+ * the canon arrives one breath later (tier 1). Keyed by display name. */
+const TIER_OVERRIDE: Record<string, 0 | 1 | 2> = {
+  Harlem: 0,
+  "Upper West Side": 0,
+  "Upper East Side": 0,
+  Midtown: 0,
+  Chelsea: 0,
+  "East Village": 0,
+  "Financial District": 0,
+  Williamsburg: 0,
+  Bushwick: 0,
+  "Park Slope": 0,
+  "Long Island City": 0,
+  "East Williamsburg": 1, // collides with Williamsburg at the rest view
+  "Greenwich Village": 1,
+  SoHo: 1,
+  Tribeca: 1,
+  "West Village": 1,
+  Chinatown: 1,
+};
+
+function displayName(raw: string): string {
+  // "Bedford-Stuyvesant (West)" → "Bedford-Stuyvesant"
+  const stripped = raw.replace(/\s*\([^)]*\)/g, "").trim();
+  if (KEEP_WHOLE.has(stripped)) return stripped;
+  if (RENAME[stripped]) return RENAME[stripped];
+  return stripped.split("-")[0].trim();
+}
+
 let cache: Promise<LabelDatum[]> | null = null;
 
-/** Load + prep label data once: strip census parentheticals, dedupe, tier. */
+/** Load + prep label data once: clean names, dedupe, tier. */
 export function loadLabels(): Promise<LabelDatum[]> {
   if (!cache) {
     cache = fetch("/data/nyc-neighborhoods.json")
       .then((r) => r.json())
       .then((fc: GeoJSON.FeatureCollection) => {
-        const byName = new Map<string, { area: number; anchor: [number, number] }>();
+        // Dedupe on name+borough (largest wins) so census sub-areas collapse
+        // to one label while true twins survive — Murray Hill exists in both
+        // Manhattan and Queens, and both deserve their name.
+        const byName = new Map<string, { name: string; area: number; anchor: [number, number] }>();
         for (const f of fc.features) {
-          const p = f.properties as { name: string; area: number; anchor: [number, number] };
-          // "Bedford-Stuyvesant (West)" → "Bedford-Stuyvesant"; keep largest.
-          const name = p.name.replace(/\s*\([^)]*\)/g, "").trim();
-          const prev = byName.get(name);
-          if (!prev || p.area > prev.area) byName.set(name, { area: p.area, anchor: p.anchor });
+          const p = f.properties as {
+            name: string;
+            borough: string;
+            area: number;
+            anchor: [number, number];
+          };
+          const name = displayName(p.name);
+          const key = `${name}|${p.borough}`;
+          const prev = byName.get(key);
+          if (!prev || p.area > prev.area) byName.set(key, { name, area: p.area, anchor: p.anchor });
         }
-        return [...byName.entries()].map(([name, { area, anchor }]) => ({
+        return [...byName.values()].map(({ name, area, anchor }) => ({
           name,
           anchor,
-          tier: (area >= LABELS.tierAreas[0] ? 0 : area >= LABELS.tierAreas[1] ? 1 : 2) as
-            | 0
-            | 1
-            | 2,
+          tier:
+            TIER_OVERRIDE[name] ??
+            ((area >= LABELS.tierAreas[0] ? 0 : area >= LABELS.tierAreas[1] ? 1 : 2) as 0 | 1 | 2),
         }));
       });
   }

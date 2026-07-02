@@ -63,12 +63,20 @@ export default function MapLab() {
         ))}
       </div>
 
-      {/* Mapbox attribution is required (ToS) — kept, but made quiet. */}
+      {/* Mapbox attribution is required (ToS) — kept, but made quiet.
+          The compact ⓘ toggle ships with a bright default icon; it gets the
+          same whisper treatment as everything else (the one law has no
+          exceptions for chrome). */}
       <style>{`
         .mapboxgl-ctrl-attrib { background: transparent !important; }
         .mapboxgl-ctrl-attrib a { color: rgba(255,255,255,0.28) !important; font-size: 10px; }
         .mapboxgl-ctrl-logo { opacity: 0.32; }
         .mapboxgl-ctrl-attrib.mapboxgl-compact { background: rgba(10,11,15,0.6) !important; }
+        .mapboxgl-ctrl-attrib-button {
+          opacity: 0.3 !important;
+          filter: grayscale(1) brightness(1.6);
+          outline: none;
+        }
       `}</style>
     </div>
   );
