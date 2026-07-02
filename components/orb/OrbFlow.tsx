@@ -108,9 +108,16 @@ type Phase = "idle" | "wheel" | "bar" | "bursting";
 export function OrbFlow({
   hintWord,
   gestureDepth,
+  onCommit,
 }: {
   hintWord: string;
   gestureDepth: MotionValue<number>;
+  /**
+   * Fires the instant a feeling is committed (start of the burst, not the
+   * end) — the world outside the orb reacts in the same beat. intensity is
+   * the continuous 1..10 the tube produced.
+   */
+  onCommit?: (moment: { emotion: Emotion; intensity: number }) => void;
 }) {
   const reduced = useReducedMotion();
   const spring = (s: Transition): Transition =>
@@ -366,6 +373,10 @@ export function OrbFlow({
     st.pointerId = null;
     const committedRgb = rgb.get();
     const v = st.v;
+
+    // The world hears about it NOW — the bloom and any network write ride
+    // under the burst instead of waiting for it.
+    onCommit?.({ emotion, intensity: v });
 
     setPhase("bursting");
     stopHum();
