@@ -225,6 +225,10 @@ export class FieldLayer implements CustomLayerInterface {
   type = "custom" as const;
   renderingMode = "2d" as const;
 
+  /** Public↔private crossfade (0..1): rides the gain uniforms, and at 0 the
+   *  whole field (accumulation included) costs nothing. Set from MapStage. */
+  fade = 1;
+
   private map: MapboxMap | null = null;
   private gl: WebGL2RenderingContext | null = null;
   private accumProgram: WebGLProgram | null = null;
@@ -262,10 +266,14 @@ export class FieldLayer implements CustomLayerInterface {
       this.instanceData = new Float32Array(
         Math.max(64, n * 2) * FLOATS_PER_INSTANCE,
       );
+      this.floorPx = new Float32Array(Math.max(64, n * 2));
     }
     const d = this.instanceData;
     for (let i = 0; i < n; i++) {
       const p = points[i];
+      // The lonely-commit floor is for real feelings; the seed sheet keeps
+      // its geographic scale (small floor) so it can't pool into blobs.
+      this.floorPx[i] = p.seed ? FIELD.seedMinRadiusPx : FIELD.minRadiusPx;
       const mc = mapboxgl.MercatorCoordinate.fromLngLat({
         lng: p.position[0],
         lat: p.position[1],
@@ -352,7 +360,7 @@ export class FieldLayer implements CustomLayerInterface {
 
   /** Offscreen accumulation — mapbox's sanctioned hook for FBO work. */
   prerender(gl: WebGL2RenderingContext, matrix: number[]) {
-    if (!this.accumProgram || !this.map) return;
+    if (!this.accumProgram || !this.map || this.fade < 0.01) return;
     this.ensureTargets(gl);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
@@ -369,12 +377,12 @@ export class FieldLayer implements CustomLayerInterface {
     gl.bindVertexArray(this.quadVao);
 
     // Radius pixel clamps happen HERE (zoom changes without data changes):
-    // clamp in mercator units derived from the current zoom.
+    // clamp in mercator units derived from the current zoom. The floor is
+    // per-point (seed sheet vs lonely commit — see setData).
     const zoom = this.map.getZoom();
     const mercPerCssPx = 1 / (512 * Math.pow(2, zoom));
-    const minMerc = FIELD.minRadiusPx * mercPerCssPx;
     const maxMerc = FIELD.maxRadiusPx * mercPerCssPx;
-    if (!this.uploaded || this.clampMin !== minMerc) {
+    if (!this.uploaded || this.clampScale !== mercPerCssPx) {
       // Re-upload with clamped radii (cheap: ≤500 × 20 bytes).
       const n = this.count;
       const src = this.instanceData;
@@ -384,12 +392,13 @@ export class FieldLayer implements CustomLayerInterface {
       this.clamped.set(src.subarray(0, n * FLOATS_PER_INSTANCE));
       for (let i = 0; i < n; i++) {
         const o = i * FLOATS_PER_INSTANCE + 2;
+        const minMerc = this.floorPx[i] * mercPerCssPx;
         this.clamped[o] = Math.min(maxMerc, Math.max(minMerc, src[o]));
       }
       gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuf);
       gl.bufferData(gl.ARRAY_BUFFER, this.clamped.subarray(0, n * FLOATS_PER_INSTANCE), gl.DYNAMIC_DRAW);
       this.uploaded = true;
-      this.clampMin = minMerc;
+      this.clampScale = mercPerCssPx;
     }
 
     gl.uniformMatrix4fv(
@@ -411,11 +420,12 @@ export class FieldLayer implements CustomLayerInterface {
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
   }
   private clamped = new Float32Array(0);
-  private clampMin = -1;
+  private clampScale = -1;
+  private floorPx = new Float32Array(0);
   private uniformCache = new Map<string, WebGLUniformLocation | null>();
 
   render(gl: WebGL2RenderingContext) {
-    if (!this.resolveProgram || this.count === 0) return;
+    if (!this.resolveProgram || this.count === 0 || this.fade < 0.01) return;
     if (this.epoch === 0) this.epoch = performance.now();
     const periodSec = FIELD.breath.periodMs / 1000;
     const timeSec = ((performance.now() - this.epoch) / 1000) % periodSec;
@@ -449,14 +459,14 @@ export class FieldLayer implements CustomLayerInterface {
     // Pass 1 — streetlight: field × base map (dst is the pure ink city).
     if (FIELD.streetlightGain > 0) {
       gl.uniform1i(u("uMode"), 1);
-      gl.uniform1f(u("uGain"), FIELD.streetlightGain);
+      gl.uniform1f(u("uGain"), FIELD.streetlightGain * this.fade);
       gl.blendFunc(gl.DST_COLOR, gl.ONE);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
 
     // Pass 2 — the field itself, additive (alpha 0 under premultiplied).
     gl.uniform1i(u("uMode"), 0);
-    gl.uniform1f(u("uGain"), FIELD.gain);
+    gl.uniform1f(u("uGain"), FIELD.gain * this.fade);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
