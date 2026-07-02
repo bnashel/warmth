@@ -43,3 +43,7 @@ next-env.d.ts
 
 # claude code — per-user local settings (never shared)
 .claude/settings.local.json
+
+# playwright MCP session artifacts + local screenshots
+.playwright-mcp/
+/*.png

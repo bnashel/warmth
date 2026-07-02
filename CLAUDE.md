@@ -2,7 +2,7 @@
 *Read this at the start of every session.*
 
 ## Right now
-**Phase 0 → 1: get the app scaffolded and deployed, then make the empty map beautiful.**
+**Phase 3: the one screen — orb commits bloom on the live map; then Supabase realtime (two-device test = done).**
 Update this line as we move through phases (full plan in /docs). Whatever this line says is your top priority.
 
 ## What we're building
@@ -37,19 +37,23 @@ An ambient, beautiful live map of how a city feels. Emotion is rendered as glowi
 - Hosting: Vercel. Repo: GitHub.
 
 ## Project structure
+(Full codebase map with ownership in README.md — keep the two in sync.)
 ```
-/app         Next.js routes
-/components  UI by feature: Map/, Slider/, Trail/
-/lib         theme.ts (tokens), supabase.ts, map.ts, audio.ts
+/app         page.tsx = the product (one screen); lab/ + maplab/ = dev-only workshops
+/components  Screen/ (composition + public/private tabs) · Map/ (city + public field, tune.ts)
+             · Orb/ (the slider, feel.ts) · Trail/ (private diary dots) · Lab/ (workshop harnesses)
+/lib         theme.ts (tokens), momentsStore.ts (live data), map.ts, location.ts, sound.ts, supabase.ts
 /supabase    migrations (via Supabase CLI — never hand-edit applied files)
-/docs        build plan, design system, later.md (parked ideas)
+/docs        build plan, design system, later.md (parked ideas), map-candidates (style history)
 ```
+Ownership: Ben drives Orb/, Eli drives Map/; Screen/, Trail/, lib/ are shared.
+Commit prefixes by area: orb: · map: · field: · screen: · trail: · store: · docs:
 
 ## Commands
-*(Fill in right after scaffolding — ask me to add the real ones.)*
-- Dev server: TBD
-- Run tests: TBD
-- Deploy: push to main → auto-deploys on Vercel
+- Dev server: `npm run dev` (labs at /lab and /maplab are dev-only)
+- Lint: `npm run lint` · Build: `npm run build`
+- Run tests: none yet (no framework installed — ask Ben before adding one)
+- Deploy: `npx vercel@latest` for now (Git auto-deploy not connected yet)
 
 ## Workflow
 - **Plan first** for anything touching more than one file: propose a plan, wait for my approval.
