@@ -103,15 +103,64 @@ function globalOpacity(zoom: number): number {
   return 1 - t * t * (3 - 2 * t);
 }
 
-/** Three TextLayers (one per tier), opacity recomputed per zoom — the caller
- *  feeds these into overlay.setProps on map move (no React churn). */
+/* At the rest view the only text is the five boroughs — tracked-out capitals,
+ * barely there. They dissolve as neighborhood names take over. (TextLayer has
+ * no letter-spacing; thin spaces between characters carry the tracking.) */
+const track = (s: string) => s.split("").join(" ");
+
+function buildBoroughLayer(zoom: number) {
+  const { from, to } = LABELS.boroughFadeOut;
+  const t = Math.min(1, Math.max(0, (zoom - from) / (to - from)));
+  const opacity = 1 - t * t * (3 - 2 * t);
+  return new TextLayer<(typeof LABELS.boroughs)[number]>({
+    id: "borough-labels",
+    data: LABELS.boroughs,
+    visible: opacity > 0.01 && LABELS.boroughAlpha > 0,
+    opacity,
+    getPosition: (d) => d.anchor,
+    getText: (d) => track(d.name),
+    getSize: LABELS.boroughSizePx,
+    getColor: [233, 236, 244, LABELS.boroughAlpha],
+    fontFamily: "Inter, system-ui, sans-serif",
+    fontWeight: 500,
+    fontSettings: { sdf: true, smoothing: 0.32 },
+    sizeUnits: "pixels",
+    characterSet: "auto",
+    billboard: true,
+    // Interleaved rendering: glyph quads must not write depth, or their
+    // transparent corners punch invisible holes into layers drawn after.
+    parameters: { depthWriteEnabled: false },
+  });
+}
+
+/* Per-tier arrays are computed ONCE per dataset — a fresh filter() every
+ * frame would change the data reference and force a full glyph re-layout
+ * on every pinch-zoom frame (deck diffs data by identity). */
+const tierCache = new WeakMap<LabelDatum[], [LabelDatum[], LabelDatum[], LabelDatum[]]>();
+function tiersOf(data: LabelDatum[]) {
+  let t = tierCache.get(data);
+  if (!t) {
+    t = [
+      data.filter((d) => d.tier === 0),
+      data.filter((d) => d.tier === 1),
+      data.filter((d) => d.tier === 2),
+    ];
+    tierCache.set(data, t);
+  }
+  return t;
+}
+
+/** Borough layer + three neighborhood TextLayers (one per tier), opacity
+ *  recomputed per zoom — the caller feeds these into overlay.setProps on map
+ *  move (no React churn). */
 export function buildLabelLayers(data: LabelDatum[], zoom: number) {
   const g = globalOpacity(zoom);
-  return [0, 1, 2].map((tier) => {
+  const tierData = tiersOf(data);
+  const tiers = [0, 1, 2].map((tier) => {
     const opacity = tierOpacity(zoom, LABELS.tierZoom[tier]) * g;
     return new TextLayer<LabelDatum>({
       id: `nbhd-labels-${tier}`,
-      data: data.filter((d) => d.tier === tier),
+      data: tierData[tier],
       visible: opacity > 0.01,
       opacity,
       getPosition: (d) => d.anchor,
@@ -124,6 +173,8 @@ export function buildLabelLayers(data: LabelDatum[], zoom: number) {
       sizeUnits: "pixels",
       characterSet: "auto",
       billboard: true,
+      parameters: { depthWriteEnabled: false },
     });
   });
+  return [buildBoroughLayer(zoom), ...tiers];
 }

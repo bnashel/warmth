@@ -3,8 +3,14 @@
 import { useState } from "react";
 import { Inter } from "next/font/google";
 import { MAPBOX_TOKEN } from "@/lib/map";
-import { CANDIDATES, type CandidateId } from "./tune";
+import { ATMOSPHERE, CANDIDATES, type CandidateId } from "./tune";
 import MapStage from "./MapStage";
+
+/* Colorless film grain (feTurbulence desaturated to zero — the one law holds
+ * even for noise). A static 160px tile, composited once; costs no frames. */
+const GRAIN_URI = `url("data:image/svg+xml,${encodeURIComponent(
+  `<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%' height='100%' filter='url(#n)'/></svg>`,
+)}")`;
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
 
@@ -28,6 +34,32 @@ export default function MapLab() {
       }}
     >
       {MAPBOX_TOKEN ? <MapStage candidate={candidate} /> : <MissingToken />}
+
+      {/* Atmosphere: the void has depth. A gentle vignette pulls the eye to
+          the city; static grain keeps the darkness from feeling digital.
+          Both are single composited layers — zero per-frame cost. */}
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          inset: 0,
+          pointerEvents: "none",
+          zIndex: 5,
+          background: `radial-gradient(140% 100% at 50% 44%, rgba(0,0,0,0) 52%, rgba(3,4,7,${ATMOSPHERE.vignette}) 100%)`,
+        }}
+      />
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          inset: 0,
+          pointerEvents: "none",
+          zIndex: 5,
+          backgroundImage: GRAIN_URI,
+          backgroundRepeat: "repeat",
+          opacity: ATMOSPHERE.grain,
+        }}
+      />
 
       {/* Candidate switcher — whisper chrome, top-center. */}
       <div

@@ -1,25 +1,31 @@
 # Map style candidates — pick on your iPhone
 
-Live: open the Vercel preview at `/maplab`. Switch candidates with the quiet **1 2 3** at the top. Fake glow (test data) is always on — that's the honest way to judge.
+Live: open the Vercel preview at `/maplab`. Switch candidates with the quiet **1 2 3** at the top. The glow test data is always on — that's the honest way to judge.
 
-Matched screenshots (iPhone viewport, identical cameras, glow on):
-`c<candidate>-<zoom>.png` — zooms are `city` (the at-rest wide shot), `nbhd` (Williamsburg/Greenpoint), `street` (East Village).
+**`v2/` is current** (after your feedback round). `before/` is the first pass, same nine viewports, for comparison. Zooms: `city` (at-rest wide shot) / `nbhd` (Williamsburg) / `street` (East Village).
 
-## The three visions
+## What changed in v2 (your fix list, in your order)
 
-**1 — Ink & Glow.** The city at 3am drawn in ink on black paper. At rest it's barely there — the glow *wakes it up*. Streets arrive as hairlines of light. The glow is at its most luminous here.
+1. **Glow is now real light.** Custom shader: hot core that whitens like a filament, long soft falloff, additive blending — same-hue neighbors pool into one field, different hues bleed at the edges. Size and peak brightness scale with intensity. A slow breathing pulse (~3.4s), each point on its own phase. Compare any `before/` vs `v2/` shot.
+2. **Street rhythm.** Four waves instead of uniform wireframe: highways → avenues → side streets → alleys, each with its own weight. See `v2/c1-nbhd.png`.
+3. **Neighborhood contours.** Half the smoothing tolerance, one corner-cut pass instead of two — shapes keep their real character, corners still soft.
+4. **Atmosphere.** Gentle vignette + colorless static grain. Composited once; costs no frames.
 
-**2 — Carved Graphite.** The city as a sculpted block: land carries visible mass, water is polished black stone, streets are channels *carved out of* the material (dark, not light — the inverse of every other dark map). Most complete at street level.
+Also from your notes: **rotation is on** (two-finger turn; a quiet "N" chip appears only while rotated and eases you back), **no neighborhood names at the wide view** — just the five boroughs whispering, names arrive as you zoom in. And the lag work: one shared GL canvas instead of two, one glow draw call instead of six heatmap layers, labels cached, at-rest animation throttled.
 
-**3 — Fog & Void.** Inverted figure-ground: land is a pale luminous haze and the water is the deepest black on screen — the city floats. The boldest single image, but the base competes with the glow more than the other two.
+## The experiment (Ink & Glow only)
+
+**Feeling lights up the streets around it.** A second glow pass that only lands on bright pixels — street hairlines near a glow catch its color and fade with distance. Compare `v2/exp-streetlight-on.png` vs `v2/exp-streetlight-off.png`. My verdict: magical, not gimmicky — it makes the light feel *in* the city instead of on top of it. Judge on your phone; killing it is one number in `tune.ts` (`GLOW.streetlight.gain: 0`).
 
 ## What to look for on your phone
-- Which one would you screenshot and send someone?
-- Pan around for no reason — which one keeps you panning?
-- Does the glow feel *alive* on it, or does the map fight the glow?
-- Zoom slowly from city to street — does it feel like one camera move?
 
-## Honest ranking (mine + design-reviewer's, reasons in the handoff)
-1. **Carved Graphite** — glow looks most *meaningful* (you see the city feeling it); best street level; delivers the whole zoom journey.
-2. **Ink & Glow** — glow looks most *luminous*; the most unmistakably-Warmth wide shot. Conditionally #1 if the rest view wins your heart.
-3. **Fog & Void** — the artiest thesis, but its black voids out-contrast the emotion glow — it fights the product.
+- Do two same-color glows near each other read as one pool of feeling?
+- Watch a glow for ten seconds — does the breathing feel alive?
+- Pan hard, then zoom slowly city → street. Rhythm in the grid?
+- Rotate it. Does it come back north with dignity?
+
+## Honest ranking (unchanged from round 1)
+
+1. **Carved Graphite** — the glow looks most *meaningful*; you can see the city that's feeling it.
+2. **Ink & Glow** — the glow looks most *luminous*, and the streetlight experiment only exists here. If the experiment wins your heart, this candidate rises to #1.
+3. **Fog & Void** — boldest single image, but its black voids still compete with the glow.

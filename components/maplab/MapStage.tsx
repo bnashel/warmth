@@ -1,19 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Map, useControl } from "react-map-gl/mapbox";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import type { MapRef } from "react-map-gl/mapbox";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { MAPBOX_TOKEN } from "@/lib/map";
-import { CAMERA, CANDIDATES, MOTION, type CandidateId } from "./tune";
+import { CAMERA, CANDIDATES, GLOW, MOTION, type CandidateId } from "./tune";
 import { buildStyle } from "./styles";
-import { buildFakeGlowLayers } from "./fakeGlow";
+import { buildGlowLayers } from "./fakeGlow";
 import { buildLabelLayers, loadLabels } from "./neighborhoods";
 
-/** deck.gl overlay as a Mapbox control; layers are pushed imperatively. */
+/** deck.gl overlay INTERLEAVED into the map's own canvas — one GL context,
+ *  one render pass, and the streetlight blend can read the base map. */
 function DeckOverlay({ onReady }: { onReady: (o: MapboxOverlay) => void }) {
-  const overlay = useControl<MapboxOverlay>(() => new MapboxOverlay({ interleaved: false }));
+  const overlay = useControl<MapboxOverlay>(() => new MapboxOverlay({ interleaved: true }));
   const sent = useRef(false);
   useEffect(() => {
     if (!sent.current) {
@@ -25,79 +26,129 @@ function DeckOverlay({ onReady }: { onReady: (o: MapboxOverlay) => void }) {
 }
 
 /**
- * The stage: one full-screen map, hand-authored style, glow + labels above.
- * Motion is tuned on load (inertia, zoom rate, rotation off) — the Apple Maps
- * half of the bar. Label opacities are recomputed per movement frame straight
- * into overlay.setProps — zero React re-renders while panning/zooming.
+ * The stage: one full-screen map, hand-authored style, light + labels
+ * interleaved. A single rAF loop drives the glow's breathing — full rate
+ * while the camera moves, half rate at rest (phones stay cool). Labels are
+ * rebuilt only when zoom actually changes; the glow layer updates are pure
+ * uniform writes. Zero React re-renders while panning/zooming.
  */
 export default function MapStage({ candidate }: { candidate: CandidateId }) {
   const mapRef = useRef<MapRef | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
-  const glowLayers = useMemo(() => buildFakeGlowLayers(), []);
   const labelData = useRef<Awaited<ReturnType<typeof loadLabels>>>([]);
-  const rafPending = useRef(false);
+  const labelCache = useRef<{ zoom: number; layers: ReturnType<typeof buildLabelLayers> } | null>(
+    null,
+  );
+  const loaded = useRef(false);
+  const epoch = useRef(0); // pulse clock origin — survives candidate switches
+  const [rotated, setRotated] = useState(false);
 
   const style = useMemo(
     () => buildStyle(CANDIDATES[candidate].palette, CANDIDATES[candidate].name),
     [candidate],
   );
 
-  // Push glow + zoom-correct labels into the overlay (rAF-coalesced).
-  const syncOverlay = () => {
-    if (rafPending.current) return;
-    rafPending.current = true;
-    requestAnimationFrame(() => {
-      rafPending.current = false;
-      const overlay = overlayRef.current;
-      const map = mapRef.current;
-      if (!overlay || !map) return;
-      overlay.setProps({
-        layers: [...glowLayers, ...buildLabelLayers(labelData.current, map.getZoom())],
-      });
-    });
-  };
-
   useEffect(() => {
     void loadLabels().then((d) => {
       labelData.current = d;
-      syncOverlay();
+      labelCache.current = null;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The heartbeat. Everything the overlay shows is composed here.
+  useEffect(() => {
+    let raf = 0;
+    let lastPush = 0;
+    const periodSec = GLOW.pulse.periodMs / 1000;
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const overlay = overlayRef.current;
+      const map = mapRef.current?.getMap();
+      if (!overlay || !map || !loaded.current) return;
+      const now = performance.now();
+      // At rest only the breath animates — ~22fps is invisible for a 3.4s
+      // pulse and keeps phones cool. Motion gets every frame.
+      if (!map.isMoving() && now - lastPush < 45) return;
+      lastPush = now;
+      if (epoch.current === 0) epoch.current = now;
+      const zoom = map.getZoom();
+      if (!labelCache.current || Math.abs(labelCache.current.zoom - zoom) > 0.02) {
+        labelCache.current = { zoom, layers: buildLabelLayers(labelData.current, zoom) };
+      }
+      // Wrapping at the pulse period keeps the f32 uniform precise forever
+      // and makes the clock continuous across candidate switches.
+      const timeSec = ((now - epoch.current) / 1000) % periodSec;
+      overlay.setProps({
+        layers: [
+          ...buildGlowLayers(timeSec, zoom, candidate === 1),
+          ...labelCache.current.layers,
+        ],
+      });
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [candidate]);
+
   return (
-    <Map
-      ref={mapRef}
-      mapboxAccessToken={MAPBOX_TOKEN}
-      initialViewState={CAMERA.initial}
-      mapStyle={style}
-      style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
-      maxBounds={CAMERA.maxBounds}
-      minZoom={CAMERA.minZoom}
-      maxZoom={CAMERA.maxZoom}
-      dragRotate={CAMERA.rotationEnabled}
-      pitchWithRotate={false}
-      touchPitch={false}
-      fadeDuration={MOTION.fadeDurationMs}
-      onLoad={(e) => {
-        const map = e.target;
-        // Motion is a choice, not a default: heavy-glass pan, anchored zoom,
-        // and a strictly north-up flat canvas.
-        map.touchZoomRotate.disableRotation();
-        map.dragPan.enable(MOTION.dragPan);
-        map.scrollZoom.setWheelZoomRate(MOTION.wheelZoomRate);
-        // Lab-only hook so the screenshot/perf harness can set exact cameras.
-        (window as unknown as { __warmthMap?: typeof map }).__warmthMap = map;
-        syncOverlay();
-      }}
-      onMove={syncOverlay}
-    >
-      <DeckOverlay
-        onReady={(o) => {
-          overlayRef.current = o;
-          syncOverlay();
+    <>
+      <Map
+        ref={mapRef}
+        mapboxAccessToken={MAPBOX_TOKEN}
+        initialViewState={CAMERA.initial}
+        mapStyle={style}
+        style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
+        maxBounds={CAMERA.maxBounds}
+        minZoom={CAMERA.minZoom}
+        maxZoom={CAMERA.maxZoom}
+        dragRotate={CAMERA.rotationEnabled}
+        pitchWithRotate={false}
+        touchPitch={false}
+        fadeDuration={MOTION.fadeDurationMs}
+        onLoad={(e) => {
+          const map = e.target;
+          // Motion is a choice, not a default: heavy-glass pan, anchored
+          // zoom. Rotation is on (two fingers / right-drag); pitch stays off.
+          map.dragPan.enable(MOTION.dragPan);
+          map.scrollZoom.setWheelZoomRate(MOTION.wheelZoomRate);
+          // Lab-only hook so the screenshot/perf harness can set exact cameras.
+          (window as unknown as { __warmthMap?: typeof map }).__warmthMap = map;
+          loaded.current = true;
         }}
-      />
-    </Map>
+        onMove={(e) => setRotated(Math.abs(e.viewState.bearing) > 0.5)}
+      >
+        <DeckOverlay
+          onReady={(o) => {
+            overlayRef.current = o;
+          }}
+        />
+      </Map>
+
+      {/* Return-to-north — appears only while rotated, like Apple Maps. */}
+      <button
+        type="button"
+        aria-label="Point north"
+        onClick={() => mapRef.current?.getMap().resetNorth({ duration: 700 })}
+        style={{
+          position: "absolute",
+          top: "max(env(safe-area-inset-top), 20px)",
+          right: 16,
+          width: 34,
+          height: 34,
+          borderRadius: "50%",
+          border: "1px solid rgba(233,236,244,0.14)",
+          background: "rgba(10,11,15,0.55)",
+          color: "rgba(233,236,244,0.6)",
+          fontSize: 12,
+          fontWeight: 500,
+          cursor: "pointer",
+          zIndex: 10,
+          opacity: rotated ? 1 : 0,
+          pointerEvents: rotated ? "auto" : "none",
+          transition: "opacity 300ms ease",
+        }}
+      >
+        N
+      </button>
+    </>
   );
 }

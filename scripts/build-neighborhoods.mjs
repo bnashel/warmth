@@ -95,8 +95,9 @@ function ringAreaCentroid(ring) {
 
 /* ---------------- pipeline ---------------- */
 
-const TOLERANCE = 0.0006; // deg ≈ 55m — kills census stair-steps, keeps character
-const SMOOTH_PASSES = 2; // Chaikin ×2 — hand-drawn softness
+const TOLERANCE = 0.00025; // deg ≈ 23m — kills census stair-steps only; heavier
+// values balloon the shapes and erase each neighborhood's real character
+const SMOOTH_PASSES = 1; // Chaikin ×1 — soften corners, don't inflate them
 
 async function fetchSource() {
   for (const url of SOURCES) {

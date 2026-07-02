@@ -13,8 +13,12 @@
 import type { StyleSpecification, LayerSpecification } from "mapbox-gl";
 import { JOURNEY, type CandidatePalette } from "./tune";
 
-const ARTERIAL = ["motorway", "motorway_link", "trunk", "primary", "secondary"];
-const LOCAL = ["tertiary", "street", "street_limited", "primary_link", "secondary_link"];
+// NYC tagging note: avenues alternate primary/secondary/tertiary block to
+// block (Bedford Ave does all three) — tertiary belongs with avenues here,
+// or avenues flicker between tiers. Links ride with their parent class.
+const HIGHWAY = ["motorway", "motorway_link", "trunk", "trunk_link"];
+const AVENUE = ["primary", "secondary", "tertiary", "primary_link", "secondary_link", "tertiary_link"];
+const LOCAL = ["street", "street_limited"];
 const SERVICE = ["service", "track"];
 
 /** Linear zoom fade 0 → alpha across [from, to]. Nothing ever pops. */
@@ -126,10 +130,12 @@ export function buildStyle(p: CandidatePalette, name: string): StyleSpecificatio
   }
 
   layers.push(
-    // The street journey: arterials breathe in first, then locals, then service.
+    // The street journey, four waves: highways → avenues → side streets →
+    // alleys. Weight and opacity step down per wave so the grid has rhythm.
     roadLayer("roads-service", SERVICE, JOURNEY.serviceFade, p.road, p.roadAlpha.service, p.roadWidth.service),
     roadLayer("roads-local", LOCAL, JOURNEY.localFade, p.road, p.roadAlpha.local, p.roadWidth.local),
-    roadLayer("roads-arterial", ARTERIAL, JOURNEY.arterialFade, p.road, p.roadAlpha.arterial, p.roadWidth.arterial),
+    roadLayer("roads-avenue", AVENUE, JOURNEY.avenueFade, p.road, p.roadAlpha.avenue, p.roadWidth.avenue),
+    roadLayer("roads-highway", HIGHWAY, JOURNEY.highwayFade, p.road, p.roadAlpha.highway, p.roadWidth.highway),
     // Neighborhood boundaries — hand-softened seams that dissolve as the
     // street texture takes over.
     {

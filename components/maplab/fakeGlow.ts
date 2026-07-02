@@ -1,16 +1,19 @@
 /**
- * components/map/fakeGlow.ts
+ * components/maplab/fakeGlow.ts
  *
- * ⚠️ TEST SCAFFOLDING — NOT PRODUCT CODE. ⚠️
- * A static, plausible spread of emotion points across NYC so the three style
- * candidates are judged the only way that's honest: WITH glow rendered.
- * The real realtime glow is Phase 3 work and replaces this wholesale.
+ * ⚠️ TEST DATA — the points below are scaffolding for judging the map. ⚠️
+ * The RENDERER (GlowLayer) is real: emotion drawn as additive light with a
+ * hot core, long falloff, and a breathing pulse. Phase 3 swaps the static
+ * points for realtime ones; the light itself is meant to ship.
  */
-import { HeatmapLayer } from "@deck.gl/aggregation-layers";
-import { EMOTIONS, EMOTION_HUES, type Emotion } from "@/lib/theme";
-import { GLOW_TEST } from "./tune";
-
-type TestPoint = { p: [number, number]; e: Emotion; w: number };
+import { EMOTION_HUES, type Emotion } from "@/lib/theme";
+import {
+  ADDITIVE_LIGHT,
+  STREET_LIGHT,
+  EmotionGlowLayer,
+  type GlowDatum,
+} from "./GlowLayer";
+import { GLOW } from "./tune";
 
 /* Hand-placed clusters — real neighborhoods, all six hues, varied intensity. */
 const PTS: [number, number, Emotion, number][] = [
@@ -55,36 +58,74 @@ const PTS: [number, number, Emotion, number][] = [
   [-74.15, 40.58, "calm", 0.5],
 ];
 
-const POINTS: TestPoint[] = PTS.map(([lng, lat, e, w]) => ({ p: [lng, lat], e, w }));
-
 function hexToRgb(hex: string): [number, number, number] {
   const n = parseInt(hex.slice(1), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-/** Transparent → hue ramp so overlapping fields brighten like aurora. */
-function rampFor(emotion: Emotion) {
-  const [r, g, b] = hexToRgb(EMOTION_HUES[emotion]);
-  return [0, 40, 90, 150, 210, 255].map(
-    (a) => [r, g, b, a] as [number, number, number, number],
-  );
-}
+const POINTS: GlowDatum[] = PTS.map(([lng, lat, e, w]) => ({
+  position: [lng, lat],
+  hue: hexToRgb(EMOTION_HUES[e]),
+  intensity: w,
+}));
 
-/** One additive heatmap field per emotion — hue is identity, never mixed. */
-export function buildFakeGlowLayers() {
-  return EMOTIONS.map(
-    (emotion) =>
-      new HeatmapLayer<TestPoint>({
-        id: `test-glow-${emotion}`,
-        data: POINTS.filter((d) => d.e === emotion),
-        getPosition: (d) => d.p,
-        getWeight: (d) => d.w,
-        radiusPixels: GLOW_TEST.radiusPx,
-        intensity: GLOW_TEST.intensity,
-        threshold: GLOW_TEST.threshold,
-        colorRange: rampFor(emotion),
-        opacity: GLOW_TEST.opacity,
-        aggregation: "SUM",
+/** Radius growth as the camera approaches — light gets room to breathe. */
+const zoomScale = (zoom: number) => Math.pow(GLOW.zoomGrowth, zoom - 12);
+
+const shared = {
+  data: POINTS,
+  getPosition: (d: GlowDatum) => d.position,
+  getRadius: (d: GlowDatum) => GLOW.baseRadiusPx + GLOW.radiusPerIntensityPx * d.intensity,
+  // rgb = hue; alpha carries INTENSITY into the shader (see GlowLayer).
+  getFillColor: (d: GlowDatum) =>
+    [d.hue[0], d.hue[1], d.hue[2], Math.round(d.intensity * 255)] as [
+      number, number, number, number,
+    ],
+  radiusUnits: "pixels" as const,
+  // Fill-rate guard: without a clamp, deep zoom grows quads past the whole
+  // viewport and stacked additive passes melt DPR-3 phones.
+  radiusMaxPixels: GLOW.maxRadiusPx,
+  stroked: false,
+  filled: true,
+  antialiasing: false,
+  pickable: false,
+};
+
+/**
+ * The emotion light. `streetlight` adds the Ink & Glow experiment pass:
+ * a wider, coreless copy multiplied by the base map, so street hairlines
+ * near a feeling catch its color and fade with distance.
+ */
+export function buildGlowLayers(timeSec: number, zoom: number, streetlight: boolean) {
+  const layers = [];
+  if (streetlight && GLOW.streetlight.gain > 0) {
+    layers.push(
+      new EmotionGlowLayer({
+        id: "glow-streetlight",
+        ...shared,
+        timeSec,
+        radiusScale: zoomScale(zoom) * GLOW.streetlight.radiusFactor,
+        radiusMaxPixels: GLOW.streetlight.maxRadiusPx,
+        light: {
+          corePeak: 0,
+          coreWhiteness: 0,
+          tailFalloff: GLOW.streetlight.tailFalloff,
+          gain: GLOW.streetlight.gain,
+        },
+        parameters: STREET_LIGHT,
+        // Under the boundary seams: the lit streets stay part of the map.
+        beforeId: "nbhd-boundaries",
       }),
+    );
+  }
+  layers.push(
+    new EmotionGlowLayer({
+      id: "glow-main",
+      ...shared,
+      timeSec,
+      radiusScale: zoomScale(zoom),
+      parameters: ADDITIVE_LIGHT,
+    }),
   );
+  return layers;
 }

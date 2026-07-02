@@ -21,11 +21,11 @@ export const CAMERA = {
   minZoom: 9.3,
   maxZoom: 16.5,
   /**
-   * Rotation & pitch are OFF — deliberate. The map is a composed canvas:
-   * north-up keeps neighborhood shapes and screenshots stable, and the ink
-   * aesthetic is a drawing, not a diorama. Revisit if 3D buildings land.
+   * Rotation is ON (Ben's call — the map should turn under your fingers like
+   * Apple Maps). Pitch stays off: the ink aesthetic is a drawing, not a
+   * diorama. A quiet north chip appears only while rotated.
    */
-  rotationEnabled: false,
+  rotationEnabled: true,
 } as const;
 
 export const MOTION = {
@@ -41,11 +41,14 @@ export const MOTION = {
 /* The zoom journey — where detail fades in (all continuous, no steps) */
 /* ------------------------------------------------------------------ */
 export const JOURNEY = {
-  /** Streets are absent at rest; arterials breathe in first, then locals. */
-  arterialFade: { from: 11.6, to: 13.2 }, // motorway/trunk/primary/secondary
-  localFade: { from: 13.0, to: 14.8 }, // tertiary/street
-  serviceFade: { from: 14.6, to: 15.8 }, // service/alley/path
-  /** Buildings (Graphite's mass texture). */
+  /** Streets are absent at rest and arrive in four waves — highways first,
+   *  then avenues, then side streets, then alleys — so the grid has rhythm
+   *  instead of uniform wireframe density. */
+  highwayFade: { from: 11.2, to: 12.4 }, // motorway/trunk (FDR, BQE)
+  avenueFade: { from: 11.8, to: 13.4 }, // primary/secondary (5th Ave, Bedford)
+  localFade: { from: 13.2, to: 14.9 }, // tertiary/street (the residential grid)
+  serviceFade: { from: 14.8, to: 15.9 }, // service/alley
+  /** Buildings (mass texture). */
   buildingFade: { from: 13.2, to: 15.0 },
   /** Neighborhood boundaries: present at rest, dissolving as streets take over. */
   boundaryFade: { peak: 11.0, gone: 14.5 },
@@ -61,22 +64,79 @@ export const LABELS = {
   sizePx: [13, 11.5, 10.5],
   /** White alpha per tier (0-255). Whisper, not shout. */
   alpha: [150, 112, 88],
-  /** Zoom at which each tier begins to appear (fades over ~0.8z). */
-  tierZoom: [9.3, 11.0, 12.3],
+  /**
+   * Zoom at which each tier begins to appear (fades over ~0.8z).
+   * NO neighborhood names at the rest view (Ben: cluttered) — the wide city
+   * is shapes, water, and glow. Names arrive as you commit to a place.
+   */
+  tierZoom: [11.2, 12.2, 13.0],
   /** Letterspacing feel comes from uppercase + tracking. */
   uppercase: false,
   /** All labels dissolve as the street texture takes the stage. */
   globalFadeOut: { from: 14.6, to: 15.6 },
+  /**
+   * At rest, only the five boroughs whisper — enough to orient, nothing to
+   * clutter. They dissolve as neighborhoods take over. Set alpha 0 to kill.
+   */
+  boroughs: [
+    { name: "MANHATTAN", anchor: [-73.972, 40.783] },
+    { name: "BROOKLYN", anchor: [-73.949, 40.652] },
+    { name: "QUEENS", anchor: [-73.818, 40.727] },
+    { name: "THE BRONX", anchor: [-73.878, 40.853] },
+    { name: "STATEN ISLAND", anchor: [-74.148, 40.58] },
+  ] as { name: string; anchor: [number, number] }[],
+  boroughAlpha: 84,
+  boroughSizePx: 11.5,
+  boroughFadeOut: { from: 10.9, to: 11.6 },
 } as const;
 
 /* ------------------------------------------------------------------ */
-/* Fake glow — TEST SCAFFOLDING for judging candidates (not Phase 3)   */
+/* Glow — emotion rendered as LIGHT (additive shader; test data only)  */
 /* ------------------------------------------------------------------ */
-export const GLOW_TEST = {
-  radiusPx: 96, // bigger = softer, more aurora (dots read as fields, not dabs)
-  intensity: 1.15,
-  threshold: 0.018, // lower = wider soft skirt
-  opacity: 0.85,
+export const GLOW = {
+  /** Radius in px at zoom 12: base + perIntensity × intensity (0..1). */
+  baseRadiusPx: 26,
+  radiusPerIntensityPx: 54,
+  /** Glow grows as you approach: radius × zoomGrowth^(zoom − 12). */
+  zoomGrowth: 1.24,
+  /** Hard pixel ceiling — fill-rate protection for DPR-3 phones. */
+  maxRadiusPx: 220,
+  /** Hot core: fraction of radius that burns near-peak before falloff. */
+  coreRadius: 0.16,
+  /** Extra brightness of the core above the tail's own peak. */
+  corePeak: 0.9,
+  /** How far the core whitens toward "hot filament" (0 = pure hue). */
+  coreWhiteness: 0.18,
+  /** Brightness floor + intensity gain: dim moments glow, big ones blaze. */
+  peakBase: 0.32,
+  peakPerIntensity: 0.55,
+  /** Long-tail falloff exponent — lower = longer, softer skirt. */
+  tailFalloff: 2.6,
+  /** Breathing: ±radius and ±brightness over one slow cycle. Pulse frames
+   *  are driven at half rate when the camera is still (battery, phones). */
+  pulse: { periodMs: 3400, radiusAmp: 0.05, brightnessAmp: 0.1 },
+  /**
+   * EXPERIMENT (Ink & Glow only): feeling lights the streets around it.
+   * A second glow pass multiplied by what's beneath — dark land absorbs it,
+   * light street hairlines catch it, so blocks near a glow switch on and
+   * fade with distance. Set gain 0 to kill the experiment.
+   */
+  streetlight: {
+    gain: 0.5,
+    radiusFactor: 1.6,
+    maxRadiusPx: 300,
+    tailFalloff: 1.5,
+  },
+} as const;
+
+/* ------------------------------------------------------------------ */
+/* Atmosphere — depth for the void. Static, composited once, no frames */
+/* ------------------------------------------------------------------ */
+export const ATMOSPHERE = {
+  /** Edge vignette: max darkness at the corners (0 = off). */
+  vignette: 0.42,
+  /** Film grain opacity (0 = off). Static tile, masks gradient banding. */
+  grain: 0.05,
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -95,8 +155,8 @@ export const INK = {
   boundary: "rgba(233,236,244,0.075)", // hand-drawn seams between places
   boundaryWidth: 1.0,
   road: "#E9ECF4", // streets are LIGHT (hairlines), faded in by JOURNEY
-  roadAlpha: { arterial: 0.3, local: 0.17, service: 0.09 },
-  roadWidth: { arterial: 1.2, local: 0.8, service: 0.5 }, // px at fade-in end
+  roadAlpha: { highway: 0.5, avenue: 0.32, local: 0.14, service: 0.07 },
+  roadWidth: { highway: 2.2, avenue: 1.35, local: 0.7, service: 0.45 }, // px at fade-in end
 } as const;
 
 /** C2 — CARVED GRAPHITE: the city as sculpted mass; streets are carved voids. */
@@ -111,8 +171,8 @@ export const GRAPHITE = {
   boundary: "rgba(0,0,0,0.42)", // seams carved INTO the block
   boundaryWidth: 1.2,
   road: "#07080B", // streets as dark channels cut from the mass
-  roadAlpha: { arterial: 0.85, local: 0.7, service: 0.5 },
-  roadWidth: { arterial: 2.6, local: 1.7, service: 1.0 },
+  roadAlpha: { highway: 0.92, avenue: 0.8, local: 0.62, service: 0.45 },
+  roadWidth: { highway: 3.6, avenue: 2.3, local: 1.35, service: 0.85 },
 } as const;
 
 /** C3 — FOG & VOID: land is luminous haze; water/parks are pure void;
@@ -129,8 +189,8 @@ export const FOG = {
   boundary: "rgba(4,5,7,0.35)", // darker seams pressed into the haze
   boundaryWidth: 1.4,
   road: "#0B0D12", // etched through the fog at close zoom
-  roadAlpha: { arterial: 0.7, local: 0.55, service: 0.35 },
-  roadWidth: { arterial: 2.0, local: 1.3, service: 0.8 },
+  roadAlpha: { highway: 0.85, avenue: 0.68, local: 0.5, service: 0.32 },
+  roadWidth: { highway: 2.8, avenue: 1.8, local: 1.05, service: 0.65 },
 } as const;
 
 export type CandidatePalette = typeof INK | typeof GRAPHITE | typeof FOG;

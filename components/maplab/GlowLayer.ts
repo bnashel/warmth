@@ -1,0 +1,203 @@
+/**
+ * components/maplab/GlowLayer.ts — emotion rendered as LIGHT.
+ *
+ * A ScatterplotLayer whose fragment shader is replaced with a radial light
+ * function: a bright hot core (slightly white-shifted, like a filament), a
+ * long soft falloff, and additive blending so nearby glows pool into
+ * continuous fields — same hue deepens into one pool, different hues bleed
+ * into each other at the edges. A slow breathing pulse rides on a `timeSec`
+ * uniform; per-point phase is hashed from hue + radius so the city never
+ * throbs in lockstep.
+ *
+ * All look-tunables live in tune.ts (GLOW); this file is the machinery.
+ */
+import { ScatterplotLayer, type ScatterplotLayerProps } from "deck.gl";
+import { GLOW } from "./tune";
+
+/* Extra uniform block (deck 9 shader-module pattern — see TripsLayer). */
+const glowUniforms = {
+  name: "glow" as const,
+  fs: /* glsl */ `\
+layout(std140) uniform glowUniforms {
+  float timeSec;
+  float coreRadius;
+  float corePeak;
+  float coreWhiteness;
+  float tailFalloff;
+  float radiusAmp;
+  float brightnessAmp;
+  float periodSec;
+  float peakBase;
+  float peakPerIntensity;
+  float gain;
+} glow;
+`,
+  uniformTypes: {
+    timeSec: "f32" as const,
+    coreRadius: "f32" as const,
+    corePeak: "f32" as const,
+    coreWhiteness: "f32" as const,
+    tailFalloff: "f32" as const,
+    radiusAmp: "f32" as const,
+    brightnessAmp: "f32" as const,
+    periodSec: "f32" as const,
+    peakBase: "f32" as const,
+    peakPerIntensity: "f32" as const,
+    gain: "f32" as const,
+  },
+};
+
+/* The light function. vFillColor carries the emotion hue in rgb and the
+ * INTENSITY (0..1) in alpha — the layer's opacity prop must stay 1 (the
+ * stock vertex shader premultiplies opacity into alpha, which would corrupt
+ * intensity); overall gain is its own uniform. vPhase is a per-point hash
+ * of world position, injected into the vertex shader below. */
+const FS = /* glsl */ `\
+#version 300 es
+#define SHADER_NAME emotion-glow-layer-fragment-shader
+precision highp float;
+in vec4 vFillColor;
+in vec2 unitPosition;
+in float vPhase;
+out vec4 fragColor;
+
+void main(void) {
+  geometry.uv = unitPosition;
+
+  float w = vFillColor.a;              // intensity of this moment (0..1)
+  float r = length(unitPosition);      // 0 at center, 1 at quad edge
+
+  // Breathing: per-point phase — the city never throbs in lockstep.
+  float s = sin(6.2831853 * (glow.timeSec / glow.periodSec + vPhase));
+
+  // Radius breathes but never leaves the quad: full size only at s = 1.
+  float breathe = (1.0 + glow.radiusAmp * s) / (1.0 + glow.radiusAmp);
+  float rr = r / breathe;
+  if (rr >= 1.0) discard;
+
+  // Bright hot core + long soft tail.
+  float core = exp(-pow(rr / glow.coreRadius, 1.8));
+  float tail = pow(1.0 - rr, glow.tailFalloff);
+  float lum = glow.corePeak * core + tail;
+
+  // Peak brightness scales with intensity; breath modulates it gently.
+  lum *= (glow.peakBase + glow.peakPerIntensity * w)
+       * (1.0 + glow.brightnessAmp * s);
+
+  // The filament: the very center whitens toward hot.
+  vec3 color = mix(vFillColor.rgb, vec3(1.0), glow.coreWhiteness * core);
+
+  // Ordered-noise dither so the long tail never bands on 8-bit targets.
+  float n = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+  lum += (n - 0.5) * 0.004;
+
+  // Additive light: color scaled by luminance; alpha adds nothing.
+  fragColor = vec4(color * max(lum, 0.0) * glow.gain, 0.0);
+  DECKGL_FILTER_COLOR(fragColor, geometry);
+}
+`;
+
+export type GlowDatum = {
+  position: [number, number];
+  hue: [number, number, number];
+  intensity: number; // 0..1
+};
+
+type LightParams = {
+  coreRadius: number;
+  corePeak: number;
+  coreWhiteness: number;
+  tailFalloff: number;
+  peakBase: number;
+  peakPerIntensity: number;
+  gain: number;
+};
+
+type EmotionGlowLayerProps = ScatterplotLayerProps<GlowDatum> & {
+  timeSec?: number;
+  /** Per-layer shading overrides (the streetlight pass has no hot core). */
+  light?: Partial<LightParams>;
+};
+
+export class EmotionGlowLayer extends ScatterplotLayer<
+  GlowDatum,
+  // beforeId is read by MapboxOverlay (interleaved) to place the layer
+  // within the mapbox style stack; deck's own types don't know it.
+  { timeSec?: number; light?: Partial<LightParams>; beforeId?: string }
+> {
+  static layerName = "EmotionGlowLayer";
+
+  getShaders() {
+    const shaders = super.getShaders();
+    shaders.fs = FS;
+    shaders.modules = [...shaders.modules, glowUniforms];
+    // Per-point pulse phase, hashed from world position in the (otherwise
+    // stock) vertex shader — hue or intensity alone would sync clusters.
+    shaders.inject = {
+      ...shaders.inject,
+      "vs:#decl": "out float vPhase;\n",
+      "vs:#main-end":
+        "vPhase = fract(sin(dot(instancePositions.xy, vec2(12.9898, 78.233))) * 43758.5453);\n",
+    };
+    return shaders;
+  }
+
+  draw(params: unknown) {
+    const { timeSec = 0, light } = this.props as EmotionGlowLayerProps;
+    const p: LightParams = {
+      coreRadius: GLOW.coreRadius,
+      corePeak: GLOW.corePeak,
+      coreWhiteness: GLOW.coreWhiteness,
+      tailFalloff: GLOW.tailFalloff,
+      peakBase: GLOW.peakBase,
+      peakPerIntensity: GLOW.peakPerIntensity,
+      gain: 1,
+      ...light,
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const model = (this.state as any).model;
+    model?.shaderInputs.setProps({
+      glow: {
+        timeSec,
+        coreRadius: p.coreRadius,
+        corePeak: p.corePeak,
+        coreWhiteness: p.coreWhiteness,
+        tailFalloff: p.tailFalloff,
+        radiusAmp: GLOW.pulse.radiusAmp,
+        brightnessAmp: GLOW.pulse.brightnessAmp,
+        periodSec: GLOW.pulse.periodMs / 1000,
+        peakBase: p.peakBase,
+        peakPerIntensity: p.peakPerIntensity,
+        gain: p.gain,
+      },
+    });
+    super.draw(params as never);
+  }
+}
+
+/** Additive-light GPU state: sum into the scene, never test depth. */
+export const ADDITIVE_LIGHT = {
+  blend: true,
+  blendColorOperation: "add",
+  blendColorSrcFactor: "one",
+  blendColorDstFactor: "one",
+  blendAlphaOperation: "add",
+  blendAlphaSrcFactor: "one",
+  blendAlphaDstFactor: "one",
+  depthWriteEnabled: false,
+  depthCompare: "always",
+} as const;
+
+/** Streetlight state: src×dst + dst — light lands only on bright pixels
+ *  (the streets), so glow appears to switch the blocks around it on. */
+export const STREET_LIGHT = {
+  blend: true,
+  blendColorOperation: "add",
+  blendColorSrcFactor: "dst",
+  blendColorDstFactor: "one",
+  blendAlphaOperation: "add",
+  blendAlphaSrcFactor: "dst-alpha",
+  blendAlphaDstFactor: "one",
+  depthWriteEnabled: false,
+  depthCompare: "always",
+} as const;
