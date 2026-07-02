@@ -8,13 +8,13 @@ import { MAPBOX_TOKEN } from "@/lib/map";
 import { momentsStore, type Moment } from "@/lib/momentsStore";
 import { armLocation, currentFix } from "@/lib/location";
 import { panic, unlockAudio } from "@/lib/sound";
-import { ORB } from "@/lib/feel";
+import { ORB } from "@/components/Orb/feel";
 import { SPRING, type Emotion } from "@/lib/theme";
 import { Atmosphere, MissingToken } from "@/components/Map/Atmosphere";
 import MapStage from "@/components/Map/MapStage";
 import { ambientSeedMoments } from "@/components/Map/ambientSeed";
 import { CAMERA, CHOREO, MOTION } from "@/components/Map/tune";
-import { OrbFlow } from "@/components/orb/OrbFlow";
+import { OrbFlow } from "@/components/Orb/OrbFlow";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
 

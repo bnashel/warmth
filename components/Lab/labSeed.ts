@@ -1,5 +1,5 @@
 /**
- * components/Map/labSeed.ts
+ * components/Lab/labSeed.ts
  *
  * ⚠️ LAB-ONLY TEST DATA. ⚠️
  * A plausible spread of feelings across NYC so the /maplab workshop always

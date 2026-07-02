@@ -4,9 +4,9 @@ import { useEffect } from "react";
 import { Inter } from "next/font/google";
 import { MAPBOX_TOKEN } from "@/lib/map";
 import { momentsStore } from "@/lib/momentsStore";
-import { Atmosphere, MissingToken } from "./Atmosphere";
+import { Atmosphere, MissingToken } from "@/components/Map/Atmosphere";
 import { labSeedMoments } from "./labSeed";
-import MapStage from "./MapStage";
+import MapStage from "@/components/Map/MapStage";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
 

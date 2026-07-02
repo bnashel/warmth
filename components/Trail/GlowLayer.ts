@@ -1,5 +1,5 @@
 /**
- * components/Map/GlowLayer.ts — emotion rendered as LIGHT.
+ * components/Trail/GlowLayer.ts — emotion rendered as LIGHT.
  *
  * A ScatterplotLayer whose fragment shader is replaced with a radial light
  * function: a bright hot core (slightly white-shifted, like a filament), a

@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { motion } from "framer-motion";
-import { BURST, ORB, seededRandom } from "@/lib/feel";
+import { BURST, ORB, seededRandom } from "./feel";
 
 /**
  * The commit burst — the reward. An expanding ring + a handful of drifting

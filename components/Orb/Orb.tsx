@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, useTransform, type MotionValue } from "framer-motion";
-import { GLOW, ORB } from "@/lib/feel";
+import { GLOW, ORB } from "./feel";
 
 /**
  * The orb — pure presentation, driven entirely by motion values from the

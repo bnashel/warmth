@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 import { Inter } from "next/font/google";
 import { motion, useMotionValue, useTransform } from "framer-motion";
-import { ORB, TEXT } from "@/lib/feel";
+import { ORB, TEXT } from "@/components/Orb/feel";
 import { isMuted, panic, setMuted, unlockAudio } from "@/lib/sound";
-import { OrbFlow } from "./OrbFlow";
+import { OrbFlow } from "@/components/Orb/OrbFlow";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
 
