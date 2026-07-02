@@ -233,9 +233,8 @@ export const SOUND = {
   /** Per-emotion swell root notes (C-major pentatonic). Reassign to taste. */
   emotionRootHz: {
     calm: 261.63, // C4
-    reflective: 293.66, // D4
+    gratitude: 293.66, // D4 (inherited from reflective)
     love: 329.63, // E4
-    awe: 392.0, // G4
     joy: 440.0, // A4
     energy: 523.25, // C5
   } satisfies Record<Emotion, number>,

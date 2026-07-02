@@ -72,13 +72,39 @@ function arrivalEnvelope(t: number): number {
 const OWN_KEY = "warmth-own-moments-v1";
 const OWN_CAP = 300;
 
+/**
+ * Emotion-set migration (2026-07-02, Eli's call): the final five are
+ * joy/energy/love/gratitude/calm. reflective → gratitude; awe was removed
+ * with no successor, so persisted awe moments are DROPPED on load.
+ * localStorage has no rollback tooling — this is one-way by design.
+ */
+const LEGACY_EMOTION: Record<string, Emotion | null> = {
+  reflective: "gratitude",
+  awe: null, // dropped
+};
+
+/** Set when the last load remapped or dropped legacy rows — the caller
+ *  must rewrite storage so retired values (and their precise locations)
+ *  leave the device immediately, not at the next incidental save. */
+let legacyMigrated = false;
+
+function migrateLegacyEmotion(m: unknown): unknown {
+  if (typeof m !== "object" || m === null) return m;
+  const p = m as Record<string, unknown>;
+  if (typeof p.emotion !== "string" || !Object.hasOwn(LEGACY_EMOTION, p.emotion)) return m;
+  legacyMigrated = true;
+  const next = LEGACY_EMOTION[p.emotion];
+  return next === null ? null : { ...p, emotion: next };
+}
+
 function isPersistedMoment(m: unknown): m is Moment {
   if (typeof m !== "object" || m === null) return false;
   const p = m as Record<string, unknown>;
   return (
     typeof p.id === "string" &&
     typeof p.emotion === "string" &&
-    p.emotion in EMOTION_HUES &&
+    // hasOwn, not `in`: prototype-chain keys ("constructor") must not pass.
+    Object.hasOwn(EMOTION_HUES, p.emotion) &&
     // Bounds matter, not just types: Infinity/garbage numbers survive
     // JSON round-trips and would poison weights forever (review finding).
     Number.isFinite(p.intensity) &&
@@ -100,7 +126,11 @@ function loadPersistedOwn(): Moment[] {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     const now = Date.now();
-    return parsed.filter(isPersistedMoment).map((m) => ({
+    return parsed
+      .map(migrateLegacyEmotion)
+      .filter((m): m is unknown => m !== null)
+      .filter(isPersistedMoment)
+      .map((m) => ({
       ...m,
       own: true,
       intensity: Math.min(10, Math.max(1, m.intensity)),
@@ -132,9 +162,10 @@ class MomentsStore {
     // Rehydrate the trail; still-fresh moments rejoin the public field too.
     const persisted = loadPersistedOwn();
     for (const m of persisted) this.add(m, { quiet: true, persist: false });
-    // One rewrite now, so expired entries leave the device immediately —
-    // not only whenever the next commit happens to trigger a save.
-    if (persisted.length > this.ownRaw.length) this.persistOwn();
+    // One rewrite now, so expired entries — and rows the emotion migration
+    // remapped or dropped — leave the device immediately, not only whenever
+    // the next commit happens to trigger a save.
+    if (legacyMigrated || persisted.length > this.ownRaw.length) this.persistOwn();
   }
 
   private makePoint(m: Moment, quiet: boolean): LivePoint {

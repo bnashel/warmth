@@ -3,7 +3,7 @@
  * in one place, commented. "Make the water darker" is a one-line edit here.
  *
  * THE ONE LAW: nothing in this file may carry saturation worth noticing.
- * The base city is ink — the six emotion hues (lib/theme.ts) are the only
+ * The base city is ink — the five emotion hues (lib/theme.ts) are the only
  * vivid color allowed on screen, and they arrive via the glow, never the base.
  */
 

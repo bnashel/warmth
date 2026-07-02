@@ -8,17 +8,17 @@ import type { Transition } from "framer-motion";
 /** Near-black base. Everything sits on this. */
 export const BASE = "#0A0B0F" as const;
 
-/** The six emotions users can drop. */
-export type Emotion = "joy" | "energy" | "love" | "awe" | "calm" | "reflective";
+/** The five emotions users can drop — final set (2026-07-02, Eli's call).
+ *  History: awe removed (no successor); reflective became gratitude. */
+export type Emotion = "joy" | "energy" | "love" | "gratitude" | "calm";
 
-/** Emotion → hue. On the map: hue = emotion. */
+/** Emotion → hue. On the map: hue = emotion. Object order = slider order. */
 export const EMOTION_HUES: Record<Emotion, string> = {
   joy: "#FFC24B",
   energy: "#FF7A29",
   love: "#FF6FB5",
-  awe: "#7B6CF6",
+  gratitude: "#4CAF72", // comforting forest green (Eli's spec)
   calm: "#35D0BA",
-  reflective: "#3E8EF7",
 };
 
 export const EMOTIONS = Object.keys(EMOTION_HUES) as Emotion[];

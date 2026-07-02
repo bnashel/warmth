@@ -59,7 +59,7 @@ An ambient, beautiful live map of how a city feels. Emotion is rendered as glowi
 - Migrations only via `supabase migration new ...`.
 
 ## Design tokens (source of truth: /lib/theme.ts once built)
-Emotion hues: Joy #FFC24B · Energy #FF7A29 · Love #FF6FB5 · Awe #7B6CF6 · Calm #35D0BA · Reflective #3E8EF7.
+Emotion hues (final five): Joy #FFC24B · Energy #FF7A29 · Love #FF6FB5 · Gratitude #4CAF72 · Calm #35D0BA.
 Motion: snappy = spring(stiffness 400, damping 32); settle = spring(stiffness 140, damping 22); glow pulse ≈ 2.5s ease-in-out loop.
 Map: hue = emotion, brightness = intensity, pulse = density.
 

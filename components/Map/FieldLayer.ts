@@ -5,11 +5,11 @@
  * points. A Mapbox custom layer (raw WebGL2 in the map's own context):
  *
  *   prerender  — every moment splats a coreless meters-scaled kernel into a
- *                half-res offscreen target: 6 per-emotion intensity fields
+ *                half-res offscreen target: one intensity field per emotion
  *                across two RGBA16F attachments (MRT), additively pooled.
  *   render     — one fullscreen resolve: pooled weight → brightness through
  *                a filmic knee (never clips to white); hue = dominance-
- *                weighted OKLab mix of the six emotion hues (the mud rule:
+ *                weighted OKLab mix of the emotion hues (the mud rule:
  *                hues are mixed by local dominance, never summed — many
  *                emotions piled up can not gray out). Then the streetlight
  *                pass multiplies the same field onto the base map.
@@ -27,7 +27,7 @@ function srgbToLinear(c: number): number {
   return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
 }
 
-/** hex → OKLab [L, a, b] — the six hue anchors, computed once on CPU. */
+/** hex → OKLab [L, a, b] — the per-emotion hue anchors, computed once on CPU. */
 function hexToOklab(hex: string): [number, number, number] {
   const n = parseInt(hex.slice(1), 16);
   const r = srgbToLinear(((n >> 16) & 255) / 255);
@@ -45,14 +45,18 @@ function hexToOklab(hex: string): [number, number, number] {
 
 /* ---------------- shaders ---------------- */
 
+/** One accumulation channel per emotion, spread across two RGBA targets
+ *  (up to 6 supported; the count flows from the canonical EMOTIONS list). */
+const NE = EMOTIONS.length;
+
 /* Kernel splat: instanced quads in mercator space, radius pre-clamped on
  * CPU per frame. Each instance writes its weight × falloff into exactly one
- * of six channels across two render targets. */
+ * per-emotion channel across two render targets. */
 const ACCUM_VS = /* glsl */ `#version 300 es
 precision highp float;
 layout(location=0) in vec2 corner;         // quad: ±1
 layout(location=1) in vec3 inst;           // mercX, mercY, radiusMerc
-layout(location=2) in vec2 instWC;         // weight, channel(0..5)
+layout(location=2) in vec2 instWC;         // weight, channel (one per emotion)
 uniform mat4 uMatrix;
 out vec2 vUv;
 out float vWeight;
@@ -72,8 +76,8 @@ in vec2 vUv;
 in float vWeight;
 flat in int vChannel;
 uniform float uSoftness;
-layout(location=0) out vec4 o0;            // joy, energy, love, awe
-layout(location=1) out vec4 o1;            // calm, reflective, -, -
+layout(location=0) out vec4 o0;            // joy, energy, love, gratitude
+layout(location=1) out vec4 o1;            // calm, -, -, -
 void main() {
   float t2 = dot(vUv, vUv);
   if (t2 >= 1.0) discard;
@@ -109,7 +113,7 @@ precision highp float;
 in vec2 vUv;
 uniform sampler2D uField0;
 uniform sampler2D uField1;
-uniform vec3 uHueLab[6];
+uniform vec3 uHueLab[${NE}];
 uniform float uExposure;
 uniform float uDominance;
 uniform float uChromaFloor;
@@ -142,10 +146,14 @@ vec3 linearToSrgb(vec3 c) {
 void main() {
   vec4 f0 = texture(uField0, vUv);
   vec2 f1 = texture(uField1, vUv).xy;
-  float I[6];
-  I[0] = f0.x; I[1] = f0.y; I[2] = f0.z; I[3] = f0.w; I[4] = f1.x; I[5] = f1.y;
+  float I[${NE}];
+  ${["f0.x", "f0.y", "f0.z", "f0.w", "f1.x", "f1.y", "f1.z", "f1.w"]
+    .slice(0, NE)
+    .map((src, i) => `I[${i}] = ${src};`)
+    .join(" ")}
 
-  float total = I[0] + I[1] + I[2] + I[3] + I[4] + I[5];
+  float total = 0.0;
+  for (int i = 0; i < ${NE}; i++) total += I[i];
   if (total < 0.002) discard;
 
   // THE MUD RULE: hues mix by dominance share (I^p), never sum. Any local
@@ -158,7 +166,7 @@ void main() {
   float anchorChroma = 0.0;
   int top = 0;
   float topW = -1.0;
-  for (int i = 0; i < 6; i++) {
+  for (int i = 0; i < ${NE}; i++) {
     float w = pow(I[i], uDominance);
     lab += w * uHueLab[i];
     anchorChroma += w * length(uHueLab[i].yz);
@@ -245,14 +253,14 @@ export class FieldLayer implements CustomLayerInterface {
   private count = 0;
   private uploaded = false;
   private epoch = 0;
-  private hueLab = new Float32Array(18);
+  private hueLab = new Float32Array(NE * 3);
 
   constructor() {
     EMOTIONS.forEach((e, i) => {
       const [, a, b] = hexToOklab(EMOTION_HUES[e]);
       // Equal feeling = equal light: anchors share one OKLab lightness
-      // (raw hues span L .62–.87, which made Awe glow half as bright as
-      // Joy for the same intensity). Hue/chroma stay the brand's.
+      // (raw hues span a wide L range, which made cooler hues glow dimmer
+      // than Joy for the same intensity). Hue/chroma stay the brand's.
       this.hueLab[i * 3] = FIELD.anchorL;
       this.hueLab[i * 3 + 1] = a;
       this.hueLab[i * 3 + 2] = b;

@@ -40,40 +40,40 @@ const POCKETS: [number, number, Emotion, number][] = [
   [-73.958, 40.714, "energy", 8.5], // Williamsburg
   [-73.95, 40.729, "calm", 6], // Greenpoint
   [-73.941, 40.686, "joy", 7.5], // Bed-Stuy
-  [-73.99, 40.703, "awe", 8], // DUMBO
+  [-73.99, 40.703, "gratitude", 8], // DUMBO (was awe — removed 2026-07-02)
   [-73.977, 40.669, "calm", 7], // Park Slope
   [-73.969, 40.661, "calm", 8], // Prospect Park
   [-73.944, 40.668, "love", 6.5], // Crown Heights
   [-74.005, 40.645, "love", 5.5], // Sunset Park
   [-73.985, 40.578, "joy", 6.5], // Coney Island
   [-73.917, 40.695, "energy", 6], // Bushwick
-  [-73.902, 40.635, "reflective", 4.5], // Canarsie-ish
+  [-73.902, 40.635, "gratitude", 4.5], // Canarsie-ish
   // Manhattan
   [-73.984, 40.727, "joy", 8], // East Village
-  [-73.997, 40.716, "reflective", 6], // Chinatown
-  [-74.012, 40.705, "awe", 7], // FiDi
+  [-73.997, 40.716, "gratitude", 6], // Chinatown
+  [-74.012, 40.705, "energy", 7], // FiDi (was awe — removed 2026-07-02)
   [-74.003, 40.735, "love", 8.5], // West Village
   [-73.985, 40.755, "energy", 9], // Times Square
-  [-73.978, 40.765, "awe", 6.5], // Columbus Circle
+  [-73.978, 40.765, "joy", 6.5], // Columbus Circle (was awe — removed 2026-07-02)
   [-73.966, 40.782, "calm", 7.5], // Central Park
   [-73.978, 40.788, "love", 6], // UWS
   [-73.955, 40.777, "calm", 5.5], // UES
   [-73.945, 40.809, "joy", 8], // Harlem
-  [-73.938, 40.845, "reflective", 6], // Washington Heights
+  [-73.938, 40.845, "gratitude", 6], // Washington Heights
   [-73.99, 40.744, "energy", 6.5], // Flatiron
   // Queens
   [-73.923, 40.771, "love", 6.5], // Astoria
-  [-73.94, 40.745, "awe", 7], // Long Island City
+  [-73.94, 40.745, "energy", 7], // Long Island City (was awe — removed 2026-07-02)
   [-73.883, 40.748, "love", 5.5], // Jackson Heights
   [-73.83, 40.759, "joy", 6.5], // Flushing
-  [-73.858, 40.7, "reflective", 5], // Forest Hills
+  [-73.858, 40.7, "gratitude", 5], // Forest Hills
   [-73.795, 40.707, "joy", 5], // Jamaica
   // The Bronx
   [-73.92, 40.827, "energy", 6.5], // South Bronx
   [-73.877, 40.86, "calm", 5.5], // Bronx Park
-  [-73.905, 40.881, "reflective", 4.5], // Riverdale-ish
+  [-73.905, 40.881, "gratitude", 4.5], // Riverdale-ish
   // Staten Island
-  [-74.077, 40.641, "reflective", 5.5], // St. George
+  [-74.077, 40.641, "gratitude", 5.5], // St. George
   [-74.15, 40.58, "calm", 5], // mid-island
   [-74.19, 40.54, "calm", 4.5], // south shore
 ];
