@@ -1,5 +1,5 @@
 /**
- * components/maplab/GlowLayer.ts — emotion rendered as LIGHT.
+ * components/Map/GlowLayer.ts — emotion rendered as LIGHT.
  *
  * A ScatterplotLayer whose fragment shader is replaced with a radial light
  * function: a bright hot core (slightly white-shifted, like a filament), a
@@ -64,7 +64,7 @@ out vec4 fragColor;
 void main(void) {
   geometry.uv = unitPosition;
 
-  float w = vFillColor.a;              // intensity of this moment (0..1)
+  float w = vFillColor.a;              // weight of this moment (0..1)
   float r = length(unitPosition);      // 0 at center, 1 at quad edge
 
   // Breathing: per-point phase — the city never throbs in lockstep.
@@ -80,9 +80,13 @@ void main(void) {
   float tail = pow(1.0 - rr, glow.tailFalloff);
   float lum = glow.corePeak * core + tail;
 
-  // Peak brightness scales with intensity; breath modulates it gently.
+  // Peak brightness scales with weight; breath modulates it gently.
   lum *= (glow.peakBase + glow.peakPerIntensity * w)
        * (1.0 + glow.brightnessAmp * s);
+
+  // Dying and newborn moments reach TRUE black: without this, peakBase
+  // would floor every point at ~32% and arrivals/fades would pop.
+  lum *= smoothstep(0.0, 0.12, w);
 
   // The filament: the very center whitens toward hot.
   vec3 color = mix(vFillColor.rgb, vec3(1.0), glow.coreWhiteness * core);
@@ -100,7 +104,7 @@ void main(void) {
 export type GlowDatum = {
   position: [number, number];
   hue: [number, number, number];
-  intensity: number; // 0..1
+  weight: number; // 0..1 — intensity × freshness × arrival
 };
 
 type LightParams = {

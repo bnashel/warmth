@@ -116,6 +116,9 @@ export const GLOW = {
   /** Breathing: ±radius and ±brightness over one slow cycle. Pulse frames
    *  are driven at half rate when the camera is still (battery, phones). */
   pulse: { periodMs: 2500, radiusAmp: 0.05, brightnessAmp: 0.1 },
+  /** Weight an intensity-1 moment starts at (intensity-10 → 1.0): the
+   *  gentlest feeling still visibly glows; fading continues below it. */
+  weightFloor: 0.25,
   /**
    * EXPERIMENT (Ink & Glow only): feeling lights the streets around it.
    * A second glow pass multiplied by what's beneath — dark land absorbs it,
@@ -128,6 +131,30 @@ export const GLOW = {
     maxRadiusPx: 300,
     tailFalloff: 1.5,
   },
+} as const;
+
+/* ------------------------------------------------------------------ */
+/* The commit choreography — orb burst → a beat → the city receives it */
+/* ------------------------------------------------------------------ */
+export const CHOREO = {
+  /** Silence between the orb's burst igniting and the map bloom starting. */
+  beatMs: 180,
+  /** The bloom: light turning on — rise past full, then settle into breath. */
+  arrival: { durationMs: 1400, overshoot: 1.18, peakAt: 0.55 },
+  /** Camera: glide to your bloom ONLY if it's off-screen (Ben's call). */
+  glide: { marginPct: 0.1, durationMs: 1400 },
+} as const;
+
+/* ------------------------------------------------------------------ */
+/* Recency — the map always shows NOW                                  */
+/* ------------------------------------------------------------------ */
+export const RECENCY = {
+  /** Feelings are brightest fresh and fade to nothing over this window. */
+  windowHours: 24,
+  /** Hard cap on rendered moments — a loved map never becomes a slow map. */
+  maxPoints: 500,
+  /** How often the fade is re-derived at rest (ms). */
+  refreshMs: 60_000,
 } as const;
 
 /* ------------------------------------------------------------------ */

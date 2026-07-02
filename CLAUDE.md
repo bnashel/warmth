@@ -2,7 +2,7 @@
 *Read this at the start of every session.*
 
 ## Right now
-**Phase 0 → 1: get the app scaffolded and deployed, then make the empty map beautiful.**
+**Phase 3: the one screen — orb commits bloom on the live map; then Supabase realtime (two-device test = done).**
 Update this line as we move through phases (full plan in /docs). Whatever this line says is your top priority.
 
 ## What we're building

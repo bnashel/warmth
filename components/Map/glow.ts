@@ -1,0 +1,90 @@
+/**
+ * components/Map/glow.ts — the glow render path: live moments → light layers.
+ *
+ * Data comes from lib/momentsStore (stable array identity; weights mutate in
+ * place). `version` keys deck.gl's updateTriggers so weight changes actually
+ * reach the GPU — without it, in-place mutation is invisible.
+ */
+import {
+  ADDITIVE_LIGHT,
+  STREET_LIGHT,
+  EmotionGlowLayer,
+  type GlowDatum,
+} from "./GlowLayer";
+import type { LivePoint } from "@/lib/momentsStore";
+import { GLOW } from "./tune";
+
+/** Radius growth as the camera approaches — light gets room to breathe. */
+const zoomScale = (zoom: number) => Math.pow(GLOW.zoomGrowth, zoom - 12);
+
+/* Stable accessor identities (deck diffs by reference). LivePoint is a
+ * structural superset of GlowDatum — the layer only reads these fields. */
+const getPosition = (d: GlowDatum) => d.position;
+const getRadius = (d: GlowDatum) =>
+  GLOW.baseRadiusPx + GLOW.radiusPerIntensityPx * Math.min(1, Math.max(0, d.weight));
+// rgb = hue; alpha carries WEIGHT into the shader (see GlowLayer).
+const getFillColor = (d: GlowDatum) =>
+  [
+    d.hue[0],
+    d.hue[1],
+    d.hue[2],
+    Math.round(Math.min(1, Math.max(0, d.weight)) * 255),
+  ] as [number, number, number, number];
+
+/**
+ * The emotion light. `streetlight` adds the Ink & Glow signature pass:
+ * a wider, coreless copy multiplied by the base map, so street hairlines
+ * near a feeling catch its color and fade with distance.
+ */
+export function buildGlowLayers(
+  data: LivePoint[],
+  version: number,
+  timeSec: number,
+  zoom: number,
+  streetlight: boolean,
+) {
+  const shared = {
+    data,
+    getPosition,
+    getRadius,
+    getFillColor,
+    updateTriggers: { getRadius: version, getFillColor: version },
+    radiusUnits: "pixels" as const,
+    stroked: false,
+    filled: true,
+    antialiasing: false,
+    pickable: false,
+  };
+  const layers = [];
+  if (streetlight && GLOW.streetlight.gain > 0) {
+    layers.push(
+      new EmotionGlowLayer({
+        id: "glow-streetlight",
+        ...shared,
+        timeSec,
+        radiusScale: zoomScale(zoom) * GLOW.streetlight.radiusFactor,
+        radiusMaxPixels: GLOW.streetlight.maxRadiusPx,
+        light: {
+          corePeak: 0,
+          coreWhiteness: 0,
+          tailFalloff: GLOW.streetlight.tailFalloff,
+          gain: GLOW.streetlight.gain,
+        },
+        parameters: STREET_LIGHT,
+        // Under the boundary seams: the lit streets stay part of the map.
+        beforeId: "nbhd-boundaries",
+      }),
+    );
+  }
+  layers.push(
+    new EmotionGlowLayer({
+      id: "glow-main",
+      ...shared,
+      timeSec,
+      radiusScale: zoomScale(zoom),
+      radiusMaxPixels: GLOW.maxRadiusPx,
+      parameters: ADDITIVE_LIGHT,
+    }),
+  );
+  return layers;
+}
