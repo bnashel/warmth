@@ -6,7 +6,7 @@ import { MapboxOverlay } from "@deck.gl/mapbox";
 import type { MapRef } from "react-map-gl/mapbox";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { MAPBOX_TOKEN } from "@/lib/map";
-import { CAMERA, CANDIDATES, GLOW, MOTION, type CandidateId } from "./tune";
+import { CAMERA, GLOW, INK, MOTION } from "./tune";
 import { buildStyle } from "./styles";
 import { buildGlowLayers } from "./fakeGlow";
 import { buildLabelLayers, loadLabels } from "./neighborhoods";
@@ -32,7 +32,7 @@ function DeckOverlay({ onReady }: { onReady: (o: MapboxOverlay) => void }) {
  * rebuilt only when zoom actually changes; the glow layer updates are pure
  * uniform writes. Zero React re-renders while panning/zooming.
  */
-export default function MapStage({ candidate }: { candidate: CandidateId }) {
+export default function MapStage() {
   const mapRef = useRef<MapRef | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const labelData = useRef<Awaited<ReturnType<typeof loadLabels>>>([]);
@@ -43,10 +43,7 @@ export default function MapStage({ candidate }: { candidate: CandidateId }) {
   const epoch = useRef(0); // pulse clock origin — survives candidate switches
   const [rotated, setRotated] = useState(false);
 
-  const style = useMemo(
-    () => buildStyle(CANDIDATES[candidate].palette, CANDIDATES[candidate].name),
-    [candidate],
-  );
+  const style = useMemo(() => buildStyle(INK, "ink-and-glow"), []);
 
   useEffect(() => {
     void loadLabels().then((d) => {
@@ -80,14 +77,14 @@ export default function MapStage({ candidate }: { candidate: CandidateId }) {
       const timeSec = ((now - epoch.current) / 1000) % periodSec;
       overlay.setProps({
         layers: [
-          ...buildGlowLayers(timeSec, zoom, candidate === 1),
+          ...buildGlowLayers(timeSec, zoom, true),
           ...labelCache.current.layers,
         ],
       });
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [candidate]);
+  }, []);
 
   return (
     <>

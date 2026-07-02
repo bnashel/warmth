@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import { Inter } from "next/font/google";
 import { MAPBOX_TOKEN } from "@/lib/map";
-import { ATMOSPHERE, CANDIDATES, type CandidateId } from "./tune";
+import { ATMOSPHERE } from "./tune";
 import MapStage from "./MapStage";
 
 /* Colorless film grain (feTurbulence desaturated to zero — the one law holds
@@ -15,13 +14,11 @@ const GRAIN_URI = `url("data:image/svg+xml,${encodeURIComponent(
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
 
 /**
- * The map lab: three full style candidates, switchable live ("1 2 3"),
- * judged with the fake glow always on. No chrome beyond the switcher and a
- * quiet, ToS-required attribution.
+ * The map lab: Ink & Glow (Ben's pick — the other candidates are deleted),
+ * with the glow test data always on. No chrome beyond a quiet, ToS-required
+ * attribution.
  */
 export default function MapLab() {
-  const [candidate, setCandidate] = useState<CandidateId>(1);
-
   return (
     <div
       className={inter.className}
@@ -33,7 +30,7 @@ export default function MapLab() {
         overscrollBehavior: "none",
       }}
     >
-      {MAPBOX_TOKEN ? <MapStage candidate={candidate} /> : <MissingToken />}
+      {MAPBOX_TOKEN ? <MapStage /> : <MissingToken />}
 
       {/* Atmosphere: the void has depth. A gentle vignette pulls the eye to
           the city; static grain keeps the darkness from feeling digital.
@@ -60,40 +57,6 @@ export default function MapLab() {
           opacity: ATMOSPHERE.grain,
         }}
       />
-
-      {/* Candidate switcher — whisper chrome, top-center. */}
-      <div
-        style={{
-          position: "absolute",
-          top: "max(env(safe-area-inset-top), 20px)",
-          left: 0,
-          right: 0,
-          display: "flex",
-          justifyContent: "center",
-          gap: 22,
-          zIndex: 10,
-        }}
-      >
-        {([1, 2, 3] as const).map((c) => (
-          <button
-            key={c}
-            type="button"
-            aria-label={CANDIDATES[c].name}
-            onClick={() => setCandidate(c)}
-            style={{
-              fontSize: 11,
-              letterSpacing: "0.1em",
-              color: `rgba(255,255,255,${c === candidate ? 0.7 : 0.3})`,
-              background: "none",
-              border: "none",
-              padding: "8px 6px",
-              cursor: "pointer",
-            }}
-          >
-            {c}
-          </button>
-        ))}
-      </div>
 
       {/* Mapbox attribution is required (ToS) — kept, but made quiet.
           The compact ⓘ toggle ships with a bright default icon; it gets the

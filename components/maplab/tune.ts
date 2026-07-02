@@ -62,8 +62,9 @@ export const LABELS = {
   tierAreas: [3.0e-4, 1.2e-4], // ≥t1 = tier1, ≥t2 = tier2, else tier3
   /** Px sizes per tier — hierarchy by opacity/spacing, never size wars. */
   sizePx: [13, 11.5, 10.5],
-  /** White alpha per tier (0-255). Whisper, not shout. */
-  alpha: [150, 112, 88],
+  /** White alpha per tier (0-255). Whisper, not shout — and always
+   *  quieter than the dimmest glow (the brightness law). */
+  alpha: [132, 100, 78],
   /**
    * Zoom at which each tier begins to appear (fades over ~0.8z).
    * NO neighborhood names at the rest view (Ben: cluttered) — the wide city
@@ -85,7 +86,7 @@ export const LABELS = {
     { name: "THE BRONX", anchor: [-73.878, 40.853] },
     { name: "STATEN ISLAND", anchor: [-74.148, 40.58] },
   ] as { name: string; anchor: [number, number] }[],
-  boroughAlpha: 84,
+  boroughAlpha: 76,
   boroughSizePx: 11.5,
   boroughFadeOut: { from: 10.9, to: 11.6 },
 } as const;
@@ -114,7 +115,7 @@ export const GLOW = {
   tailFalloff: 2.6,
   /** Breathing: ±radius and ±brightness over one slow cycle. Pulse frames
    *  are driven at half rate when the camera is still (battery, phones). */
-  pulse: { periodMs: 3400, radiusAmp: 0.05, brightnessAmp: 0.1 },
+  pulse: { periodMs: 2500, radiusAmp: 0.05, brightnessAmp: 0.1 },
   /**
    * EXPERIMENT (Ink & Glow only): feeling lights the streets around it.
    * A second glow pass multiplied by what's beneath — dark land absorbs it,
@@ -140,63 +141,26 @@ export const ATMOSPHERE = {
 } as const;
 
 /* ------------------------------------------------------------------ */
-/* The three candidates' palettes — ALL ink, zero saturation           */
+/* THE palette — Ink & Glow, Ben's pick. All ink, zero saturation.     */
+/*                                                                     */
+/* THE BRIGHTNESS LAW: nothing on the base may outshine the dimmest    */
+/* emotion glow. glow > neighborhood labels > arterials > side streets.*/
 /* ------------------------------------------------------------------ */
 
-/** C1 — INK & GLOW: near-black glass city; streets as hairlines of light. */
+/** INK & GLOW: near-black glass city; streets as quiet hairlines. */
 export const INK = {
   bg: "#0A0B0F", // the void itself — land is the absence of feature
   water: "#06070A", // water darker than land: rivers as deep cuts
   park: "#0D0F13", // parks: the faintest lift above land (a held breath)
   building: "#12141B", // human-scale mass at street zoom — still ink
   buildingAlpha: 0.6,
-  plateBase: 0.03, // neighborhood tonal plates: lift land off the water…
-  plateStep: 0.011, // …varied per-plate so the city reads as patchwork
+  plateBase: 0.03, // neighborhood tonal plates — UNIFORM: every dark patch
+  // on the map is a park or water, never an accident
   boundary: "rgba(233,236,244,0.075)", // hand-drawn seams between places
   boundaryWidth: 1.0,
-  road: "#E9ECF4", // streets are LIGHT (hairlines), faded in by JOURNEY
-  roadAlpha: { highway: 0.5, avenue: 0.32, local: 0.14, service: 0.07 },
+  road: "#C7CBD6", // hairlines in cool gray — structure, not light
+  roadAlpha: { highway: 0.26, avenue: 0.16, local: 0.09, service: 0.05 },
   roadWidth: { highway: 2.2, avenue: 1.35, local: 0.7, service: 0.45 }, // px at fade-in end
 } as const;
 
-/** C2 — CARVED GRAPHITE: the city as sculpted mass; streets are carved voids. */
-export const GRAPHITE = {
-  bg: "#131519", // the graphite block: land carries visible mass
-  water: "#050608", // polished black stone
-  park: "#0E1013", // carved hollows
-  building: "#1A1D22", // the volume texture (fades in via JOURNEY)
-  buildingAlpha: 0.85,
-  plateBase: 0.012, // faint plates so places exist at rest, not just labels
-  plateStep: 0.008,
-  boundary: "rgba(0,0,0,0.42)", // seams carved INTO the block
-  boundaryWidth: 1.2,
-  road: "#07080B", // streets as dark channels cut from the mass
-  roadAlpha: { highway: 0.92, avenue: 0.8, local: 0.62, service: 0.45 },
-  roadWidth: { highway: 3.6, avenue: 2.3, local: 1.35, service: 0.85 },
-} as const;
-
-/** C3 — FOG & VOID: land is luminous haze; water/parks are pure void;
- *  streets are etchings through the fog. Structure by absence. */
-export const FOG = {
-  bg: "#1C1F26", // the haze — lifted well above graphite so the thesis reads:
-  // land glows faintly, and water/parks/streets are absences cut from it
-  water: "#030406", // the deepest void on screen — THE void, singular
-  park: "#12141A", // parks recede quietly; they must not out-shout the glow
-  building: "#252932", // denser fog clumps (density texture)
-  buildingAlpha: 0.55,
-  plateBase: 0.012, // plates as gentle pressure differences in the fog
-  plateStep: 0.008,
-  boundary: "rgba(4,5,7,0.35)", // darker seams pressed into the haze
-  boundaryWidth: 1.4,
-  road: "#0B0D12", // etched through the fog at close zoom
-  roadAlpha: { highway: 0.85, avenue: 0.68, local: 0.5, service: 0.32 },
-  roadWidth: { highway: 2.8, avenue: 1.8, local: 1.05, service: 0.65 },
-} as const;
-
-export type CandidatePalette = typeof INK | typeof GRAPHITE | typeof FOG;
-export const CANDIDATES = {
-  1: { name: "Ink & Glow", palette: INK },
-  2: { name: "Carved Graphite", palette: GRAPHITE },
-  3: { name: "Fog & Void", palette: FOG },
-} as const;
-export type CandidateId = keyof typeof CANDIDATES;
+export type CandidatePalette = typeof INK;

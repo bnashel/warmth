@@ -70,21 +70,15 @@ export function buildStyle(p: CandidatePalette, name: string): StyleSpecificatio
     { id: "bg", type: "background", paint: { "background-color": p.bg } },
   ];
 
-  // Neighborhood tonal plates — whisper-white fills, varied per place so the
-  // city reads as a hand-laid patchwork (skipped when the palette says 0).
+  // Neighborhood tonal plates — one uniform whisper-white lift so land
+  // separates from water. Uniform on purpose: per-plate variance read as
+  // accidental shadows. Every dark patch on the map is a park or water.
   if (p.plateBase > 0) {
     layers.push({
       id: "nbhd-plates",
       type: "fill",
       source: "neighborhoods",
-      paint: {
-        "fill-color": "#E9ECF4",
-        "fill-opacity": [
-          "+",
-          p.plateBase,
-          ["*", p.plateStep, ["%", ["length", ["get", "name"]], 3]],
-        ] as unknown as number,
-      },
+      paint: { "fill-color": "#E9ECF4", "fill-opacity": p.plateBase },
     });
   }
 
