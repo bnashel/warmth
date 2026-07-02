@@ -9,10 +9,10 @@ import { momentsStore, type Moment } from "@/lib/momentsStore";
 import { armLocation, currentFix } from "@/lib/location";
 import { panic, unlockAudio } from "@/lib/sound";
 import { ORB } from "@/lib/feel";
-import type { Emotion } from "@/lib/theme";
+import { SPRING, type Emotion } from "@/lib/theme";
 import { Atmosphere, MissingToken } from "@/components/Map/Atmosphere";
 import MapStage from "@/components/Map/MapStage";
-import { CAMERA, CHOREO } from "@/components/Map/tune";
+import { CAMERA, CHOREO, MOTION } from "@/components/Map/tune";
 import { OrbFlow } from "@/components/orb/OrbFlow";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
@@ -21,11 +21,13 @@ const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
  * THE screen: the city breathing full-bleed, the orb floating above it.
  * Committing a feeling is one continuous act — the orb bursts, a beat of
  * silence, then the map blooms at your location in the same hue and the
- * light settles into the ambient field. If your bloom would land off-screen,
- * the camera glides you to it; if it's visible, the camera never moves.
+ * light settles into the ambient field. If your bloom would land off-screen
+ * the camera glides there FIRST and the light ignites as you arrive — the
+ * flight is the drumroll, never a replay of something you missed.
  */
 export default function OneScreen() {
   const mapRef = useRef<MapboxMap | null>(null);
+  const committedOnce = useRef(false);
   const gestureDepth = useMotionValue(0);
   const [centerHint, setCenterHint] = useState(false);
 
@@ -39,6 +41,28 @@ export default function OneScreen() {
     document.addEventListener("visibilitychange", onHide);
     return () => document.removeEventListener("visibilitychange", onHide);
   }, []);
+
+  // While a finger is on the orb, the city holds still — a second finger
+  // must never pan the map out from under the tube mid-rating.
+  useEffect(() => {
+    let frozen = false;
+    return gestureDepth.on("change", (d) => {
+      const map = mapRef.current;
+      if (!map) return;
+      if (d > 0.02 && !frozen) {
+        frozen = true;
+        map.dragPan.disable();
+        map.touchZoomRotate.disable();
+        map.scrollZoom.disable();
+      } else if (d <= 0.02 && frozen) {
+        frozen = false;
+        map.dragPan.enable(MOTION.dragPan);
+        map.touchZoomRotate.enable(); // rotation stays on (Ben's call)
+        map.scrollZoom.enable();
+        map.scrollZoom.setWheelZoomRate(MOTION.wheelZoomRate);
+      }
+    });
+  }, [gestureDepth]);
 
   /** Inside the NYC stage? (A fix in another city can't land on this map.) */
   function inBounds(lng: number, lat: number): boolean {
@@ -57,6 +81,7 @@ export default function OneScreen() {
 
   function handleCommit({ emotion, intensity }: { emotion: Emotion; intensity: number }) {
     const map = mapRef.current;
+    committedOnce.current = true;
     // The burst is playing on the orb. One beat of silence, then the city
     // receives it — the bloom continues the burst's outward motion.
     window.setTimeout(() => {
@@ -75,22 +100,24 @@ export default function OneScreen() {
         createdAt: Date.now(),
         own: true,
       };
-      momentsStore.add(moment); // the bloom ignites (arrival envelope)
 
-      // One-time whisper when the feeling lands where you're looking.
-      if (!usable && !sessionStorage.getItem("warmth-center-hint")) {
-        sessionStorage.setItem("warmth-center-hint", "1");
-        setCenterHint(true);
-        window.setTimeout(() => setCenterHint(false), 3600);
+      const ignite = () => momentsStore.add(moment);
+
+      if (map && !onScreen(map, lng, lat)) {
+        // Off-screen: fly first, ignite as you arrive — the glide is the
+        // drumroll; the bloom must never play to an empty theater.
+        map.easeTo({ center: [lng, lat], duration: CHOREO.glide.durationMs });
+        window.setTimeout(ignite, CHOREO.glide.durationMs * 0.85);
+      } else {
+        ignite();
       }
 
-      // Glide only if the bloom would live off-screen (Ben's call).
-      if (map && !onScreen(map, lng, lat)) {
-        map.easeTo({
-          center: [lng, lat],
-          duration: CHOREO.glide.durationMs,
-          essential: true,
-        });
+      // One-time whisper when the feeling lands where you're looking —
+      // arriving as the bloom settles, so it never competes with the light.
+      if (!usable && !sessionStorage.getItem("warmth-center-hint")) {
+        sessionStorage.setItem("warmth-center-hint", "1");
+        window.setTimeout(() => setCenterHint(true), 800);
+        window.setTimeout(() => setCenterHint(false), 4400);
       }
     }, CHOREO.beatMs);
   }
@@ -124,7 +151,12 @@ export default function OneScreen() {
       <div
         onPointerDown={() => {
           unlockAudio();
-          armLocation(); // permission asked at INTENT — never on load
+          // Location permission is asked at INTENT, never on load — and never
+          // during the FIRST gesture: iOS throws a modal permission alert the
+          // instant we arm, which would kill the wheel under the finger. The
+          // first feeling lands where you're looking (with the whisper); the
+          // next touch arms for real, still inside a user gesture.
+          if (committedOnce.current) armLocation();
         }}
         style={{
           position: "absolute",
@@ -146,7 +178,7 @@ export default function OneScreen() {
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 0.55, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.8, ease: "easeOut" }}
+            transition={SPRING.settle}
             style={{
               position: "absolute",
               left: 0,

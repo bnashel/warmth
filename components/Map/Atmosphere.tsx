@@ -49,6 +49,10 @@ export function Atmosphere() {
           filter: grayscale(1) brightness(1.6);
           outline: none;
         }
+        /* Keep ToS chrome clear of the iPhone home indicator. */
+        .mapboxgl-ctrl-bottom-left, .mapboxgl-ctrl-bottom-right {
+          margin-bottom: env(safe-area-inset-bottom, 0px);
+        }
       `}</style>
     </>
   );

@@ -24,6 +24,10 @@ export function armLocation(): void {
   watchId = navigator.geolocation.watchPosition(
     ({ coords }) => {
       lastFix = { lng: coords.longitude, lat: coords.latitude, at: Date.now() };
+      // One good fix is enough — release the GPS (battery). Each orb touch
+      // re-arms; maximumAge makes the refresh instant while the fix is warm.
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      watchId = null;
     },
     (err) => {
       if (err.code === err.PERMISSION_DENIED) {

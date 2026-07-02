@@ -33,9 +33,12 @@ export const ORB = {
 export const GLOW = {
   coreFrac: 0.2,
   midFrac: 0.6,
-  haloFrac: 1.4,
-  /** Halo alpha at rest → at max intensity. Higher = louder room glow. */
-  haloAlpha: { rest: 0.14, max: 0.38 },
+  haloFrac: 1.15,
+  /** Halo alpha at rest → at max intensity. Higher = louder room glow.
+   *  Rest is quiet on purpose: the orb now floats over the CITY, and its
+   *  idle light must never fog the map (the brightness law) — the halo
+   *  swells during the gesture, when drama is earned. */
+  haloAlpha: { rest: 0.07, max: 0.38 },
   midAlpha: 0.85,
 } as const;
 
@@ -170,9 +173,11 @@ export const BURST = {
     sizePx: { min: 3, max: 5 },
     durationMs: { min: 500, max: 750 },
   },
-  /** Afterglow ember: committed-hue tint kept on the resting orb, fading. */
-  afterglowTint: 0.2,
-  afterglowS: 1.2,
+  /** Afterglow ember: committed-hue tint kept on the resting orb, fading.
+   *  High + slow on purpose: the orb EXHALES the hue on the same clock the
+   *  map inhales it — color continuity is what makes commit-to-bloom one act. */
+  afterglowTint: 0.7,
+  afterglowS: 1.4,
   /** Input re-enabled this long after commit, ms. Keep ≤1000. */
   rearmMs: 900,
 } as const;
