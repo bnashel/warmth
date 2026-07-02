@@ -1,5 +1,5 @@
 /**
- * components/Map/glow.ts — the glow render path: live moments → light layers.
+ * components/Trail/glow.ts — the glow render path: live moments → light layers.
  *
  * Data comes from lib/momentsStore (stable array identity; weights mutate in
  * place). `version` keys deck.gl's updateTriggers so weight changes actually
@@ -12,7 +12,7 @@ import {
   type GlowDatum,
 } from "./GlowLayer";
 import type { LivePoint } from "@/lib/momentsStore";
-import { GLOW } from "@/components/Map/tune";
+import { GLOW, TRAIL } from "@/components/Map/tune";
 
 /** Radius growth as the camera approaches — light gets room to breathe. */
 const zoomScale = (zoom: number) => Math.pow(GLOW.zoomGrowth, zoom - 12);
@@ -87,4 +87,43 @@ export function buildGlowLayers(
     }),
   );
   return layers;
+}
+
+/* Trail dot sizing: small, precise marks — the diary, not the weather. */
+const getTrailRadius = (d: GlowDatum) =>
+  TRAIL.baseRadiusPx + TRAIL.radiusPerIntensityPx * Math.min(1, Math.max(0, d.weight));
+
+/**
+ * THE TRAIL (private view): your own moments as exact glowing dots.
+ * `fade` is the public↔private crossfade (0 = hidden, 1 = fully private) —
+ * it rides the gain uniform so the switch costs nothing but a uniform.
+ */
+export function buildTrailLayers(
+  data: LivePoint[],
+  version: number,
+  timeSec: number,
+  zoom: number,
+  fade: number,
+) {
+  if (fade < 0.01 || data.length === 0) return [];
+  return [
+    new EmotionGlowLayer({
+      id: "trail-dots",
+      data,
+      getPosition,
+      getRadius: getTrailRadius,
+      getFillColor,
+      updateTriggers: { getRadius: version, getFillColor: version },
+      radiusUnits: "pixels" as const,
+      stroked: false,
+      filled: true,
+      antialiasing: false,
+      pickable: false,
+      timeSec,
+      radiusScale: Math.pow(TRAIL.zoomGrowth, zoom - 12),
+      radiusMaxPixels: TRAIL.maxRadiusPx,
+      light: { ...TRAIL.light, gain: TRAIL.gain * fade },
+      parameters: ADDITIVE_LIGHT,
+    }),
+  ];
 }

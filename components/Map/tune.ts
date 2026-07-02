@@ -147,6 +147,11 @@ export const FIELD = {
    *  every zoom (never a pin); max protects DPR-3 fill-rate. CSS px. */
   minRadiusPx: 92,
   maxRadiusPx: 300,
+  /** The ambient seed's own floor: the wash is a continuous SHEET, so its
+   *  kernels don't need the lonely-commit clamp — a small floor keeps the
+   *  lattice overlapping at rest zoom without the 92px blobs that pooled
+   *  hard enough to out-vote a real commit's hue (and cost ~26× overdraw). */
+  seedMinRadiusPx: 56,
   /** Kernel falloff exponent on (1 − t²): higher = tighter heart,
    *  longer relative skirt. The edge ALWAYS reaches zero — no rims. */
   kernelSoftness: 2.0,
@@ -164,6 +169,10 @@ export const FIELD = {
   anchorL: 0.76,
   /** Overall field gain on the additive composite. */
   gain: 0.88,
+  /** Ambient-seed weight dimmer: the placeholder city is a thin translucent
+   *  water layer — REAL feelings (your commit, realtime) burn through it at
+   *  full strength. Applies to `seed: true` moments only. */
+  seedGain: 0.38,
   /** Living tide: subtle brightness breath. */
   breath: { periodMs: 2500, amp: 0.045 },
   /** Streetlight signature: the field multiplied onto the base map so
@@ -171,6 +180,35 @@ export const FIELD = {
   streetlightGain: 0.55,
   /** Internal render-target scale (0.5 = half res — soft field, 4× cheaper). */
   resolutionScale: 0.5,
+} as const;
+
+/* ------------------------------------------------------------------ */
+/* THE TRAIL — your own feelings as precise dots (the PRIVATE view).   */
+/* Where the field is weather over everyone, the trail is a diary:     */
+/* exact points, exact places, a week of memory, visible only to you.  */
+/* ------------------------------------------------------------------ */
+export const TRAIL = {
+  /** The diary remembers longer than the weather: days, not hours. */
+  windowDays: 7,
+  /** Dot radius in px at zoom 12: base + perWeight × weight (0..1).
+   *  Deliberately small — these are POINTS, the opposite of the field. */
+  baseRadiusPx: 12,
+  radiusPerIntensityPx: 30,
+  maxRadiusPx: 96,
+  zoomGrowth: 1.18,
+  /** A week-old whisper still shows as a dim ember (0..1 weight floor). */
+  weightFloor: 0.4,
+  gain: 1.15,
+  /** Dot shading: tighter core, harder falloff than the old area glow —
+   *  reads as a mark on the map, not a weather cell. */
+  light: {
+    coreRadius: 0.3,
+    corePeak: 1.25,
+    coreWhiteness: 0.35,
+    tailFalloff: 3.4,
+    peakBase: 0.45,
+    peakPerIntensity: 0.55,
+  },
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -195,6 +233,9 @@ export const CHOREO = {
   arrival: { durationMs: 1400, overshoot: 1.7, peakAt: 0.55 },
   /** Camera: glide to your bloom ONLY if it's off-screen (Ben's call). */
   glide: { marginPct: 0.1, durationMs: 1400 },
+  /** Public ↔ private crossfade time constant (exponential settle, ms).
+   *  ~3τ to rest: fast enough to feel like a switch, soft enough to breathe. */
+  viewFade: { tauMs: 130 },
 } as const;
 
 /* ------------------------------------------------------------------ */

@@ -7,10 +7,11 @@ import type { MapRef } from "react-map-gl/mapbox";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { MAPBOX_TOKEN } from "@/lib/map";
 import { momentsStore } from "@/lib/momentsStore";
-import { CAMERA, INK, MOTION, PERF } from "./tune";
+import { CAMERA, CHOREO, INK, MOTION, PERF } from "./tune";
 import { buildStyle } from "./styles";
 import { FieldLayer } from "./FieldLayer";
 import { buildLabelLayers, loadLabels } from "./neighborhoods";
+import { buildTrailLayers } from "@/components/Trail/glow";
 import type { Map as MapboxMap } from "mapbox-gl";
 
 /** deck.gl overlay INTERLEAVED into the map's canvas — labels only now;
@@ -28,15 +29,19 @@ function DeckOverlay({ onReady }: { onReady: (o: MapboxOverlay) => void }) {
 }
 
 /**
- * The stage: one full-screen map, hand-authored style, THE FIELD (emotion as
- * standing weather) + whisper labels. One rAF loop advances the store and
- * asks the map to repaint — full rate while moving or blooming, ~15fps at
- * rest so the breath stays alive without warming phones. Zero React
- * re-renders while panning/zooming.
+ * The stage: one full-screen map, hand-authored style, TWO WAYS OF SEEING —
+ * public (THE FIELD: everyone's emotion as standing weather) and private
+ * (THE TRAIL: your own moments as precise dots), crossfaded on the view
+ * prop. One rAF loop advances the store and asks the map to repaint — full
+ * rate while moving, blooming, or crossfading, ~15fps at rest so the breath
+ * stays alive without warming phones. Zero React re-renders while panning.
  */
 export default function MapStage({
+  view = "public",
   onMapReady,
 }: {
+  /** public = the field (everyone); private = your trail (dots, only you). */
+  view?: "public" | "private";
   /** The composed screen needs the camera (glide-to-bloom). */
   onMapReady?: (map: MapboxMap) => void;
 }) {
@@ -50,6 +55,14 @@ export default function MapStage({
   const dataVersion = useRef(-1);
   const loaded = useRef(false);
   const [rotated, setRotated] = useState(false);
+  // The public↔private crossfade lives OUTSIDE React: a target the prop
+  // sets, a mix the rAF loop settles exponentially — no re-render, no jank.
+  const initialMix = view === "private" ? 1 : 0;
+  const viewTarget = useRef(initialMix);
+  const viewMix = useRef(initialMix);
+  useEffect(() => {
+    viewTarget.current = view === "private" ? 1 : 0;
+  }, [view]);
 
   const style = useMemo(() => buildStyle(INK, "ink-and-glow"), []);
   // DPR cap: 3× phones render near-identically at 2× on a dark map, for
@@ -73,18 +86,35 @@ export default function MapStage({
     });
   }, []);
 
-  // The heartbeat: advance the store; hand data + repaints to the field.
+  // The heartbeat: advance the store; hand data + repaints to the field,
+  // the trail, and the labels; settle the public↔private crossfade.
   useEffect(() => {
     let raf = 0;
     let lastPush = 0;
+    let lastFrame = 0;
+    let trailShown = false;
     const tick = () => {
       raf = requestAnimationFrame(tick);
       const map = mapRef.current?.getMap();
       const field = fieldRef.current;
       if (!map || !field || !loaded.current) return;
       const now = performance.now();
+      const dt = lastFrame ? Math.min(50, now - lastFrame) : 16;
+      lastFrame = now;
       const arriving = momentsStore.tick(now);
-      if (!map.isMoving() && !arriving && now - lastPush < PERF.restFrameMs) return;
+
+      // Crossfade: exponential settle toward the view target, then snap.
+      const target = viewTarget.current;
+      const fading = viewMix.current !== target;
+      if (fading) {
+        viewMix.current += (target - viewMix.current) * (1 - Math.exp(-dt / CHOREO.viewFade.tauMs));
+        if (Math.abs(viewMix.current - target) < 0.004) viewMix.current = target;
+      }
+      field.fade = 1 - viewMix.current;
+      const trailOn = viewMix.current > 0.01;
+
+      // Rest-throttle — bypassed while moving, blooming, or crossfading.
+      if (!map.isMoving() && !arriving && !fading && now - lastPush < PERF.restFrameMs) return;
       lastPush = now;
 
       if (momentsStore.version !== dataVersion.current) {
@@ -92,9 +122,26 @@ export default function MapStage({
         field.setData(momentsStore.points);
       }
       const zoom = map.getZoom();
-      if (!labelCache.current || Math.abs(labelCache.current.zoom - zoom) > 0.02) {
+      const labelsStale =
+        !labelCache.current || Math.abs(labelCache.current.zoom - zoom) > 0.02;
+      if (labelsStale) {
         labelCache.current = { zoom, layers: buildLabelLayers(labelData.current, zoom) };
-        overlayRef.current?.setProps({ layers: labelCache.current.layers });
+      }
+      // Trail dots breathe via a time uniform, so while visible they re-set
+      // props every push (cheap: deck diffs, data identity is stable).
+      if (labelsStale || trailOn || trailShown) {
+        const trail = trailOn
+          ? buildTrailLayers(
+              momentsStore.ownPoints,
+              momentsStore.ownVersion,
+              now / 1000,
+              zoom,
+              viewMix.current,
+            )
+          : [];
+        // Trail first: labels stay readable above your dots.
+        overlayRef.current?.setProps({ layers: [...trail, ...labelCache.current!.layers] });
+        trailShown = trailOn;
       }
       map.triggerRepaint(); // the field accumulates + resolves this frame
     };
@@ -128,6 +175,21 @@ export default function MapStage({
           const field = new FieldLayer();
           map.addLayer(field);
           fieldRef.current = field;
+          // A backgrounded phone can lose the GL context; mapbox restores
+          // its own layers but never re-onAdds custom ones — without this
+          // the field stays dead forever after restore (review finding).
+          map.on("webglcontextrestored", () => {
+            // Re-add in place (below the labels), not on top of the stack.
+            const layers = map.getStyle()?.layers ?? [];
+            const at = layers.findIndex((l) => l.id === "emotion-field");
+            const beforeId = at >= 0 && at + 1 < layers.length ? layers[at + 1].id : undefined;
+            if (at >= 0) map.removeLayer("emotion-field");
+            const fresh = new FieldLayer();
+            fresh.fade = fieldRef.current?.fade ?? 1;
+            map.addLayer(fresh, beforeId);
+            fieldRef.current = fresh;
+            dataVersion.current = -1; // force the tick to re-feed the data
+          });
           // Lab-only hook so the screenshot/perf harness can set exact cameras.
           (window as unknown as { __warmthMap?: typeof map }).__warmthMap = map;
           loaded.current = true;
