@@ -10,7 +10,7 @@ An ambient, beautiful live map of how a city feels. Emotion is rendered as glowi
 
 ## Non-negotiables (the taste bar — never violate)
 1. **60fps, always.** If a change risks jank, flag it and propose a lighter approach.
-2. **Dark-first.** Near-black base (#0A0B0F). Color comes only from the emotional glow and small accents.
+2. **Dark-first at night; light paper by day.** Night is the near-black ink city (#0A0B0F). In daylight mode (the default; Eli's call, 2026-07-02) the map turns light like Apple Maps by day, and emotion renders as watercolor pigment instead of glow. Either way, color comes only from emotion and small accents.
 3. **Spring physics on all motion** (Framer Motion). Nothing linear or instant that the user sees move.
 4. **Never generic.** No default dashboards or stock component dumps. Every screen looks intentional and premium. Unsure of the design intent? Ask — don't guess.
 5. **The slider is sacred.** The emotion/intensity slider is the signature. Give it extra care and a design-reviewer pass on any change.
@@ -59,7 +59,7 @@ An ambient, beautiful live map of how a city feels. Emotion is rendered as glowi
 - Migrations only via `supabase migration new ...`.
 
 ## Design tokens (source of truth: /lib/theme.ts once built)
-Emotion hues (final five): Joy #FFC24B · Energy #FF7A29 · Love #FF6FB5 · Gratitude #4CAF72 · Calm #35D0BA.
+Emotion hues (final five, softened 2026-07-02): Joy #F0C275 · Energy #F08D5C · Love #E693B3 · Gratitude #B19DE6 (soft lilac) · Calm #6FCBB8.
 Motion: snappy = spring(stiffness 400, damping 32); settle = spring(stiffness 140, damping 22); glow pulse ≈ 2.5s ease-in-out loop.
 Map: hue = emotion, brightness = intensity, pulse = density.
 

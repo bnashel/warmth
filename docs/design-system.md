@@ -9,14 +9,15 @@ in prose. If they disagree, `lib/theme.ts` wins.
 - **60fps, always.** If a change risks jank, flag it and propose a lighter approach.
 
 ## Emotion hues
-The final five (2026-07-02: awe removed; reflective became gratitude).
+The final five (2026-07-02: awe removed; reflective became gratitude;
+palette softened away from neon the same day).
 | Emotion | Hue |
 | --- | --- |
-| Joy | `#FFC24B` |
-| Energy | `#FF7A29` |
-| Love | `#FF6FB5` |
-| Gratitude | `#4CAF72` |
-| Calm | `#35D0BA` |
+| Joy | `#F0C275` warm gold |
+| Energy | `#F08D5C` soft coral |
+| Love | `#E693B3` dusty pink |
+| Gratitude | `#B19DE6` soft lilac |
+| Calm | `#6FCBB8` seafoam |
 
 ## Motion (Framer Motion)
 Nothing the user sees move is linear or instant — always spring.

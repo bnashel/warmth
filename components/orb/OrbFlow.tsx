@@ -107,10 +107,13 @@ type Phase = "idle" | "wheel" | "bar" | "bursting";
  */
 export function OrbFlow({
   hintWord,
+  hintColor = "#FFFFFF",
   gestureDepth,
   onCommit,
 }: {
   hintWord: string;
+  /** Hint ink — the screen passes graphite when the map is paper (day). */
+  hintColor?: string;
   gestureDepth: MotionValue<number>;
   /**
    * Fires the instant a feeling is committed (start of the burst, not the
@@ -672,7 +675,7 @@ export function OrbFlow({
             left: "50%",
             x: "-50%",
             fontSize: TEXT.hint.sizePx,
-            color: "#FFFFFF",
+            color: hintColor,
             letterSpacing: "0.04em",
             whiteSpace: "nowrap",
             pointerEvents: "none",

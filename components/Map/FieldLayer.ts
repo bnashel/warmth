@@ -19,7 +19,7 @@
 import mapboxgl, { type CustomLayerInterface, type Map as MapboxMap } from "mapbox-gl";
 import { EMOTION_HUES, EMOTIONS } from "@/lib/theme";
 import type { LivePoint } from "@/lib/momentsStore";
-import { FIELD } from "./tune";
+import { FIELD, SHAPES } from "./tune";
 
 /* ---------------- OKLab (Björn Ottosson, via components/orb/oklch.ts) --- */
 
@@ -122,7 +122,35 @@ uniform float uTimeSec;
 uniform float uBreathPeriod;
 uniform float uBreathAmp;
 uniform int uMode;
+// THE SHAPE OF FEELING (Look panel): domain-warp the field lookup so blooms
+// stop being circles. x=warp amplitude (uv), y=noise scale, z=drift speed,
+// w=streak (anisotropy along the flow axis).
+uniform vec4 uShape;
+uniform float uBand;   // aurora curtains: brightness modulation (0 = off)
+uniform float uAspect; // target width / height, so the flow isn't squashed
 out vec4 fragColor;
+
+// Value-noise fbm, 3 octaves — cheap enough for a half-res target.
+float vhash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(vhash(i), vhash(i + vec2(1, 0)), u.x),
+             mix(vhash(i + vec2(0, 1)), vhash(i + vec2(1, 1)), u.x), u.y);
+}
+float fbm(vec2 p) {
+  float a = 0.5;
+  float s = 0.0;
+  for (int i = 0; i < 3; i++) {
+    s += a * vnoise(p);
+    p = p * 2.03 + 17.7;
+    a *= 0.5;
+  }
+  return s;
+}
 
 vec3 oklabToLinear(vec3 lab) {
   float l_ = lab.x + 0.3963377774 * lab.y + 0.2158037573 * lab.z;
@@ -144,8 +172,26 @@ vec3 linearToSrgb(vec3 c) {
 }
 
 void main() {
-  vec4 f0 = texture(uField0, vUv);
-  vec2 f1 = texture(uField1, vUv).xy;
+  // Free-flowing edges: pull each lookup through slowly-drifting fbm warp.
+  // warpAmp 0 (bloom mode) short-circuits to the original circles.
+  vec2 uv = vUv;
+  if (uShape.x > 0.0) {
+    vec2 q = vec2(vUv.x * uAspect, vUv.y) * uShape.y;
+    // The flow axis: a fixed gentle diagonal, like prevailing wind.
+    vec2 axis = normalize(vec2(1.0, 0.35));
+    // Streak stretches the noise domain along the axis (ribbons), and the
+    // drift crawls the domain over time so the weather is alive, not stuck.
+    vec2 along = axis * dot(q, axis);
+    q = mix(q, along, uShape.w * 0.72);
+    q += uTimeSec * uShape.z * vec2(1.0, -0.6);
+    vec2 w = vec2(fbm(q), fbm(q + 31.416)) - 0.5;
+    // Warp mostly across the axis when streaked — edges feather sideways.
+    vec2 across = vec2(-axis.y, axis.x);
+    vec2 wStreak = across * dot(w, across) * 1.8;
+    uv += mix(w, wStreak, uShape.w) * uShape.x;
+  }
+  vec4 f0 = texture(uField0, uv);
+  vec2 f1 = texture(uField1, uv).xy;
   float I[${NE}];
   ${["f0.x", "f0.y", "f0.z", "f0.w", "f1.x", "f1.y", "f1.z", "f1.w"]
     .slice(0, NE)
@@ -189,9 +235,32 @@ void main() {
   float phase = fract(lab.y * 3.7 + lab.z * 5.3);
   b *= 1.0 + uBreathAmp * sin(6.2831853 * (uTimeSec / uBreathPeriod + phase));
 
+  // Aurora curtains: slow luminous banding across the flow axis. Modulation
+  // only — never to zero, so the field's coverage is untouched.
+  if (uBand > 0.0) {
+    vec2 axis = normalize(vec2(1.0, 0.35));
+    float across = dot(vec2(uv.x * uAspect, uv.y), vec2(-axis.y, axis.x));
+    float curtain = fbm(vec2(across * 9.0, uTimeSec * 0.05));
+    b *= 1.0 + uBand * (curtain - 0.5) * 1.6;
+  }
+
   // Dither so the long tail never bands on 8-bit output.
   float n = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
   b += (n - 0.5) * 0.004;
+
+  // uMode 2 — WATERCOLOR PIGMENT (the light "paper" day): instead of adding
+  // light, stain the paper. Caller blends ZERO/SRC_COLOR (true multiply);
+  // uGain carries paperness × fade as stain strength. Pigment is the same
+  // OKLab hue, dropped to pigment depth so it reads saturated on white.
+  if (uMode == 2) {
+    // Pigment depth is capped on purpose: heavily-pooled spots must read as
+    // deeper watercolor, never a bruise — but the wash must still carry the
+    // city's feeling at a glance (design-review: stain to .58, pigment L .64).
+    vec3 pig = linearToSrgb(oklabToLinear(vec3(0.64, lab.y * 1.35, lab.z * 1.35)));
+    float stain = min(0.58, max(b, 0.0) * 0.8) * uGain;
+    fragColor = vec4(mix(vec3(1.0), pig, stain), 1.0);
+    return;
+  }
 
   vec3 color = linearToSrgb(oklabToLinear(lab)) * max(b, 0.0) * uGain;
   // uMode 0: alpha 0 under mapbox's premultiplied blend == pure additive.
@@ -236,6 +305,16 @@ export class FieldLayer implements CustomLayerInterface {
   /** Public↔private crossfade (0..1): rides the gain uniforms, and at 0 the
    *  whole field (accumulation included) costs nothing. Set from MapStage. */
   fade = 1;
+
+  /** THE SHAPE OF FEELING (Look panel) — plain uniform values; switching
+   *  modes is free. Set from MapStage (source of truth: lib/prefs). */
+  look: { warpAmp: number; scale: number; drift: number; streak: number; band: number } = {
+    ...SHAPES.watercolor,
+  };
+
+  /** 0 = dark ink night (glow), 1 = light paper day (pigment). Set from
+   *  MapStage on every solar apply; crossfades the two ways of painting. */
+  paper = 0;
 
   private map: MapboxMap | null = null;
   private gl: WebGL2RenderingContext | null = null;
@@ -436,7 +515,10 @@ export class FieldLayer implements CustomLayerInterface {
     if (!this.resolveProgram || this.count === 0 || this.fade < 0.01) return;
     if (this.epoch === 0) this.epoch = performance.now();
     const periodSec = FIELD.breath.periodMs / 1000;
-    const timeSec = ((performance.now() - this.epoch) / 1000) % periodSec;
+    // Continuous, NOT modulo the breath period: the flow warp and aurora
+    // curtains drift on this clock, and a wrap would visibly snap them.
+    // sin() keeps the breath periodic regardless.
+    const timeSec = (performance.now() - this.epoch) / 1000;
 
     gl.useProgram(this.resolveProgram);
     gl.bindVertexArray(this.resolveVao);
@@ -461,22 +543,41 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform1f(u("uTimeSec"), timeSec);
     gl.uniform1f(u("uBreathPeriod"), periodSec);
     gl.uniform1f(u("uBreathAmp"), FIELD.breath.amp);
+    gl.uniform4f(u("uShape"), this.look.warpAmp, this.look.scale, this.look.drift, this.look.streak);
+    gl.uniform1f(u("uBand"), this.look.band);
+    gl.uniform1f(u("uAspect"), this.texW / Math.max(1, this.texH));
     gl.enable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
 
+    // By day (paper → 1) the glow passes hand off to the pigment pass:
+    // light added to a light map is invisible, so feeling stains instead.
+    const night = 1 - this.paper;
+
+    // Pass 0 — watercolor pigment onto the paper (true multiply).
+    if (this.paper > 0.01) {
+      gl.uniform1i(u("uMode"), 2);
+      gl.uniform1f(u("uGain"), this.paper * this.fade);
+      gl.blendFunc(gl.ZERO, gl.SRC_COLOR);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
     // Pass 1 — streetlight: field × base map (dst is the pure ink city).
-    if (FIELD.streetlightGain > 0) {
+    // Gated past half-paper: brightening a light ground is invisible, so
+    // twilight never pays for three full passes (design-review flag).
+    if (FIELD.streetlightGain > 0 && night > 0.01 && this.paper <= 0.5) {
       gl.uniform1i(u("uMode"), 1);
-      gl.uniform1f(u("uGain"), FIELD.streetlightGain * this.fade);
+      gl.uniform1f(u("uGain"), FIELD.streetlightGain * this.fade * night);
       gl.blendFunc(gl.DST_COLOR, gl.ONE);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
 
     // Pass 2 — the field itself, additive (alpha 0 under premultiplied).
-    gl.uniform1i(u("uMode"), 0);
-    gl.uniform1f(u("uGain"), FIELD.gain * this.fade);
-    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if (night > 0.01) {
+      gl.uniform1i(u("uMode"), 0);
+      gl.uniform1f(u("uGain"), FIELD.gain * this.fade * night);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
 
     gl.bindVertexArray(null);
   }

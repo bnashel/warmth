@@ -7,9 +7,10 @@ import type { MapRef } from "react-map-gl/mapbox";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { MAPBOX_TOKEN } from "@/lib/map";
 import { momentsStore } from "@/lib/momentsStore";
-import { CAMERA, CHOREO, INK, MOTION, PERF, SOLAR } from "./tune";
+import { CAMERA, CHOREO, INK, MOTION, PERF, SHAPES, SOLAR } from "./tune";
 import { buildStyle } from "./styles";
-import { applySolarInk } from "./solar";
+import { applySolarInk, solarPaperWeight } from "./solar";
+import { getPrefs, onPrefsChange } from "@/lib/prefs";
 import { FieldLayer } from "./FieldLayer";
 import { buildLabelLayers, loadLabels } from "./neighborhoods";
 import { buildTrailLayers } from "@/components/Trail/glow";
@@ -56,6 +57,9 @@ export default function MapStage({
   const dataVersion = useRef(-1);
   const loaded = useRef(false);
   const [rotated, setRotated] = useState(false);
+  // 0 = ink night, 1 = paper day (daylight mode) — refreshed on solar apply;
+  // the field trades glow for pigment, labels trade white for graphite.
+  const paperRef = useRef(0);
   // The public↔private crossfade lives OUTSIDE React: a target the prop
   // sets, a mix the rAF loop settles exponentially — no re-render, no jank.
   const initialMix = view === "private" ? 1 : 0;
@@ -94,13 +98,24 @@ export default function MapStage({
     const apply = () => {
       if (document.visibilityState !== "visible") return;
       const map = mapRef.current?.getMap();
-      if (map && loaded.current) applySolarInk(map);
+      if (!map || !loaded.current) return;
+      applySolarInk(map);
+      paperRef.current = solarPaperWeight();
+      if (fieldRef.current) fieldRef.current.paper = paperRef.current;
+      labelCache.current = null; // re-ink the labels for the new paperness
     };
     const iv = setInterval(apply, SOLAR.updateMs);
     document.addEventListener("visibilitychange", apply);
+    // Look panel: shape lands on the field, light re-inks the base — both
+    // instant, both riding their usual eases.
+    const offPrefs = onPrefsChange((p) => {
+      if (fieldRef.current) fieldRef.current.look = { ...SHAPES[p.shape] };
+      apply();
+    });
     return () => {
       clearInterval(iv);
       document.removeEventListener("visibilitychange", apply);
+      offPrefs();
     };
   }, []);
 
@@ -143,7 +158,10 @@ export default function MapStage({
       const labelsStale =
         !labelCache.current || Math.abs(labelCache.current.zoom - zoom) > 0.02;
       if (labelsStale) {
-        labelCache.current = { zoom, layers: buildLabelLayers(labelData.current, zoom) };
+        labelCache.current = {
+          zoom,
+          layers: buildLabelLayers(labelData.current, zoom, paperRef.current),
+        };
       }
       // Trail dots breathe via a time uniform, so while visible they re-set
       // props every push (cheap: deck diffs, data identity is stable).
@@ -191,10 +209,13 @@ export default function MapStage({
           // THE FIELD — added after the base layers; deck pins its label
           // groups above it, so names stay readable over the light.
           const field = new FieldLayer();
+          field.look = { ...SHAPES[getPrefs().shape] };
           map.addLayer(field);
           fieldRef.current = field;
           // First coat of solar ink (real sun, or ?solarHour= lab preview).
           applySolarInk(map);
+          paperRef.current = solarPaperWeight();
+          field.paper = paperRef.current;
           // A backgrounded phone can lose the GL context; mapbox restores
           // its own layers but never re-onAdds custom ones — without this
           // the field stays dead forever after restore (review finding).
@@ -206,6 +227,7 @@ export default function MapStage({
             if (at >= 0) map.removeLayer("emotion-field");
             const fresh = new FieldLayer();
             fresh.fade = fieldRef.current?.fade ?? 1;
+            fresh.look = { ...SHAPES[getPrefs().shape] };
             map.addLayer(fresh, beforeId);
             fieldRef.current = fresh;
             dataVersion.current = -1; // force the tick to re-feed the data

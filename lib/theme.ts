@@ -12,13 +12,15 @@ export const BASE = "#0A0B0F" as const;
  *  History: awe removed (no successor); reflective became gratitude. */
 export type Emotion = "joy" | "energy" | "love" | "gratitude" | "calm";
 
-/** Emotion → hue. On the map: hue = emotion. Object order = slider order. */
+/** Emotion → hue. On the map: hue = emotion. Object order = slider order.
+ *  Softened away from neon (Eli, 2026-07-02): rich but gentle — near-equal
+ *  lightness, moderated chroma, no electric edges. */
 export const EMOTION_HUES: Record<Emotion, string> = {
-  joy: "#FFC24B",
-  energy: "#FF7A29",
-  love: "#FF6FB5",
-  gratitude: "#4CAF72", // comforting forest green (Eli's spec)
-  calm: "#35D0BA",
+  joy: "#F0C275", // warm gold
+  energy: "#F08D5C", // soft coral
+  love: "#E693B3", // dusty pink
+  gratitude: "#B19DE6", // soft lilac (Eli's pick; chroma nudged per review)
+  calm: "#6FCBB8", // seafoam (chroma nudged per review)
 };
 
 export const EMOTIONS = Object.keys(EMOTION_HUES) as Emotion[];

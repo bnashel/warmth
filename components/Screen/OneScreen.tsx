@@ -15,6 +15,9 @@ import MapStage from "@/components/Map/MapStage";
 import { ambientSeedMoments } from "@/components/Map/ambientSeed";
 import { CAMERA, CHOREO, MOTION } from "@/components/Map/tune";
 import { OrbFlow } from "@/components/orb/OrbFlow";
+import { solarPaperWeight } from "@/components/Map/solar";
+import { onPrefsChange } from "@/lib/prefs";
+import { LookPanel } from "./LookPanel";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
 
@@ -61,6 +64,29 @@ export default function OneScreen() {
   // The trail rehydrates from localStorage when the store module loads —
   // by first render the diary already knows if it has entries.
   const [hasOwn, setHasOwn] = useState(() => momentsStore.ownPoints.length > 0);
+  // Paperness of the map (0 ink night → 1 light day): every loose whisper of
+  // text follows it, whisper-white on ink, graphite on paper — otherwise the
+  // captions vanish at noon (design-review blocker). Starts 0 (SSR-stable),
+  // lands on the real sun in the effect below.
+  const [paper, setPaper] = useState(0);
+  useEffect(() => {
+    const update = () => setPaper(solarPaperWeight());
+    update();
+    const iv = window.setInterval(update, 60_000);
+    const offPrefs = onPrefsChange(update);
+    document.addEventListener("visibilitychange", update);
+    return () => {
+      window.clearInterval(iv);
+      offPrefs();
+      document.removeEventListener("visibilitychange", update);
+    };
+  }, []);
+  /** Loose-text ink for the current paperness (alpha lifts a touch on paper —
+   *  dark-on-light needs more presence for the same whisper). */
+  const paperText = (alpha: number) => {
+    const c = (a: number, b: number) => Math.round(a + (b - a) * paper);
+    return `rgba(${c(233, 52)},${c(236, 58)},${c(244, 70)},${Math.min(1, alpha * (1 + 0.5 * paper))})`;
+  };
 
   // Sweep lab data, then lay in the ambient city — the public map opens
   // onto standing feeling (clearly-labeled seed until realtime replaces it).
@@ -200,6 +226,9 @@ export default function OneScreen() {
       )}
       <Atmosphere />
 
+      {/* The Look panel — shape of feeling + how hard the sun shows. */}
+      <LookPanel />
+
       {/* PUBLIC / PRIVATE — the two ways of seeing, named plainly. The pill
           slides on a spring; a whisper under it says what each view means. */}
       <div
@@ -279,7 +308,7 @@ export default function OneScreen() {
               margin: 0,
               fontSize: 11,
               letterSpacing: "0.05em",
-              color: "rgba(233,236,244,0.9)",
+              color: paperText(0.9),
               pointerEvents: "none",
             }}
           >
@@ -305,7 +334,7 @@ export default function OneScreen() {
               fontSize: 13,
               lineHeight: 1.6,
               letterSpacing: "0.04em",
-              color: "rgba(233,236,244,0.85)",
+              color: paperText(0.85),
               pointerEvents: "none",
               zIndex: 10,
             }}
@@ -337,7 +366,12 @@ export default function OneScreen() {
           WebkitTouchCallout: "none",
         }}
       >
-        <OrbFlow hintWord="hold" gestureDepth={gestureDepth} onCommit={handleCommit} />
+        <OrbFlow
+          hintWord="hold"
+          hintColor={paperText(1)}
+          gestureDepth={gestureDepth}
+          onCommit={handleCommit}
+        />
       </div>
 
       {/* One-time whisper: where a feeling lands without location. */}
@@ -356,7 +390,7 @@ export default function OneScreen() {
               textAlign: "center",
               fontSize: 12,
               letterSpacing: "0.04em",
-              color: "rgba(233,236,244,0.8)",
+              color: paperText(0.8),
               pointerEvents: "none",
               zIndex: 10,
             }}

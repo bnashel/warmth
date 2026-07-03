@@ -162,8 +162,9 @@ export const FIELD = {
    *  Higher p = dominant emotion snaps harder, narrower weather fronts. */
   dominance: 5.0,
   /** Minimum front chroma as a fraction of the anchors' own chroma —
-   *  fronts rotate hue but can never wash to gray (design-review fix). */
-  chromaFloor: 0.62,
+   *  fronts rotate hue but can never wash to gray. Raised with the softened
+   *  palette so the quiet hues (lilac, seafoam) never read as gray fog. */
+  chromaFloor: 0.72,
   /** Shared OKLab lightness for all six anchors: equal feeling = equal
    *  light (raw brand hues span L .62–.87). */
   anchorL: 0.76,
@@ -261,13 +262,34 @@ export const ATMOSPHERE = {
 } as const;
 
 /* ------------------------------------------------------------------ */
-/* Solar drift — the ink follows the real sun. Always dark; the sun    */
-/* only changes the TEMPERATURE of the ink: cooler and a hair lifted   */
-/* at midday, a faint ember cast at dawn/dusk, deepest black at night. */
-/* Night is INK itself, untouched.                                     */
+/* THE SHAPE OF FEELING — how the field draws emotion (Look panel).    */
+/* All four are the same shader; a mode is just uniform values, so     */
+/* switching is instant and free. Units: warpAmp is a fraction of the  */
+/* screen the edges may wander; scale is noise cells across the width; */
+/* drift is how fast the flow crawls; streak stretches the flow along  */
+/* one axis (0 = round, 1 = fully ribboned); band modulates brightness */
+/* into aurora curtains (0 = off).                                     */
+/* ------------------------------------------------------------------ */
+export const SHAPES = {
+  /** The original: soft circular blooms, edges untouched. */
+  bloom: { warpAmp: 0, scale: 8, drift: 0, streak: 0, band: 0 },
+  /** Ink on wet paper: blotted, seeping edges; barely-moving weather. */
+  watercolor: { warpAmp: 0.06, scale: 10, drift: 0.01, streak: 0, band: 0 },
+  /** Drops dispersing in water: streakier, curling, visibly alive. */
+  ink: { warpAmp: 0.095, scale: 14, drift: 0.05, streak: 0.5, band: 0 },
+  /** Northern lights: feeling stretched into flowing ribbons. */
+  aurora: { warpAmp: 0.09, scale: 6.5, drift: 0.02, streak: 0.9, band: 0.5 },
+} as const;
+
+/* ------------------------------------------------------------------ */
+/* Solar drift — the ink follows the real sun. Three intensities       */
+/* (Look panel): subtle keeps the original whisper; bold is unmissable */
+/* at a glance; sky lets the map take on real sky color (the one mode  */
+/* allowed to bend the ink-only law — Eli's call, 2026-07-02).         */
+/* Night is INK itself in every mode, untouched.                       */
 /* ------------------------------------------------------------------ */
 export const SOLAR = {
-  /** Master dial: 0 kills the effect entirely, 1 = full (still subtle). */
+  /** Master dial: 0 kills the effect entirely, 1 = full. */
   strength: 1,
   /** Sun elevation (deg) across which night becomes day. Starts at civil
    *  twilight (−6°), lands at mid-morning sun (10°) — the blend spans the
@@ -280,23 +302,33 @@ export const SOLAR = {
    *  a stale backgrounded tab never visibly steps. */
   updateMs: 60_000,
   transitionMs: 1_500,
-  /** MIDDAY — the city under a high sun: cooler, a hair lifted. Still
-   *  ink; every value obeys the brightness law. */
-  day: {
-    bg: "#0B0D13",
-    water: "#070910",
-    park: "#0E1118",
-    building: "#131724",
-    road: "#CDD4E4",
-  },
-  /** DAWN/DUSK — warmth low on the horizon, a faint ember cast. The roads
-   *  carry it: land shifts are whispers, the hairlines visibly warm. */
-  ember: {
-    bg: "#0D0A0C",
-    water: "#090607",
-    park: "#110E0D",
-    building: "#191216",
-    road: "#DFCFB2",
+  /** Paper (glow→pigment handoff) rides a LATER ramp than the base ink:
+   *  the glow holds full strength through the ember twilight and pigment
+   *  takes over only once the ground is genuinely light (design-review). */
+  paperRamp: { from: 2, to: 8 },
+  /** Per-mode palettes: what midday and the dawn/dusk ember look like.
+   *  Night is always INK. */
+  modes: {
+    /** The whisper — the original design-reviewed pair. */
+    subtle: {
+      day: { bg: "#0B0D13", water: "#070910", park: "#0E1118", building: "#131724", road: "#CDD4E4" },
+      ember: { bg: "#0D0A0C", water: "#090607", park: "#110E0D", building: "#191216", road: "#DFCFB2" },
+    },
+    /** DAYLIGHT (key kept as "bold" so saved prefs survive): true Apple-Maps
+     *  day/night — by day the city is light paper, streets white, water a
+     *  soft cool gray-blue; twilight passes through a warm mid-dark ember on
+     *  its way to the ink night. Emotion renders as watercolor pigment on
+     *  the paper (FieldLayer uMode 2), not glow (Eli's call, 2026-07-02). */
+    bold: {
+      day: { bg: "#E7E9EE", water: "#C9D4E0", park: "#DCE3DB", building: "#D8DBE3", road: "#FBFCFE" },
+      ember: { bg: "#3A2C26", water: "#241A16", park: "#40332B", building: "#4A3A30", road: "#E8C9A4" },
+    },
+    /** Cinematic sky: the map borrows real sky color — deep blue noon,
+     *  burning rose-amber horizon. The one mode that bends ink-only. */
+    sky: {
+      day: { bg: "#101828", water: "#091020", park: "#152034", building: "#1D2A45", road: "#C9D9F4" },
+      ember: { bg: "#1F1010", water: "#120807", park: "#261611", building: "#332017", road: "#F6B27E" },
+    },
   },
 } as const;
 

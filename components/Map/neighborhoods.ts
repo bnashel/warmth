@@ -108,7 +108,15 @@ function globalOpacity(zoom: number): number {
  * no letter-spacing; thin spaces between characters carry the tracking.) */
 const track = (s: string) => s.split("").join(" ");
 
-function buildBoroughLayer(zoom: number) {
+/** Label ink: whisper-white on the night city, graphite on the paper day.
+ *  Alpha rises a touch on paper — dark-on-light needs more presence for the
+ *  same whisper. */
+function labelColor(alpha: number, paper: number): [number, number, number, number] {
+  const mix = (a: number, b: number) => Math.round(a + (b - a) * paper);
+  return [mix(233, 52), mix(236, 58), mix(244, 70), mix(alpha, Math.min(255, alpha * 1.5))];
+}
+
+function buildBoroughLayer(zoom: number, paper: number) {
   const { from, to } = LABELS.boroughFadeOut;
   const t = Math.min(1, Math.max(0, (zoom - from) / (to - from)));
   const opacity = 1 - t * t * (3 - 2 * t);
@@ -120,7 +128,7 @@ function buildBoroughLayer(zoom: number) {
     getPosition: (d) => d.anchor,
     getText: (d) => track(d.name),
     getSize: LABELS.boroughSizePx,
-    getColor: [233, 236, 244, LABELS.boroughAlpha],
+    getColor: labelColor(LABELS.boroughAlpha, paper),
     fontFamily: "Inter, system-ui, sans-serif",
     fontWeight: 500,
     fontSettings: { sdf: true, smoothing: 0.32 },
@@ -153,7 +161,7 @@ function tiersOf(data: LabelDatum[]) {
 /** Borough layer + three neighborhood TextLayers (one per tier), opacity
  *  recomputed per zoom — the caller feeds these into overlay.setProps on map
  *  move (no React churn). */
-export function buildLabelLayers(data: LabelDatum[], zoom: number) {
+export function buildLabelLayers(data: LabelDatum[], zoom: number, paper = 0) {
   const g = globalOpacity(zoom);
   const tierData = tiersOf(data);
   const tiers = [0, 1, 2].map((tier) => {
@@ -166,7 +174,7 @@ export function buildLabelLayers(data: LabelDatum[], zoom: number) {
       getPosition: (d) => d.anchor,
       getText: (d) => (LABELS.uppercase ? d.name.toUpperCase() : d.name),
       getSize: LABELS.sizePx[tier],
-      getColor: [233, 236, 244, LABELS.alpha[tier]],
+      getColor: labelColor(LABELS.alpha[tier], paper),
       fontFamily: "Inter, system-ui, sans-serif",
       fontWeight: 500,
       fontSettings: { sdf: true, smoothing: 0.32 },
@@ -176,5 +184,5 @@ export function buildLabelLayers(data: LabelDatum[], zoom: number) {
       parameters: { depthWriteEnabled: false },
     });
   });
-  return [buildBoroughLayer(zoom), ...tiers];
+  return [buildBoroughLayer(zoom, paper), ...tiers];
 }
