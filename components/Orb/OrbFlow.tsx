@@ -133,9 +133,10 @@ export function OrbFlow({
   const [burst, setBurst] = useState<{ seed: number; rgb: string; scale: number } | null>(
     null,
   );
-  const [hintDead, setHintDead] = useState(false);
   const [getHintFlag, setHintFlag] = useSessionFlag("warmth-lab-committed");
-  useEffect(() => setHintDead(getHintFlag()), [getHintFlag]);
+  // Lazy init reads the flag once at first render (the orb is client-only —
+  // no SSR mismatch, no post-mount setState cascade).
+  const [hintDead, setHintDead] = useState(getHintFlag);
 
   /* ---------- continuous motion values ---------- */
   const baseScale = useMotionValue(1); // orb size: pressed / continuous with v
