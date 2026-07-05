@@ -30,6 +30,7 @@ layout(std140) uniform glowUniforms {
   float peakBase;
   float peakPerIntensity;
   float gain;
+  float pigment;
 } glow;
 `,
   uniformTypes: {
@@ -44,6 +45,7 @@ layout(std140) uniform glowUniforms {
     peakBase: "f32" as const,
     peakPerIntensity: "f32" as const,
     gain: "f32" as const,
+    pigment: "f32" as const,
   },
 };
 
@@ -88,12 +90,28 @@ void main(void) {
   // would floor every point at ~32% and arrivals/fades would pop.
   lum *= smoothstep(0.0, 0.12, w);
 
-  // The filament: the very center whitens toward hot.
-  vec3 color = mix(vFillColor.rgb, vec3(1.0), glow.coreWhiteness * core);
-
-  // Ordered-noise dither so the long tail never bands on 8-bit targets.
+  // Ordered-noise dither on the luminance BEFORE the path split, so both
+  // the additive tail and the pigment stain tail stay band-free on 8-bit.
   float n = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
   lum += (n - 0.5) * 0.004;
+
+  // PIGMENT (the paper day): light added to a light map is invisible, so
+  // the dot STAINS instead — the caller blends with op MIN (deepest mark
+  // wins), where white means "untouched paper" and overlapping commits
+  // can only deepen to the darkest single stain, never stack toward black.
+  // Hue is gamma-deepened so it reads saturated on paper, never neon; lum
+  // (hot core included) sets the stain depth, capped so a fresh commit is
+  // a deep watercolor mark, never a bruise.
+  if (glow.pigment > 0.0) {
+    vec3 pig = vFillColor.rgb * vFillColor.rgb;
+    float stain = min(0.78, max(lum, 0.0) * glow.gain) * glow.pigment;
+    fragColor = vec4(mix(vec3(1.0), pig, stain), 1.0);
+    DECKGL_FILTER_COLOR(fragColor, geometry);
+    return;
+  }
+
+  // The filament: the very center whitens toward hot.
+  vec3 color = mix(vFillColor.rgb, vec3(1.0), glow.coreWhiteness * core);
 
   // Additive light: color scaled by luminance; alpha adds nothing.
   fragColor = vec4(color * max(lum, 0.0) * glow.gain, 0.0);
@@ -115,6 +133,9 @@ type LightParams = {
   peakBase: number;
   peakPerIntensity: number;
   gain: number;
+  /** 0 = additive light (night); >0 = watercolor stain on the paper day
+   *  (pair with PIGMENT_STAIN parameters — the value is the stain weight). */
+  pigment: number;
 };
 
 type EmotionGlowLayerProps = ScatterplotLayerProps<GlowDatum> & {
@@ -156,6 +177,7 @@ export class EmotionGlowLayer extends ScatterplotLayer<
       peakBase: GLOW.peakBase,
       peakPerIntensity: GLOW.peakPerIntensity,
       gain: 1,
+      pigment: 0,
       ...light,
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -173,6 +195,7 @@ export class EmotionGlowLayer extends ScatterplotLayer<
         peakBase: p.peakBase,
         peakPerIntensity: p.peakPerIntensity,
         gain: p.gain,
+        pigment: p.pigment,
       },
     });
     super.draw(params as never);
@@ -186,6 +209,23 @@ export const ADDITIVE_LIGHT = {
   blendColorSrcFactor: "one",
   blendColorDstFactor: "one",
   blendAlphaOperation: "add",
+  blendAlphaSrcFactor: "one",
+  blendAlphaDstFactor: "one",
+  depthWriteEnabled: false,
+  depthCompare: "always",
+} as const;
+
+/** Pigment state (the paper day): DEEPEST MARK WINS (blend-op min, the
+ *  factors fixed at one as min/max requires). White output leaves the paper
+ *  untouched; overlapping commits deepen to the darkest single stain —
+ *  a diary of repeat feelings at home reads as one deep watercolor mark,
+ *  never a multiplied-to-black bruise (review finding). */
+export const PIGMENT_STAIN = {
+  blend: true,
+  blendColorOperation: "min",
+  blendColorSrcFactor: "one",
+  blendColorDstFactor: "one",
+  blendAlphaOperation: "min",
   blendAlphaSrcFactor: "one",
   blendAlphaDstFactor: "one",
   depthWriteEnabled: false,

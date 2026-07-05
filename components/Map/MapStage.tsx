@@ -129,8 +129,10 @@ export default function MapStage({
     const tick = () => {
       raf = requestAnimationFrame(tick);
       const map = mapRef.current?.getMap();
+      // field may be null (compile failure degrades to a city without
+      // weather) — the trail, labels, and repaints must keep breathing.
       const field = fieldRef.current;
-      if (!map || !field || !loaded.current) return;
+      if (!map || !loaded.current) return;
       const now = performance.now();
       const dt = lastFrame ? Math.min(50, now - lastFrame) : 16;
       lastFrame = now;
@@ -143,14 +145,14 @@ export default function MapStage({
         viewMix.current += (target - viewMix.current) * (1 - Math.exp(-dt / CHOREO.viewFade.tauMs));
         if (Math.abs(viewMix.current - target) < 0.004) viewMix.current = target;
       }
-      field.fade = 1 - viewMix.current;
+      if (field) field.fade = 1 - viewMix.current;
       const trailOn = viewMix.current > 0.01;
 
       // Rest-throttle — bypassed while moving, blooming, or crossfading.
       if (!map.isMoving() && !arriving && !fading && now - lastPush < PERF.restFrameMs) return;
       lastPush = now;
 
-      if (momentsStore.version !== dataVersion.current) {
+      if (field && momentsStore.version !== dataVersion.current) {
         dataVersion.current = momentsStore.version;
         field.setData(momentsStore.points);
       }
@@ -173,6 +175,7 @@ export default function MapStage({
               now / 1000,
               zoom,
               viewMix.current,
+              paperRef.current,
             )
           : [];
         // Trail first: labels stay readable above your dots.
@@ -208,14 +211,21 @@ export default function MapStage({
           map.scrollZoom.setWheelZoomRate(MOTION.wheelZoomRate);
           // THE FIELD — added after the base layers; deck pins its label
           // groups above it, so names stay readable over the light.
-          const field = new FieldLayer();
-          field.look = { ...SHAPES[getPrefs().shape] };
-          map.addLayer(field);
-          fieldRef.current = field;
+          // A shader-compile failure (seen once: driver returned a null
+          // info log) must degrade to a city without weather — it must
+          // never take the whole screen down (design-review finding).
+          try {
+            const field = new FieldLayer();
+            field.look = { ...SHAPES[getPrefs().shape] };
+            map.addLayer(field);
+            fieldRef.current = field;
+          } catch (err) {
+            console.error("warmth: field layer failed to start", err);
+          }
           // First coat of solar ink (real sun, or ?solarHour= lab preview).
           applySolarInk(map);
           paperRef.current = solarPaperWeight();
-          field.paper = paperRef.current;
+          if (fieldRef.current) fieldRef.current.paper = paperRef.current;
           // A backgrounded phone can lose the GL context; mapbox restores
           // its own layers but never re-onAdds custom ones — without this
           // the field stays dead forever after restore (review finding).
@@ -225,12 +235,17 @@ export default function MapStage({
             const at = layers.findIndex((l) => l.id === "emotion-field");
             const beforeId = at >= 0 && at + 1 < layers.length ? layers[at + 1].id : undefined;
             if (at >= 0) map.removeLayer("emotion-field");
-            const fresh = new FieldLayer();
-            fresh.fade = fieldRef.current?.fade ?? 1;
-            fresh.look = { ...SHAPES[getPrefs().shape] };
-            map.addLayer(fresh, beforeId);
-            fieldRef.current = fresh;
-            dataVersion.current = -1; // force the tick to re-feed the data
+            try {
+              const fresh = new FieldLayer();
+              fresh.fade = fieldRef.current?.fade ?? 1;
+              fresh.look = { ...SHAPES[getPrefs().shape] };
+              fresh.paper = paperRef.current; // day must survive the restore too
+              map.addLayer(fresh, beforeId);
+              fieldRef.current = fresh;
+              dataVersion.current = -1; // force the tick to re-feed the data
+            } catch (err) {
+              console.error("warmth: field layer failed to restore", err);
+            }
           });
           // Lab-only hook so the screenshot/perf harness can set exact cameras.
           (window as unknown as { __warmthMap?: typeof map }).__warmthMap = map;

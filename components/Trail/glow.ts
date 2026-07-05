@@ -7,6 +7,7 @@
  */
 import {
   ADDITIVE_LIGHT,
+  PIGMENT_STAIN,
   STREET_LIGHT,
   EmotionGlowLayer,
   type GlowDatum,
@@ -94,9 +95,12 @@ const getTrailRadius = (d: GlowDatum) =>
   TRAIL.baseRadiusPx + TRAIL.radiusPerIntensityPx * Math.min(1, Math.max(0, d.weight));
 
 /**
- * THE TRAIL (private view): your own moments as exact glowing dots.
- * `fade` is the public↔private crossfade (0 = hidden, 1 = fully private) —
- * it rides the gain uniform so the switch costs nothing but a uniform.
+ * THE TRAIL (private view): your own moments as exact marks on the city.
+ * `fade` is the public↔private crossfade (0 = hidden, 1 = fully private);
+ * `paper` is the solar day-weight (0 = ink night, 1 = light paper day).
+ * At night the dots are additive light; on paper — where added light is
+ * invisible — they hand off to watercolor pigment stains, the same trade
+ * the field makes (its uMode 2). Both ride uniforms: switching is free.
  */
 export function buildTrailLayers(
   data: LivePoint[],
@@ -104,26 +108,47 @@ export function buildTrailLayers(
   timeSec: number,
   zoom: number,
   fade: number,
+  paper = 0,
 ) {
   if (fade < 0.01 || data.length === 0) return [];
-  return [
-    new EmotionGlowLayer({
-      id: "trail-dots",
-      data,
-      getPosition,
-      getRadius: getTrailRadius,
-      getFillColor,
-      updateTriggers: { getRadius: version, getFillColor: version },
-      radiusUnits: "pixels" as const,
-      stroked: false,
-      filled: true,
-      antialiasing: false,
-      pickable: false,
-      timeSec,
-      radiusScale: Math.pow(TRAIL.zoomGrowth, zoom - 12),
-      radiusMaxPixels: TRAIL.maxRadiusPx,
-      light: { ...TRAIL.light, gain: TRAIL.gain * fade },
-      parameters: ADDITIVE_LIGHT,
-    }),
-  ];
+  const shared = {
+    data,
+    getPosition,
+    getRadius: getTrailRadius,
+    getFillColor,
+    updateTriggers: { getRadius: version, getFillColor: version },
+    radiusUnits: "pixels" as const,
+    stroked: false,
+    filled: true,
+    antialiasing: false,
+    pickable: false,
+    timeSec,
+    radiusScale: Math.pow(TRAIL.zoomGrowth, zoom - 12),
+    radiusMaxPixels: TRAIL.maxRadiusPx,
+  };
+  const night = 1 - paper;
+  const layers = [];
+  // Stains BEFORE glow (same pass order as the field): through twilight the
+  // glow must add on top of the stained paper, never be darkened by it.
+  if (paper > 0.01) {
+    layers.push(
+      new EmotionGlowLayer({
+        id: "trail-stains",
+        ...shared,
+        light: { ...TRAIL.light, gain: TRAIL.gain * fade, pigment: paper },
+        parameters: PIGMENT_STAIN,
+      }),
+    );
+  }
+  if (night > 0.01) {
+    layers.push(
+      new EmotionGlowLayer({
+        id: "trail-dots",
+        ...shared,
+        light: { ...TRAIL.light, gain: TRAIL.gain * fade * night },
+        parameters: ADDITIVE_LIGHT,
+      }),
+    );
+  }
+  return layers;
 }
