@@ -7,7 +7,7 @@ import {
   useReducedMotion,
   type MotionValue,
 } from "framer-motion";
-import { COLOR, ORB } from "@/lib/feel";
+import { COLOR, ORB } from "./feel";
 import { mixHexRgbString } from "./oklch";
 
 /**

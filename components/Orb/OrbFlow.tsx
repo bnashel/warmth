@@ -25,7 +25,7 @@ import {
   pulseAmpForStep,
   pulsePeriodForStep,
   scaleForStep,
-} from "@/lib/feel";
+} from "./feel";
 import { EMOTIONS, EMOTION_HUES, type Emotion } from "@/lib/theme";
 import {
   cancelTick,

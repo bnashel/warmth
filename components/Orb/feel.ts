@@ -1,5 +1,5 @@
 /**
- * lib/feel.ts — THE tuning surface for the orb lab.
+ * components/Orb/feel.ts — THE tuning surface for the orb.
  *
  * Every feel constant in /lab lives here and nowhere else. Each one is
  * commented with what it does to the FEEL when you raise or lower it, so a
@@ -11,7 +11,7 @@
  * along it to rate 1–10 → release to commit. Return to the orb's center to
  * cancel, any time, free.
  */
-import type { Emotion } from "./theme";
+import type { Emotion } from "@/lib/theme";
 
 /* ------------------------------------------------------------------ */
 /* The orb itself                                                      */

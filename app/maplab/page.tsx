@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { notFound } from "next/navigation";
 
 // Mapbox needs the DOM — client-only, no hydration flash (lab page rule).
-const MapLab = dynamic(() => import("@/components/Map/MapLab"), { ssr: false });
+const MapLab = dynamic(() => import("@/components/Lab/MapLab"), { ssr: false });
 
 export default function MapLabPage() {
   // The lab is a workshop, not a product surface: dev + flagged previews only.

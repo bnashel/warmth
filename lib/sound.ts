@@ -13,7 +13,7 @@
  * - Tick v2 is a mechanical DETENT (filtered click + tiny tonal body), not a
  *   sine beep; master gain raised — v1 was inaudible on phone speakers.
  */
-import { SOUND, tickHzForStep } from "./feel";
+import { SOUND, tickHzForStep } from "@/components/Orb/feel";
 import type { Emotion } from "./theme";
 
 let ctx: AudioContext | null = null;
