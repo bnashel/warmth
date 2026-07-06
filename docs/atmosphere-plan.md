@@ -139,3 +139,54 @@ on every visual, code-reviewer on the state/fetch logic.
    the "tests for logic" rule?
 3. Sound in the atmosphere (rain patter) — park it in later.md until the
    sound phase, or pull it forward?
+
+---
+
+# Atmosphere v2 — The Night Sky & The Glow
+
+*Proposed 2026-07-06 after Ben's field report ("something wrong with the
+weather"). Diagnosis: nothing is broken — that night the real sky was 100%
+overcast and our overcast-at-night expression is a ~26% field dim: too
+quiet to notice. Time-of-day reads because it has a huge palette swing;
+night weather barely whispers. v2 makes every weather state legible AND
+levels the glow up to professional-grade. Status: awaiting Ben's go.*
+
+## v2.a — Night legibility + REAL BLOOM (no installs; biggest impact)
+
+- **Every weather state gets a night language.** Overcast night: the city
+  glows the way real cities do under clouds — the ink lifts a breath
+  (sky-glow), the field dims and diffuses more, the breath slows. Clear
+  night: deepest black, crisper hairlines, sharper glow. Rain night:
+  stronger glisten + streaks. New bar for design review: every state must
+  be *identifiable at a glance*, night and noon, while staying elegant.
+- **Bloom** (dual-Kawase blur, 2–3 passes on the field's existing offscreen
+  target): bright feeling blooms real light into the city — halos, lens
+  glow, the "professional animation" look. This is shader craft in the
+  pipeline we already own; no library does this for Mapbox custom layers.
+
+## v2.b — The moon (one tiny install: `suncalc`)
+
+`suncalc` (~2 KB, zero dependencies, the standard celestial library) gives
+precise sun times AND moon position/phase. Buys: golden-hour precision,
+and **moonlight** — clear nights get a faint cool wash when the moon is
+up; a full-moon night reads brighter than a new-moon night. Needs Ben's
+dependency approval (this section is the ask).
+
+## v2.c — Living precipitation (no install)
+
+Instanced rain streaks / drifting snowflakes in our existing WebGL
+machinery: capped count, half-res aware, angled with the real wind, snow
+tumbling slow. The visible "it is raining IN the app" moment the current
+build lacks. Perf-budgeted like everything else (60 fps bar unchanged).
+
+## v2.d — Radar-real rain + shoreline glow reflections (later)
+
+RainViewer's free precipitation radar (an API, not a dependency) → rain
+falls WHERE it is actually raining; cells drift across boroughs. Plus the
+art-pass reflections: emotion glow bleeding along shorelines at night.
+
+## Explicitly not doing
+
+A second render engine (three.js / PixiJS overlay) — fights Mapbox for
+the GPU, costs fill-rate on phones, and everything above is achievable in
+the shaders we already own. Recommendation: shader craft over frameworks.
