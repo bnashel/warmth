@@ -25,17 +25,28 @@ const SERVICE = ["service", "track"];
 const fadeIn = (from: number, to: number, alpha: number) =>
   ["interpolate", ["linear"], ["zoom"], from, 0, to, alpha] as unknown as number;
 
-/** Road width breathes wider as you approach street level. */
-const widthRamp = (from: number, w: number) =>
-  [
+/**
+ * Road width breathes wider as you approach street level. Bridges run a
+ * touch heavier at every zoom — a river crossing is a landmark, and the
+ * tile split at z13 (where `structure` appears) was letting the spans
+ * thin out into ghosts (Ben: "the bridge disappears"). `widen` scales the
+ * whole curve — solar.ts drives it with the paper weight so the day map
+ * has real mass while night keeps its hairlines. Exported: the style and
+ * the atmosphere MUST agree or the 1s re-ink would fight the base look.
+ */
+export const roadWidthExpr = (from: number, w: number, widen = 1) => {
+  const stop = (v: number) =>
+    ["match", ["get", "structure"], "bridge", v * 1.35, v] as const;
+  return [
     "interpolate",
     ["exponential", 1.5],
     ["zoom"],
     from,
-    w * 0.35,
+    stop(w * 0.35 * widen),
     16.5,
-    w * 2.4,
+    stop(w * 2.4 * widen),
   ] as unknown as number;
+};
 
 function roadLayer(
   id: string,
@@ -59,7 +70,7 @@ function roadLayer(
     paint: {
       "line-color": color,
       "line-opacity": fadeIn(fade.from, fade.to, alpha),
-      "line-width": widthRamp(fade.from, width),
+      "line-width": roadWidthExpr(fade.from, width),
     },
   };
 }

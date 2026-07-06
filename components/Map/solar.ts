@@ -12,6 +12,7 @@
 import type { ExpressionSpecification, Map as MapboxMap } from "mapbox-gl";
 import type { AtmosphereState } from "@/lib/atmosphere";
 import { INK, JOURNEY, SOLAR, WEATHER } from "./tune";
+import { roadWidthExpr } from "./styles";
 
 type InkKey = "bg" | "water" | "park" | "building" | "road";
 const INK_KEYS: InkKey[] = ["bg", "water", "park", "building", "road"];
@@ -165,14 +166,19 @@ function parkNear(ink: Record<InkKey, Rgb>): Rgb {
   ];
 }
 
-/** Road waves: fade ramp + base alpha per layer (mirrors styles.ts). By day
- *  the whole network brightens (SOLAR.dayRoadBoost) — the night hairline
- *  opacities are invisible white-on-paper (Ben's report). */
-const ROADS: [layerId: string, fade: { from: number; to: number }, alpha: number][] = [
-  ["roads-highway", JOURNEY.highwayFade, INK.roadAlpha.highway],
-  ["roads-avenue", JOURNEY.avenueFade, INK.roadAlpha.avenue],
-  ["roads-local", JOURNEY.localFade, INK.roadAlpha.local],
-  ["roads-service", JOURNEY.serviceFade, INK.roadAlpha.service],
+/** Road waves: fade ramp + base alpha + width per layer (mirrors styles.ts).
+ *  By day the whole network brightens (SOLAR.dayRoadBoost) AND widens
+ *  (dayRoadWiden) — the night hairlines dissolve on paper (Ben's report). */
+const ROADS: [
+  layerId: string,
+  fade: { from: number; to: number },
+  alpha: number,
+  width: number,
+][] = [
+  ["roads-highway", JOURNEY.highwayFade, INK.roadAlpha.highway, INK.roadWidth.highway],
+  ["roads-avenue", JOURNEY.avenueFade, INK.roadAlpha.avenue, INK.roadWidth.avenue],
+  ["roads-local", JOURNEY.localFade, INK.roadAlpha.local, INK.roadWidth.local],
+  ["roads-service", JOURNEY.serviceFade, INK.roadAlpha.service, INK.roadWidth.service],
 ];
 
 /** Maps whose paint transitions are already set to the slow solar ease. */
@@ -210,13 +216,13 @@ export function applyAtmosphereInk(map: MapboxMap, a: AtmosphereState): void {
   // an Apple-Maps-bright web on the day page. Same zoom ramps as the
   // style itself — only the landing alpha breathes.
   const boost = 1 + (SOLAR.dayRoadBoost - 1) * a.paper;
-  for (const [id, fade, alpha] of ROADS) {
+  const widen = 1 + (SOLAR.dayRoadWiden - 1) * a.paper;
+  for (const [id, fade, alpha, width] of ROADS) {
     if (!map.getLayer(id)) continue;
     if (firstTouch) {
-      map.setPaintProperty(id, "line-opacity-transition", {
-        duration: SOLAR.transitionMs,
-        delay: 0,
-      });
+      for (const prop of ["line-opacity-transition", "line-width-transition"] as const) {
+        map.setPaintProperty(id, prop, { duration: SOLAR.transitionMs, delay: 0 });
+      }
     }
     map.setPaintProperty(id, "line-opacity", [
       "interpolate",
@@ -227,6 +233,7 @@ export function applyAtmosphereInk(map: MapboxMap, a: AtmosphereState): void {
       fade.to,
       Math.min(0.95, alpha * boost),
     ] as ExpressionSpecification);
+    map.setPaintProperty(id, "line-width", roadWidthExpr(fade.from, width, widen));
   }
   eased.add(map);
 }

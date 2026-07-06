@@ -334,6 +334,10 @@ export const SOLAR = {
    *  network brightens toward Apple-Maps presence; the boost rides `paper`
    *  continuously through applyAtmosphereInk. ×4 ≈ full white arterials. */
   dayRoadBoost: 3.2,
+  /** …and WIDENS: the width curve is tuned for night hairlines, and at
+   *  mid-zoom on paper a 1.5px 83%-white line dissolves — the "bridge
+   *  disappears" dead zone. Day mass, night hairlines, same curve. */
+  dayRoadWiden: 1.55,
 } as const;
 
 /* ------------------------------------------------------------------ */
