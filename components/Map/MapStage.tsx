@@ -148,22 +148,21 @@ export default function MapStage({
       const trailOn = viewMix.current > 0.01;
 
       // Hand the atmosphere to the field — in-place mutation, no allocation.
+      // CONSTITUTION RULE 2: only the WIND (the field's living flow) and the
+      // base-response inputs (fog→streetlight, wet→glisten) cross over;
+      // cloud/rain/snow never bend or dim the emotion itself.
       const rain = atmo.wetKind === "rain" ? atmo.wet : 0;
       const snow = atmo.wetKind === "snow" ? atmo.wet : 0;
       if (field) {
         field.fade = 1 - viewMix.current;
         field.paper = atmo.paper;
         const look = field.look;
-        look.warpAmp = SHAPES.watercolor.warpAmp + atmo.wind * WEATHER.windWarp + rain * WEATHER.wetWarp;
-        look.drift =
-          (SHAPES.watercolor.drift + atmo.wind * WEATHER.windDrift) *
-          (1 - WEATHER.snowDriftSlow * snow);
+        look.warpAmp = SHAPES.watercolor.warpAmp + atmo.wind * WEATHER.windWarp;
+        look.drift = SHAPES.watercolor.drift + atmo.wind * WEATHER.windDrift;
         look.streak = atmo.wind * WEATHER.windStreak;
         const w = field.weather;
-        w.cloud = atmo.cloud;
         w.fog = atmo.fog;
         w.wet = rain;
-        w.snow = snow;
         w.axisX = atmo.axisX;
         w.axisY = atmo.axisY;
       }

@@ -320,6 +320,19 @@ export const SHAPES = {
 /* Night is INK itself in every mode, untouched.                       */
 /* ------------------------------------------------------------------ */
 export const SOLAR = {
+  /** THE PARKED DAY (constitution rule 1: Warmth is always night).
+   *  false = the product: time of day modulates the dark canvas via
+   *  nightDay/nightEmber below, and `paper` is clamped to 0 so every
+   *  pigment path sleeps. true (or `?daylight=1`) = the 2026-07-02
+   *  paper-day look, kept compiling so it can return (docs/later.md). */
+  dayMode: false,
+  /** Always-night tonal modulation: what "daytime" does to the dark canvas
+   *  when dayMode is off — a slightly lifted, warmed charcoal. Midnight is
+   *  the frozen INK itself; the sun's `light` blends toward these. */
+  nightDay: { bg: "#17161A", water: "#0A0A0E", park: "#1C1B20", building: "#1E1D24", road: "#D2D3DA" },
+  /** …and dawn/dusk: a gentle warm tint riding the ember ramp — a breath
+   *  of amber in the charcoal, never the paper-transition brown. */
+  nightEmber: { bg: "#191412", water: "#0B0808", park: "#1E1813", building: "#211A14", road: "#D8CCBC" },
   /** Master dial: 0 kills the effect entirely, 1 = full. */
   strength: 1,
   /** Sun elevation (deg) across which night becomes day. Starts at civil
@@ -377,28 +390,28 @@ export const WEATHER = {
    *  Ben toggles to SEE, not to wait (his field report, 2026-07-06). */
   previewTauMs: 1_800,
 
-  /* -- overcast: the sky's gray weight ------------------------------ */
-  cloudFieldDim: 0.26, // field brightness loss under full overcast
-  cloudSoften: 1.0, // extra kernel softness (more diffuse feeling)
-  cloudDesat: 0.32, // base-ink desaturation at full overcast
-  cloudDayDim: 0.1, // paper darkens a touch under clouds
+  /* CONSTITUTION RULE 2 (2026-07-06): weather modulates the BASE MAP ONLY.
+   * The old field couplings (cloudFieldDim, cloudSoften, wetStreak, wetWarp,
+   * snowDriftSlow, snowSparkle, and the field-pass fog dim) are GONE — the
+   * emotion layer renders identically in every sky. Wind still drives the
+   * field's living flow: it is the field's own breath, not a sky state. */
 
-  /* -- fog: the milk-glass veil -------------------------------------- */
+  /* -- overcast: the sky's gray weight (base ink only) ---------------- */
+  cloudDesat: 0.32, // base-ink desaturation at full overcast
+  cloudDayDim: 0.1, // parked-day paper darkens a touch under clouds
+
+  /* -- fog: the milk-glass veil (base ink; streetlight catch only) ----- */
   fogLift: 0.42, // base ink lifts toward the mist color
-  fogFieldDim: 0.22, // feeling recedes into the veil
+  fogStreetDim: 0.22, // the veil dims what the STREETS catch — never the field
   fogMist: { night: "#20242C", day: "#DFE3E9" },
 
-  /* -- rain: wet paper, glistening streets --------------------------- */
+  /* -- rain: glistening streets (base response) ------------------------ */
   wetWaterDarken: 0.16, // rivers deepen in the rain
   glistenGain: 0.8, // streetlight boost on wet nights (×1+this×wet)
-  wetStreak: 0.15, // field brightness streaking along the wind
-  wetWarp: 0.015, // edges seep a little further when wet
 
-  /* -- snow: the hush ------------------------------------------------ */
-  snowDayCool: 0.35, // paper toward cold bright white
+  /* -- snow: the hush (base ink only) ---------------------------------- */
+  snowDayCool: 0.35, // parked-day paper toward cold bright white
   snowNightLift: 0.06, // ink lifts a breath (snow-lit sky)
-  snowDriftSlow: 0.6, // flow slows: ×(1 − this×snow)
-  snowSparkle: 0.007, // extra dither shimmer in the field
 
   /* -- wind: the flow follows the real air --------------------------- */
   windWarp: 0.05, // + warp amplitude at full wind

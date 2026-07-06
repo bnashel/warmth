@@ -169,11 +169,10 @@ uniform vec4 uShape;
 uniform float uBand;   // aurora curtains: brightness modulation (0 = off)
 uniform float uAspect; // target width / height, so the flow isn't squashed
 // THE LIVING ATMOSPHERE (lib/atmosphere.ts, eased): the flow axis follows
-// the real wind; the sky's weight grades the light. All subtle.
+// the real wind — the field's own living motion. CONSTITUTION RULE 2: the
+// sky may not grade the emotion's light; cloud/wet/snow no longer reach
+// this shader at all.
 uniform vec2 uAxis;    // direction the air flows toward (unit-ish)
-uniform float uCloud;  // 0 clear → 1 overcast
-uniform float uWet;    // rain intensity (0 when snowing)
-uniform float uSnow;   // snow intensity
 out vec4 fragColor;
 
 // Value-noise fbm, 3 octaves — cheap enough for a half-res target.
@@ -290,24 +289,13 @@ void main() {
     b *= 1.0 + uBand * (curtain - 0.5) * 1.6;
   }
 
-  // THE SKY'S WEIGHT — all modulation, never to zero, always subtle.
-  // Overcast flattens the light.
-  b *= 1.0 - ${WEATHER.cloudFieldDim.toFixed(3)} * uCloud;
-  // Rain streaks the feeling faintly along the wind — alive, not drawn.
-  if (uWet > 0.001) {
-    vec2 ax = normalize(uAxis);
-    vec2 qw = vec2(uv.x * uAspect, uv.y);
-    float streak = vnoise(vec2(dot(qw, ax) * 3.0 - uTimeSec * 0.55,
-                               dot(qw, vec2(-ax.y, ax.x)) * 42.0));
-    b *= 1.0 + uWet * ${WEATHER.wetStreak.toFixed(3)} * (streak - 0.5);
-  }
-  // Snow hush: the floor lifts a breath, the peaks soften.
-  if (uSnow > 0.001) b = mix(b, b * 0.9 + 0.02, uSnow * 0.6);
+  // CONSTITUTION RULE 2: the sky's weight no longer touches the field —
+  // the emotion layer renders identically in every weather. (The old
+  // overcast dim, rain streak, snow hush, and snow sparkle lived here.)
 
-  // Dither so the long tail never bands on 8-bit output — snow adds a
-  // whisper of sparkle to it.
+  // Dither so the long tail never bands on 8-bit output.
   float n = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
-  b += (n - 0.5) * (0.004 + ${WEATHER.snowSparkle.toFixed(3)} * uSnow);
+  b += (n - 0.5) * 0.004;
 
   // uMode 2 — WATERCOLOR PIGMENT (the light "paper" day): instead of adding
   // light, stain the paper. Caller blends ZERO/SRC_COLOR (true multiply);
@@ -380,7 +368,10 @@ export class FieldLayer implements CustomLayerInterface {
 
   /** THE LIVING ATMOSPHERE — plain fields mutated in place from MapStage
    *  every push (no allocation): the sky's weight on the light. */
-  weather = { cloud: 0, wet: 0, snow: 0, fog: 0, axisX: 0.94, axisY: 0.33 };
+  /** What the sky may still hand the field: the wind axis (its living
+   *  flow), fog (dims the STREETLIGHT catch only), wet (the glisten).
+   *  Cloud/snow no longer cross this boundary — constitution rule 2. */
+  weather = { wet: 0, fog: 0, axisX: 0.94, axisY: 0.33 };
 
   private map: MapboxMap | null = null;
   private gl: WebGL2RenderingContext | null = null;
@@ -610,8 +601,8 @@ export class FieldLayer implements CustomLayerInterface {
     );
     gl.uniform1f(
       gl.getUniformLocation(this.accumProgram, "uSoftness"),
-      // Overcast diffuses the feeling: softer kernels under a gray sky.
-      FIELD.kernelSoftness + WEATHER.cloudSoften * this.weather.cloud,
+      // One softness in every sky (constitution rule 2).
+      FIELD.kernelSoftness,
     );
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE);
@@ -706,9 +697,6 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform1f(u("uAspect"), this.texW / Math.max(1, this.texH));
     const w = this.weather;
     gl.uniform2f(u("uAxis"), w.axisX, w.axisY);
-    gl.uniform1f(u("uCloud"), w.cloud);
-    gl.uniform1f(u("uWet"), w.wet);
-    gl.uniform1f(u("uSnow"), w.snow);
   }
 
   render(gl: WebGL2RenderingContext) {
@@ -722,13 +710,15 @@ export class FieldLayer implements CustomLayerInterface {
     // light added to a light map is invisible, so feeling stains instead.
     const night = 1 - this.paper;
     const w = this.weather;
-    // Fog: the feeling recedes into the veil, whichever way it's painted.
-    const fogDim = 1 - WEATHER.fogFieldDim * w.fog;
+    // CONSTITUTION RULE 2: fog may dim what the STREETS catch (the base
+    // map's response) but never the emotion passes themselves.
+    const fogStreet = 1 - WEATHER.fogStreetDim * w.fog;
 
-    // Pass 0 — watercolor pigment onto the paper (true multiply).
+    // Pass 0 — watercolor pigment onto the paper (true multiply; the
+    // parked day — inert while paper is clamped to 0).
     if (this.paper > 0.01) {
       gl.uniform1i(u("uMode"), 2);
-      gl.uniform1f(u("uGain"), this.paper * this.fade * fogDim);
+      gl.uniform1f(u("uGain"), this.paper * this.fade);
       gl.blendFunc(gl.ZERO, gl.SRC_COLOR);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
@@ -741,7 +731,7 @@ export class FieldLayer implements CustomLayerInterface {
       gl.uniform1i(u("uMode"), 1);
       gl.uniform1f(
         u("uGain"),
-        FIELD.streetlightGain * this.fade * night * fogDim * (1 + WEATHER.glistenGain * w.wet),
+        FIELD.streetlightGain * this.fade * night * fogStreet * (1 + WEATHER.glistenGain * w.wet),
       );
       gl.blendFunc(gl.DST_COLOR, gl.ONE);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -750,13 +740,13 @@ export class FieldLayer implements CustomLayerInterface {
     // Pass 2 — the field itself, additive (alpha 0 under premultiplied).
     if (night > 0.01) {
       gl.uniform1i(u("uMode"), 0);
-      gl.uniform1f(u("uGain"), FIELD.gain * this.fade * night * fogDim);
+      gl.uniform1f(u("uGain"), FIELD.gain * this.fade * night);
       gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
 
     // Pass 3 — BLOOM: the halo of feeling, added over the night city.
-    // (Prepared in prerender; clouds diffuse it a touch further.)
+    // (Prepared in prerender; the sky never grades it — rule 2.)
     if (this.bloomReady && this.compositeProgram) {
       gl.useProgram(this.compositeProgram);
       gl.activeTexture(gl.TEXTURE0);
@@ -764,7 +754,7 @@ export class FieldLayer implements CustomLayerInterface {
       gl.uniform1i(this.loc(gl, this.compositeProgram, "comp", "uSrc"), 0);
       gl.uniform1f(
         this.loc(gl, this.compositeProgram, "comp", "uGain"),
-        WEATHER.bloom.gain * this.fade * night * fogDim * (1 - 0.3 * w.cloud),
+        WEATHER.bloom.gain * this.fade * night,
       );
       gl.blendFunc(gl.ONE, gl.ONE);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
