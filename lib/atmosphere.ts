@@ -15,7 +15,7 @@
  *   sound.ts      — rain patter follows `wet`
  *
  * Dev preview (never in the product): URL params seed an override
- * (?cloud=0.8&wet=0.6&kind=snow&fog=0.3&wind=0.7) and the dev-only
+ * (?cloud=0.8 &wet=0.6 &kind=snow &fog=0.3 &wind=0.7) and the dev-only
  * WeatherPreview panel calls setOverride() live. `?solarHour=` (solar.ts)
  * previews time the same way. Offline or fetch failure degrades to clear
  * sky — the sun half needs no network, so the map is never wrong or frozen.
@@ -164,9 +164,11 @@ class AtmosphereEngine {
     });
   }
 
-  /** The dev preview's hook. null returns to the real world. */
+  /** The dev preview's hook. null returns to the real world (refetched
+   *  immediately so "now" never shows a stale sky). */
   setOverride(o: AtmosphereOverride | null) {
     this.override = o;
+    if (o === null) void this.fetchWeather();
   }
 
   getOverride(): AtmosphereOverride | null {
@@ -187,14 +189,18 @@ class AtmosphereEngine {
   }
 
   private async fetchWeather() {
-    if (this.fetching || this.override) return; // preview owns the sky
+    // Fetch even under a preview override — overridden values win in tick(),
+    // and a PARTIAL override (?cloud= alone) still blends with real weather.
+    if (this.fetching) return;
     this.fetching = true;
     try {
       const url =
         "https://api.open-meteo.com/v1/forecast" +
         `?latitude=${CAMERA.initial.latitude}&longitude=${CAMERA.initial.longitude}` +
         "&current=precipitation,snowfall,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m";
-      const res = await fetch(url);
+      // Timeout so a stalled response can never wedge `fetching` and freeze
+      // the sky until reload (review finding).
+      const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
       if (!res.ok) return; // keep the last known sky
       const json = (await res.json()) as {
         current?: {
@@ -247,14 +253,20 @@ class AtmosphereEngine {
     cur.ember = ease(cur.ember, this.sunEmber);
     cur.paper = ease(cur.paper, this.sunPaper);
     cur.cloud = ease(cur.cloud, o?.cloud ?? t.cloud);
-    cur.wet = ease(cur.wet, o?.wet ?? t.wet);
     cur.fog = ease(cur.fog, o?.fog ?? t.fog);
     cur.wind = ease(cur.wind, o?.wind ?? t.wind);
     cur.axisX = ease(cur.axisX, t.axisX);
     cur.axisY = ease(cur.axisY, t.axisY);
-    // Kind flips only while (nearly) dry — rain never teleports into snow.
+    // Rain never teleports into snow: a kind change DRIVES the wet to zero
+    // first (the sky drying for a beat), flips, then eases back up — so a
+    // mid-storm changeover actually happens (review finding).
     const kind = o?.wetKind ?? t.wetKind;
-    if (kind !== cur.wetKind && cur.wet < 0.05) cur.wetKind = kind;
+    if (kind !== cur.wetKind) {
+      cur.wet = ease(cur.wet, 0);
+      if (cur.wet < 0.05) cur.wetKind = kind;
+    } else {
+      cur.wet = ease(cur.wet, o?.wet ?? t.wet);
+    }
   }
 }
 

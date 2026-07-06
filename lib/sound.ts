@@ -289,20 +289,39 @@ export function stopHum(): void {
 let rainSrc: AudioBufferSourceNode | null = null;
 let rainGain: GainNode | null = null;
 let rainLfo: OscillatorNode | null = null;
+let rainDepth: GainNode | null = null;
+let rainStopTimer: number | null = null;
 
 /**
  * Rain patter under everything, felt more than heard: looped noise through
  * a band shaped like rain on a window, a slow LFO swelling it so it never
  * reads as a flat hiss. Level rides the atmosphere's `wet`; audio starts
  * only after the usual gesture unlock, and panic() silences it.
+ *
+ * The LFO depth SCALES with the level (depth < base always, so the swell
+ * never drives the gain through zero) and when the rain ends the whole
+ * node graph is torn down after the fade — no eternal ghost swell
+ * (review findings).
  */
 export function setRainLevel(level01: number): void {
   try {
     if (!ready() || !ctx || !master) return;
     const level = Math.min(1, Math.max(0, level01));
     if (level <= 0.001) {
-      if (rainGain) rainGain.gain.setTargetAtTime(0.0001, ctx.currentTime, 1.2);
+      if (rainGain && rainStopTimer === null) {
+        rainGain.gain.setTargetAtTime(0.0001, ctx.currentTime, 1.2);
+        rainDepth?.gain.setTargetAtTime(0, ctx.currentTime, 1.2);
+        // Tear down once the fade has settled (~5τ) — silence costs nothing.
+        rainStopTimer = window.setTimeout(() => {
+          rainStopTimer = null;
+          stopRain();
+        }, 6_500);
+      }
       return;
+    }
+    if (rainStopTimer !== null) {
+      window.clearTimeout(rainStopTimer);
+      rainStopTimer = null;
     }
     if (!rainSrc) {
       rainGain = ctx.createGain();
@@ -322,24 +341,27 @@ export function setRainLevel(level01: number): void {
       // The swell: a slow wobble on the gain — weather, not static.
       rainLfo = ctx.createOscillator();
       rainLfo.frequency.value = WEATHER.rainSound.lfoHz;
-      const depth = ctx.createGain();
-      depth.gain.value = WEATHER.rainSound.maxGain * WEATHER.rainSound.lfoDepth;
-      rainLfo.connect(depth).connect(rainGain.gain);
+      rainDepth = ctx.createGain();
+      rainDepth.gain.value = 0;
+      rainLfo.connect(rainDepth).connect(rainGain.gain);
       rainLfo.start();
     }
-    rainGain!.gain.setTargetAtTime(
-      WEATHER.rainSound.maxGain * level,
-      ctx.currentTime,
-      2, // rain fades in like rain
-    );
+    const t = ctx.currentTime;
+    const base = WEATHER.rainSound.maxGain * level;
+    rainGain!.gain.setTargetAtTime(base, t, 2); // rain fades in like rain
+    rainDepth!.gain.setTargetAtTime(base * WEATHER.rainSound.lfoDepth, t, 2);
   } catch {
     /* silent degrade */
   }
 }
 
-/** Stop the rain now (tab hidden). The atmosphere restarts it when back. */
+/** Stop the rain now (tab hidden / fade settled). Restartable. */
 function stopRain(): void {
   try {
+    if (rainStopTimer !== null) {
+      window.clearTimeout(rainStopTimer);
+      rainStopTimer = null;
+    }
     if (!ctx || !rainSrc) return;
     const t = ctx.currentTime;
     rainGain?.gain.setTargetAtTime(0.0001, t, 0.1);
@@ -351,6 +373,7 @@ function stopRain(): void {
     rainSrc = null;
     rainGain = null;
     rainLfo = null;
+    rainDepth = null;
   }
 }
 
