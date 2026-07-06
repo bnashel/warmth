@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Inter } from "next/font/google";
-import { AnimatePresence, motion, useMotionValue } from "framer-motion";
+import { AnimatePresence, motion, useMotionValue, useTransform } from "framer-motion";
 import type { Map as MapboxMap } from "mapbox-gl";
 import { MAPBOX_TOKEN } from "@/lib/map";
 import { momentsStore, type Moment } from "@/lib/momentsStore";
@@ -34,17 +34,6 @@ function makeId(): string {
   return `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-/** Session flags live in sessionStorage, which Safari can block entirely —
- *  hints are never worth throwing over. */
-function sessionFlag(key: string, set?: boolean): boolean {
-  try {
-    if (set) window.sessionStorage.setItem(key, "1");
-    return window.sessionStorage.getItem(key) === "1";
-  } catch {
-    return false;
-  }
-}
-
 /**
  * THE screen: the city breathing full-bleed, the orb floating above it,
  * and two ways of seeing — PUBLIC (everyone's feeling as standing weather)
@@ -59,7 +48,22 @@ export default function OneScreen() {
   const mapRef = useRef<MapboxMap | null>(null);
   const committedOnce = useRef(false);
   const gestureDepth = useMotionValue(0);
-  const [centerHint, setCenterHint] = useState(false);
+  // THE HOLD SCRIM (Ben-approved choreography): while a finger is on the
+  // orb the city dims and stills beneath a soft veil — the picker always
+  // reads, even over a bright field. Rides gestureDepth: zero re-renders.
+  const scrimOpacity = useTransform(gestureDepth, (d) => d * 0.45);
+  // Post-commit whisper: a small confirmation near where the light landed.
+  const [whisper, setWhisper] = useState<{ text: string; x: number; y: number } | null>(null);
+  const whisperTimer = useRef<number | null>(null);
+  // Learning mode: the first 3 commits name every picker dot (persisted —
+  // storage can be blocked; never worth throwing over).
+  const [commitCount, setCommitCount] = useState(() => {
+    try {
+      return Number(window.localStorage.getItem("warmth-commit-count") ?? 0) || 0;
+    } catch {
+      return 0;
+    }
+  });
   const [view, setView] = useState<ViewKey>("public");
   // The trail rehydrates from localStorage when the store module loads —
   // by first render the diary already knows if it has entries.
@@ -151,6 +155,16 @@ export default function OneScreen() {
   function handleCommit({ emotion, intensity }: { emotion: Emotion; intensity: number }) {
     const map = mapRef.current;
     committedOnce.current = true;
+    // Learning labels retire after the third commit.
+    setCommitCount((n) => {
+      const next = n + 1;
+      try {
+        window.localStorage.setItem("warmth-commit-count", String(next));
+      } catch {
+        /* storage blocked — labels just stay a session longer */
+      }
+      return next;
+    });
     // The burst is playing on the orb. One beat of silence, then the city
     // receives it — the bloom continues the burst's outward motion.
     window.setTimeout(() => {
@@ -181,7 +195,8 @@ export default function OneScreen() {
         setHasOwn(true); // the private diary has its first entry
       };
 
-      if (map && !onScreen(map, lng, lat)) {
+      const glide = map && !onScreen(map, lng, lat);
+      if (glide) {
         // Off-screen: fly first, ignite as you arrive — the glide is the
         // drumroll; the bloom must never play to an empty theater.
         map.easeTo({ center: [lng, lat], duration: CHOREO.glide.durationMs });
@@ -190,13 +205,20 @@ export default function OneScreen() {
         ignite();
       }
 
-      // One-time whisper when the feeling lands where you're looking —
-      // arriving as the bloom settles, so it never competes with the light.
-      if (!usable && !sessionFlag("warmth-center-hint")) {
-        sessionFlag("warmth-center-hint", true);
-        window.setTimeout(() => setCenterHint(true), 800);
-        window.setTimeout(() => setCenterHint(false), 4400);
-      }
+      // The whisper: a small confirmation near the landing point, arriving
+      // as the bloom settles, gone in ~2s — never competing with the light.
+      const text = view === "public" ? "added to the city" : "left a trace";
+      window.setTimeout(
+        () => {
+          const m = mapRef.current;
+          if (!m) return;
+          const p = m.project([lng, lat]);
+          setWhisper({ text, x: p.x, y: p.y });
+          if (whisperTimer.current) window.clearTimeout(whisperTimer.current);
+          whisperTimer.current = window.setTimeout(() => setWhisper(null), 2000);
+        },
+        glide ? CHOREO.glide.durationMs + 250 : 750,
+      );
     }, CHOREO.beatMs);
   }
 
@@ -227,6 +249,21 @@ export default function OneScreen() {
 
       {/* The storm answers back: flicker + distant thunder (storm-gated). */}
       <Lightning />
+
+      {/* THE HOLD SCRIM — while choosing, the city dims and stills beneath
+          a soft veil (gestures are already frozen on the same signal). The
+          picker always reads, even over a bright field. Opacity-only. */}
+      <motion.div
+        aria-hidden
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "#06070A",
+          opacity: scrimOpacity,
+          pointerEvents: "none",
+          zIndex: 5,
+        }}
+      />
 
       {/* Dev-only: force any weather/hour to see it (renders null in prod). */}
       <WeatherPreview />
@@ -395,33 +432,35 @@ export default function OneScreen() {
           hintWord="hold"
           hintColor={paperText(1)}
           paper={paper}
+          namesOn={commitCount < 3}
           gestureDepth={gestureDepth}
           onCommit={handleCommit}
         />
       </div>
 
-      {/* One-time whisper: where a feeling lands without location. */}
+      {/* Post-commit whisper: a small confirmation near the landing point,
+          gone in ~2s. "added to the city" (public) / "left a trace" (private). */}
       <AnimatePresence>
-        {centerHint && (
+        {whisper && (
           <motion.p
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 0.55, y: 0 }}
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 0.6, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
             transition={SPRING.settle}
             style={{
               position: "absolute",
-              left: 0,
-              right: 0,
-              bottom: `calc(env(safe-area-inset-bottom, 0px) + ${ORB.bottomOffset + 96}px)`,
-              textAlign: "center",
+              left: whisper.x,
+              top: whisper.y - 30,
+              x: "-50%",
               fontSize: 12,
-              letterSpacing: "0.04em",
-              color: paperText(0.8),
+              letterSpacing: "0.05em",
+              color: paperText(0.85),
+              whiteSpace: "nowrap",
               pointerEvents: "none",
-              zIndex: 10,
+              zIndex: 6,
             }}
           >
-            your feeling lands where you&apos;re looking
+            {whisper.text}
           </motion.p>
         )}
       </AnimatePresence>
