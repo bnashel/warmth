@@ -66,8 +66,9 @@ export const JOURNEY = {
       { zoom: 15, solid: 16, gone: 17 },
     ],
   },
-  /** Buildings (mass texture). */
-  buildingFade: { from: 13.2, to: 15.0 },
+  /** Buildings (mass texture). Geometry enters the tiles ~z13; the ramp
+   *  starts after it has loaded so arrival never pops (Eli). */
+  buildingFade: { from: 13.6, to: 15.4 },
   /** Neighborhood boundaries: present at rest, dissolving as streets take over. */
   boundaryFade: { peak: 11.0, gone: 14.5 },
 } as const;
