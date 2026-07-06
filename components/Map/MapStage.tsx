@@ -10,7 +10,6 @@ import { momentsStore } from "@/lib/momentsStore";
 import { CAMERA, CHOREO, INK, MOTION, PERF, SHAPES, SOLAR } from "./tune";
 import { buildStyle } from "./styles";
 import { applySolarInk, solarPaperWeight } from "./solar";
-import { getPrefs, onPrefsChange } from "@/lib/prefs";
 import { FieldLayer } from "./FieldLayer";
 import { buildLabelLayers, loadLabels } from "./neighborhoods";
 import { buildTrailLayers } from "@/components/Trail/glow";
@@ -106,16 +105,9 @@ export default function MapStage({
     };
     const iv = setInterval(apply, SOLAR.updateMs);
     document.addEventListener("visibilitychange", apply);
-    // Look panel: shape lands on the field, light re-inks the base — both
-    // instant, both riding their usual eases.
-    const offPrefs = onPrefsChange((p) => {
-      if (fieldRef.current) fieldRef.current.look = { ...SHAPES[p.shape] };
-      apply();
-    });
     return () => {
       clearInterval(iv);
       document.removeEventListener("visibilitychange", apply);
-      offPrefs();
     };
   }, []);
 
@@ -216,7 +208,7 @@ export default function MapStage({
           // never take the whole screen down (design-review finding).
           try {
             const field = new FieldLayer();
-            field.look = { ...SHAPES[getPrefs().shape] };
+            field.look = { ...SHAPES.watercolor };
             map.addLayer(field);
             fieldRef.current = field;
           } catch (err) {
@@ -238,7 +230,7 @@ export default function MapStage({
             try {
               const fresh = new FieldLayer();
               fresh.fade = fieldRef.current?.fade ?? 1;
-              fresh.look = { ...SHAPES[getPrefs().shape] };
+              fresh.look = { ...SHAPES.watercolor };
               fresh.paper = paperRef.current; // day must survive the restore too
               map.addLayer(fresh, beforeId);
               fieldRef.current = fresh;

@@ -10,7 +10,6 @@
  */
 import type { Map as MapboxMap } from "mapbox-gl";
 import { sunElevationDeg } from "@/lib/sun";
-import { getPrefs } from "@/lib/prefs";
 import { CAMERA, INK, SOLAR } from "./tune";
 
 type SolarInk = {
@@ -68,15 +67,13 @@ const fmt = (c: Rgb) => `rgb(${Math.round(c[0])},${Math.round(c[1])},${Math.roun
 
 const INK_KEYS = ["bg", "water", "park", "building", "road"] as const;
 
-/** night → day by `day`, then toward the ember by `ember` — all numeric.
- *  The palettes come from the user's solar mode (Look panel). */
+/** night → day by `day`, then toward the ember by `ember` — all numeric. */
 function blendInk(day: number, ember: number): SolarInk {
-  const mode = SOLAR.modes[getPrefs().solar];
   const out = {} as Record<keyof SolarInk, string>;
   for (const k of INK_KEYS) {
     let c = hexToRgb(NIGHT[k]);
-    if (day > 0) c = lerpRgb(c, hexToRgb(mode.day[k]), day);
-    if (ember > 0) c = lerpRgb(c, hexToRgb(mode.ember[k]), ember);
+    if (day > 0) c = lerpRgb(c, hexToRgb(SOLAR.day[k]), day);
+    if (ember > 0) c = lerpRgb(c, hexToRgb(SOLAR.ember[k]), ember);
     out[k] = fmt(c);
   }
   return out;
@@ -119,11 +116,10 @@ export function solarInk(date: Date): SolarInk {
 
 /**
  * How "paper" the map currently is (0 = dark ink, 1 = full light day).
- * Nonzero only in daylight mode ("bold"): the field uses it to trade glow
- * for watercolor pigment, and labels use it to trade white for ink text.
+ * The field uses it to trade glow for watercolor pigment, and labels use
+ * it to trade white for ink text.
  */
 export function solarPaperWeight(date: Date = solarDate()): number {
-  if (getPrefs().solar !== "bold") return 0;
   const elev = sunElevationDeg(date, CAMERA.initial.latitude, CAMERA.initial.longitude);
   return smoothstep(SOLAR.paperRamp.from, SOLAR.paperRamp.to, elev) * SOLAR.strength;
 }

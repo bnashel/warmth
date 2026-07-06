@@ -306,30 +306,13 @@ export const SOLAR = {
    *  the glow holds full strength through the ember twilight and pigment
    *  takes over only once the ground is genuinely light (design-review). */
   paperRamp: { from: 2, to: 8 },
-  /** Per-mode palettes: what midday and the dawn/dusk ember look like.
-   *  Night is always INK. */
-  modes: {
-    /** The whisper — the original design-reviewed pair. */
-    subtle: {
-      day: { bg: "#0B0D13", water: "#070910", park: "#0E1118", building: "#131724", road: "#CDD4E4" },
-      ember: { bg: "#0D0A0C", water: "#090607", park: "#110E0D", building: "#191216", road: "#DFCFB2" },
-    },
-    /** DAYLIGHT (key kept as "bold" so saved prefs survive): true Apple-Maps
-     *  day/night — by day the city is light paper, streets white, water a
-     *  soft cool gray-blue; twilight passes through a warm mid-dark ember on
-     *  its way to the ink night. Emotion renders as watercolor pigment on
-     *  the paper (FieldLayer uMode 2), not glow (Eli's call, 2026-07-02). */
-    bold: {
-      day: { bg: "#E7E9EE", water: "#C9D4E0", park: "#DCE3DB", building: "#D8DBE3", road: "#FBFCFE" },
-      ember: { bg: "#3A2C26", water: "#241A16", park: "#40332B", building: "#4A3A30", road: "#E8C9A4" },
-    },
-    /** Cinematic sky: the map borrows real sky color — deep blue noon,
-     *  burning rose-amber horizon. The one mode that bends ink-only. */
-    sky: {
-      day: { bg: "#101828", water: "#091020", park: "#152034", building: "#1D2A45", road: "#C9D9F4" },
-      ember: { bg: "#1F1010", water: "#120807", park: "#261611", building: "#332017", road: "#F6B27E" },
-    },
-  },
+  /** THE palette pair (no modes — the app has one default; Ben, 2026-07-05):
+   *  true Apple-Maps day/night. By day the city is light paper, streets
+   *  white, water a soft cool gray-blue; twilight passes through a warm
+   *  mid-dark ember on its way to the ink night. Emotion is watercolor
+   *  pigment on the paper (FieldLayer uMode 2), glow on the night ink. */
+  day: { bg: "#E7E9EE", water: "#C9D4E0", park: "#DCE3DB", building: "#D8DBE3", road: "#FBFCFE" },
+  ember: { bg: "#3A2C26", water: "#241A16", park: "#40332B", building: "#4A3A30", road: "#E8C9A4" },
 } as const;
 
 /* ------------------------------------------------------------------ */

@@ -306,8 +306,8 @@ export class FieldLayer implements CustomLayerInterface {
    *  whole field (accumulation included) costs nothing. Set from MapStage. */
   fade = 1;
 
-  /** THE SHAPE OF FEELING (Look panel) — plain uniform values; switching
-   *  modes is free. Set from MapStage (source of truth: lib/prefs). */
+  /** THE SHAPE OF FEELING — plain uniform values (watercolor is the one
+   *  identity; the atmosphere drives these live). Set from MapStage. */
   look: { warpAmp: number; scale: number; drift: number; streak: number; band: number } = {
     ...SHAPES.watercolor,
   };

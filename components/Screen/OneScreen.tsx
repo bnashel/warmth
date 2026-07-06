@@ -16,8 +16,6 @@ import { ambientSeedMoments } from "@/components/Map/ambientSeed";
 import { CAMERA, CHOREO, MOTION } from "@/components/Map/tune";
 import { OrbFlow } from "@/components/Orb/OrbFlow";
 import { solarPaperWeight } from "@/components/Map/solar";
-import { onPrefsChange } from "@/lib/prefs";
-import { LookPanel } from "./LookPanel";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
 
@@ -73,11 +71,9 @@ export default function OneScreen() {
     const update = () => setPaper(solarPaperWeight());
     update();
     const iv = window.setInterval(update, 60_000);
-    const offPrefs = onPrefsChange(update);
     document.addEventListener("visibilitychange", update);
     return () => {
       window.clearInterval(iv);
-      offPrefs();
       document.removeEventListener("visibilitychange", update);
     };
   }, []);
@@ -225,9 +221,6 @@ export default function OneScreen() {
         <MissingToken />
       )}
       <Atmosphere />
-
-      {/* The Look panel — shape of feeling + how hard the sun shows. */}
-      <LookPanel />
 
       {/* PUBLIC / PRIVATE — the two ways of seeing, named plainly. The pill
           slides on a spring; a whisper under it says what each view means. */}
