@@ -299,10 +299,11 @@ export const SOLAR = {
    *  climbs — nonzero only around sunrise and sunset. */
   emberRamp: { rise: { from: -8, to: -1 }, fade: { from: 3, to: 11 } },
   /** Re-apply the graded ink this often (8 paint sets — trivial); paint
-   *  eases over transitionMs on top of the atmosphere's own easing, so
-   *  nothing ever visibly steps. */
+   *  eases over transitionMs on top of the atmosphere's own easing.
+   *  transitionMs === updateMs so the pulses CHAIN — a big preview jump
+   *  glides instead of breathing stop-start (design-review finding). */
   updateMs: 2_500,
-  transitionMs: 1_500,
+  transitionMs: 2_500,
   /** Paper (glow→pigment handoff) rides a LATER ramp than the base ink:
    *  the glow holds full strength through the ember twilight and pigment
    *  takes over only once the ground is genuinely light (design-review). */

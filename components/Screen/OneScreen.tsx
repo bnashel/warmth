@@ -307,6 +307,8 @@ export default function OneScreen() {
               fontSize: 11,
               letterSpacing: "0.05em",
               color: paperText(0.9),
+              // The ink poll steps every 2s; CSS chains the steps smooth.
+              transition: "color 2.2s linear",
               pointerEvents: "none",
             }}
           >
@@ -333,6 +335,7 @@ export default function OneScreen() {
               lineHeight: 1.6,
               letterSpacing: "0.04em",
               color: paperText(0.85),
+              transition: "color 2.2s linear",
               pointerEvents: "none",
               zIndex: 10,
             }}
