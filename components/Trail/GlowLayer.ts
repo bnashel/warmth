@@ -33,6 +33,7 @@ layout(std140) uniform glowUniforms {
   float pigment;
   float stainEdge;
   float stainRing;
+  float stainHeart;
 } glow;
 `,
   uniformTypes: {
@@ -50,6 +51,7 @@ layout(std140) uniform glowUniforms {
     pigment: "f32" as const,
     stainEdge: "f32" as const,
     stainRing: "f32" as const,
+    stainHeart: "f32" as const,
   },
 };
 
@@ -107,21 +109,26 @@ void main(void) {
   // (hot core included) sets the stain depth, capped so a fresh commit is
   // a deep watercolor mark, never a bruise.
   if (glow.pigment > 0.0) {
-    vec3 pig = vFillColor.rgb * vFillColor.rgb;
+    // Pigment: 65% of the way to the gamma-deepened hue — saturated on
+    // paper, never the muddy full-square (Eli: the dots read dirty).
+    vec3 pig = mix(vFillColor.rgb, vFillColor.rgb * vFillColor.rgb, 0.65);
     // A MARK, not a glow (Ben: the glow tail read as an out-of-focus blob).
-    // Real watercolor: a flat wash inside, a defined-but-hand-soft edge,
-    // and pigment POOLING at the rim as the water dries. So the stain
-    // ignores the light's core/tail shape entirely:
-    //   wash — full depth until stainEdge of the radius, then eases to 0;
-    //   pool — the rim runs stainRing deeper than the heart.
+    // Real watercolor, three shapes the light's core/tail knows nothing of:
+    //   wash — full depth until stainEdge of the radius, then a SHORT
+    //          hand-soft feather to the edge (a wide one read as blur);
+    //   pool — the rim runs stainRing deeper as the water dries;
+    //   heart — the center dries stainHeart lighter (pigment pushed out),
+    //           so the mark never reads as a flat disc.
     float wash = smoothstep(1.0, glow.stainEdge, rr);
     float pool = 1.0 + glow.stainRing * smoothstep(glow.stainEdge * 0.55, glow.stainEdge, rr);
-    float s = (glow.peakBase + glow.peakPerIntensity * w) * glow.gain * wash * pool;
+    float heart = 1.0 - glow.stainHeart * (1.0 - smoothstep(0.0, glow.stainEdge * 0.7, rr));
+    float s = (glow.peakBase + glow.peakPerIntensity * w) * glow.gain * wash * pool * heart;
     s *= smoothstep(0.0, 0.12, w);          // arrivals/fades still reach zero
     s += (n - 0.5) * 0.006;                 // dither the edge, band-free
-    // Soft-knee depth cap: saturates toward 0.78, slope never breaks —
-    // deep watercolor, never a bruise, no plateau rim (review finding).
-    float stain = 0.78 * (1.0 - exp(-max(s, 0.0) / 0.45)) * glow.pigment;
+    // Soft-knee depth cap: saturates toward 0.9, slope never breaks — a
+    // fresh mark is confident ink (~0.85 at center, pooled rim deeper), a
+    // week-old one visibly lighter; never a bruise, no plateau rim.
+    float stain = 0.9 * (1.0 - exp(-max(s, 0.0) / 0.5)) * glow.pigment;
     fragColor = vec4(mix(vec3(1.0), pig, stain), 1.0);
     DECKGL_FILTER_COLOR(fragColor, geometry);
     return;
@@ -158,6 +165,8 @@ type LightParams = {
   stainEdge: number;
   /** Extra pigment pooled at the rim (watercolor dries darker at its edge). */
   stainRing: number;
+  /** How much lighter the center dries (pigment pushed toward the rim). */
+  stainHeart: number;
 };
 
 type EmotionGlowLayerProps = ScatterplotLayerProps<GlowDatum> & {
@@ -202,6 +211,7 @@ export class EmotionGlowLayer extends ScatterplotLayer<
       pigment: 0,
       stainEdge: 0.8,
       stainRing: 0,
+      stainHeart: 0,
       ...light,
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -222,6 +232,7 @@ export class EmotionGlowLayer extends ScatterplotLayer<
         pigment: p.pigment,
         stainEdge: p.stainEdge,
         stainRing: p.stainRing,
+        stainHeart: p.stainHeart,
       },
     });
     super.draw(params as never);

@@ -145,6 +145,7 @@ export function buildTrailLayers(
           pigment: paper,
           stainEdge: TRAIL.stain.edge,
           stainRing: TRAIL.stain.ring,
+          stainHeart: TRAIL.stain.heart,
         },
         parameters: PIGMENT_STAIN,
       }),

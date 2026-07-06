@@ -236,9 +236,11 @@ export const TRAIL = {
     peakPerIntensity: 0.55,
   },
   /** The paper-day stain is a MARK, not a glow (Ben: the glow tail read as
-   *  180p blur). Real watercolor: flat wash to `edge` of the radius, a
-   *  defined-but-soft boundary, pigment pooling `ring` deeper at the rim. */
-  stain: { edge: 0.74, ring: 0.32, radiusScale: 0.82, gainBoost: 1.25 },
+   *  180p blur). Real watercolor: flat wash to `edge` of the radius with a
+   *  short hand-soft feather (0.74 read as blur — Eli), pigment pooling
+   *  `ring` deeper at the rim, and a `heart` faintly lighter at the center
+   *  (water pushes pigment outward as it dries) so it never reads as a disc. */
+  stain: { edge: 0.88, ring: 0.28, radiusScale: 0.85, gainBoost: 1.25, heart: 0.12 },
 } as const;
 
 /* ------------------------------------------------------------------ */
