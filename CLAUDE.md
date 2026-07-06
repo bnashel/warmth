@@ -2,7 +2,7 @@
 *Read this at the start of every session.*
 
 ## Right now
-**Phase 3: the one screen — orb commits bloom on the live map; then Supabase realtime (two-device test = done).**
+**The Aesthetic Pass (branch `night-pass`): six phases — constitution, night+sky, base city, public field, lights, orb — proof required per phase.**
 Update this line as we move through phases (full plan in /docs). Whatever this line says is your top priority.
 
 ## What we're building
@@ -10,10 +10,18 @@ An ambient, beautiful live map of how a city feels. Emotion is rendered as glowi
 
 ## Non-negotiables (the taste bar — never violate)
 1. **60fps, always.** If a change risks jank, flag it and propose a lighter approach.
-2. **Dark-first at night; light paper by day.** Night is the near-black ink city (#0A0B0F). In daylight mode (the default; Eli's call, 2026-07-02) the map turns light like Apple Maps by day, and emotion renders as watercolor pigment instead of glow. Either way, color comes only from emotion and small accents.
+2. **Warmth is always night** (Eli's call, 2026-07-06, superseding the 2026-07-02 day-mode default). The paper-day look is PARKED, not deleted — it lives behind a dev toggle (see docs/later.md) and must keep compiling, but the product never shows it. Color comes only from emotion and small accents.
 3. **Spring physics on all motion** (Framer Motion). Nothing linear or instant that the user sees move.
 4. **Never generic.** No default dashboards or stock component dumps. Every screen looks intentional and premium. Unsure of the design intent? Ask — don't guess.
 5. **The slider is sacred.** The emotion/intensity slider is the signature. Give it extra care and a design-reviewer pass on any change.
+
+## UNBREAKABLE VISUAL RULES
+1. **Warmth is always night.** There is no light mode in the product. Time of day changes the night, never replaces it. (The old paper-day style is parked behind a dev toggle — docs/later.md.)
+2. **Color belongs to feeling.** The base city is near-monochrome ink. The five emotion hues are the only saturated color on screen. Weather and time modulate the base map only and may never dim or desaturate the emotion layer.
+3. **Brightness hierarchy.** Nothing on the base map outshines the dimmest feeling, and nothing pure white ever blooms on the map.
+4. **Nothing pops.** Every appearance, disappearance, and state change is a fade, ramp, or eased dissolve.
+5. **One glow recipe everywhere:** tight luminous core, exponential falloff, zoom-aware radius. Any glow that renders as a structureless blur is a bug.
+6. **60fps always.** Animate transform and opacity only. A style choice that costs frames loses.
 
 ## Never do this
 - Don't add libraries or dependencies without asking me first.
