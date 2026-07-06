@@ -19,7 +19,7 @@
 import mapboxgl, { type CustomLayerInterface, type Map as MapboxMap } from "mapbox-gl";
 import { EMOTION_HUES, EMOTIONS } from "@/lib/theme";
 import type { LivePoint } from "@/lib/momentsStore";
-import { FIELD, SHAPES, WEATHER } from "./tune";
+import { CAMERA, FIELD, SHAPES, WEATHER } from "./tune";
 
 /* ---------------- OKLab (Björn Ottosson, via components/Orb/oklch.ts) --- */
 
@@ -173,6 +173,17 @@ uniform float uAspect; // target width / height, so the flow isn't squashed
 // sky may not grade the emotion's light; cloud/wet/snow no longer reach
 // this shader at all.
 uniform vec2 uAxis;    // direction the air flows toward (unit-ish)
+// LAND MASK: the field inherits the coastline (rivers/harbor stay void).
+// Sampled in mercator space via the inverse view matrix — geography, not
+// screen space, so rotation and zoom cannot smear the shore.
+uniform sampler2D uMask;
+uniform float uMaskOn;
+uniform vec4 uMaskRect;   // mercX0, mercY0, 1/width, 1/height
+uniform mat4 uInvMatrix;  // clip → mercator (pitch is off: affine, exact)
+uniform float uWaterAtten;
+// THE LUMINOUS HEART: density peaks lift toward light (OKLab L), capped
+// far below white — aurora, never fog.
+uniform vec3 uHeart;      // from, to, lift
 out vec4 fragColor;
 
 // Value-noise fbm, 3 octaves — cheap enough for a half-res target.
@@ -276,6 +287,23 @@ void main() {
   // asymptotically — never white. The low end is linear: the long fade.
   float b = 1.0 - exp(-uExposure * total);
 
+  // THE LAND MASK — geography shapes the feeling: the field dies over
+  // water so rivers and harbor stay pure void and every silhouette
+  // inherits the coastline. Sampled at the TRUE pixel (vUv, unwarped):
+  // the shore is a fact, not weather.
+  if (uMaskOn > 0.5) {
+    vec4 mp = uInvMatrix * vec4(vUv * 2.0 - 1.0, 0.0, 1.0);
+    vec2 merc = mp.xy / mp.w;
+    vec2 muv = vec2((merc.x - uMaskRect.x) * uMaskRect.z,
+                    (merc.y - uMaskRect.y) * uMaskRect.w);
+    float land = smoothstep(0.12, 0.82, texture(uMask, muv).r);
+    b *= mix(uWaterAtten, 1.0, land);
+  }
+
+  // THE LUMINOUS HEART: where pooled feeling peaks, the hue itself lifts
+  // toward light — bright AND saturated, capped well below white.
+  lab.x += uHeart.z * smoothstep(uHeart.x, uHeart.y, b);
+
   // The living tide: a slow, subtle breath, phase-varied across hues.
   float phase = fract(lab.y * 3.7 + lab.z * 5.3);
   b *= 1.0 + uBreathAmp * sin(6.2831853 * (uTimeSec / uBreathPeriod + phase));
@@ -325,6 +353,47 @@ const CHANNEL: Record<string, number> = Object.fromEntries(
   EMOTIONS.map((e, i) => [e, i]),
 );
 const FLOATS_PER_INSTANCE = 5; // mercX, mercY, radiusMerc, weight, channel
+
+/** 4×4 inverse (general adjugate) — the camera matrix is affine with pitch
+ *  off, but the full inverse is cheap once per frame and never wrong. */
+function invert4(out: Float32Array, m: ArrayLike<number>): boolean {
+  const a00 = m[0], a01 = m[1], a02 = m[2], a03 = m[3];
+  const a10 = m[4], a11 = m[5], a12 = m[6], a13 = m[7];
+  const a20 = m[8], a21 = m[9], a22 = m[10], a23 = m[11];
+  const a30 = m[12], a31 = m[13], a32 = m[14], a33 = m[15];
+  const b00 = a00 * a11 - a01 * a10;
+  const b01 = a00 * a12 - a02 * a10;
+  const b02 = a00 * a13 - a03 * a10;
+  const b03 = a01 * a12 - a02 * a11;
+  const b04 = a01 * a13 - a03 * a11;
+  const b05 = a02 * a13 - a03 * a12;
+  const b06 = a20 * a31 - a21 * a30;
+  const b07 = a20 * a32 - a22 * a30;
+  const b08 = a20 * a33 - a23 * a30;
+  const b09 = a21 * a32 - a22 * a31;
+  const b10 = a21 * a33 - a23 * a31;
+  const b11 = a22 * a33 - a23 * a32;
+  let det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+  if (!det) return false;
+  det = 1.0 / det;
+  out[0] = (a11 * b11 - a12 * b10 + a13 * b09) * det;
+  out[1] = (a02 * b10 - a01 * b11 - a03 * b09) * det;
+  out[2] = (a31 * b05 - a32 * b04 + a33 * b03) * det;
+  out[3] = (a22 * b04 - a21 * b05 - a23 * b03) * det;
+  out[4] = (a12 * b08 - a10 * b11 - a13 * b07) * det;
+  out[5] = (a00 * b11 - a02 * b08 + a03 * b07) * det;
+  out[6] = (a32 * b02 - a30 * b05 - a33 * b01) * det;
+  out[7] = (a20 * b05 - a22 * b02 + a23 * b01) * det;
+  out[8] = (a10 * b10 - a11 * b08 + a13 * b06) * det;
+  out[9] = (a01 * b08 - a00 * b10 - a03 * b06) * det;
+  out[10] = (a30 * b04 - a31 * b02 + a33 * b00) * det;
+  out[11] = (a21 * b02 - a20 * b04 - a23 * b00) * det;
+  out[12] = (a11 * b07 - a10 * b09 - a12 * b06) * det;
+  out[13] = (a00 * b09 - a01 * b07 + a02 * b06) * det;
+  out[14] = (a31 * b01 - a30 * b03 - a32 * b00) * det;
+  out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * det;
+  return true;
+}
 
 function compile(gl: WebGL2RenderingContext, vsSrc: string, fsSrc: string): WebGLProgram {
   const sh = (type: number, src: string) => {
@@ -399,6 +468,11 @@ export class FieldLayer implements CustomLayerInterface {
   private uploaded = false;
   private epoch = 0;
   private hueLab = new Float32Array(NE * 3);
+  private maskTex: WebGLTexture | null = null;
+  private maskReady = false;
+  private maskRect: [number, number, number, number] = [0, 0, 1, 1];
+  private invMatrix = new Float32Array(16);
+  private invOk = false;
 
   constructor() {
     EMOTIONS.forEach((e, i) => {
@@ -480,6 +554,30 @@ export class FieldLayer implements CustomLayerInterface {
     gl.bindVertexArray(null);
     this.fbo = gl.createFramebuffer();
     this.fbo2 = gl.createFramebuffer();
+
+    // THE LAND MASK — the coastline as a mercator-space texture (built by
+    // scripts/build-landmask.mjs). Loads async; until then (or on failure)
+    // the field simply doesn't clip — never a blocker.
+    const [[west, south], [east, north]] = CAMERA.maxBounds;
+    const tl = mapboxgl.MercatorCoordinate.fromLngLat({ lng: west, lat: north });
+    const br = mapboxgl.MercatorCoordinate.fromLngLat({ lng: east, lat: south });
+    this.maskRect = [tl.x, tl.y, 1 / (br.x - tl.x), 1 / (br.y - tl.y)];
+    const img = new Image();
+    img.onload = () => {
+      if (!this.gl) return;
+      const g = this.gl;
+      this.maskTex = g.createTexture();
+      g.bindTexture(g.TEXTURE_2D, this.maskTex);
+      g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MIN_FILTER, g.LINEAR);
+      g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MAG_FILTER, g.LINEAR);
+      g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_S, g.CLAMP_TO_EDGE);
+      g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_T, g.CLAMP_TO_EDGE);
+      g.texImage2D(g.TEXTURE_2D, 0, g.R8, g.RED, g.UNSIGNED_BYTE, img);
+      this.maskReady = true;
+      this.map?.triggerRepaint();
+    };
+    img.onerror = () => console.error("warmth: land mask failed to load");
+    img.src = FIELD.landMask.url;
   }
 
   /** Make (or remake on resize) a plain RGBA8 linear-clamped texture. */
@@ -547,6 +645,9 @@ export class FieldLayer implements CustomLayerInterface {
     // warp in perfect sync with the sharp field beneath it.
     if (this.epoch === 0) this.epoch = performance.now();
     this.timeSec = (performance.now() - this.epoch) / 1000;
+    // Land mask sampling needs clip → mercator: invert the camera once per
+    // frame (pitch is off, so this is exact for every pixel).
+    this.invOk = invert4(this.invMatrix, matrix);
     this.ensureTargets(gl);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
@@ -697,6 +798,18 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform1f(u("uAspect"), this.texW / Math.max(1, this.texH));
     const w = this.weather;
     gl.uniform2f(u("uAxis"), w.axisX, w.axisY);
+    // The coastline (off until the mask texture lands — never a blocker).
+    const maskOn = this.maskReady && this.invOk;
+    gl.uniform1f(u("uMaskOn"), maskOn ? 1 : 0);
+    if (maskOn) {
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
+      gl.uniform1i(u("uMask"), 2);
+      gl.uniform4f(u("uMaskRect"), ...this.maskRect);
+      gl.uniformMatrix4fv(u("uInvMatrix"), false, this.invMatrix);
+      gl.uniform1f(u("uWaterAtten"), FIELD.landMask.waterAtten);
+    }
+    gl.uniform3f(u("uHeart"), FIELD.heart.from, FIELD.heart.to, FIELD.heart.lift);
   }
 
   render(gl: WebGL2RenderingContext) {
@@ -705,6 +818,14 @@ export class FieldLayer implements CustomLayerInterface {
     const u = (name: string) => this.loc(gl, this.resolveProgram!, "res", name);
     gl.enable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
+
+    // THE ZOOM NARRATIVE: close up, the field thins into breathing ambient
+    // light (never zero) so the city shows through. The streetlight pass is
+    // deliberately NOT thinned — it is the city glowing through.
+    const zt = FIELD.zoomThin;
+    const zoom = this.map?.getZoom() ?? 0;
+    const zx = Math.min(1, Math.max(0, (zoom - zt.from) / (zt.to - zt.from)));
+    const thin = 1 - (1 - zt.floor) * zx * zx * (3 - 2 * zx);
 
     // By day (paper → 1) the glow passes hand off to the pigment pass:
     // light added to a light map is invisible, so feeling stains instead.
@@ -740,7 +861,7 @@ export class FieldLayer implements CustomLayerInterface {
     // Pass 2 — the field itself, additive (alpha 0 under premultiplied).
     if (night > 0.01) {
       gl.uniform1i(u("uMode"), 0);
-      gl.uniform1f(u("uGain"), FIELD.gain * this.fade * night);
+      gl.uniform1f(u("uGain"), FIELD.gain * this.fade * night * thin);
       gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
@@ -754,7 +875,7 @@ export class FieldLayer implements CustomLayerInterface {
       gl.uniform1i(this.loc(gl, this.compositeProgram, "comp", "uSrc"), 0);
       gl.uniform1f(
         this.loc(gl, this.compositeProgram, "comp", "uGain"),
-        WEATHER.bloom.gain * this.fade * night,
+        WEATHER.bloom.gain * this.fade * night * thin,
       );
       gl.blendFunc(gl.ONE, gl.ONE);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -764,6 +885,7 @@ export class FieldLayer implements CustomLayerInterface {
   }
 
   onRemove(_map: MapboxMap, gl: WebGL2RenderingContext) {
+    if (this.maskTex) gl.deleteTexture(this.maskTex);
     for (const t of this.tex) if (t) gl.deleteTexture(t);
     for (const t of this.bloomTex) if (t) gl.deleteTexture(t);
     if (this.fieldColorTex) gl.deleteTexture(this.fieldColorTex);

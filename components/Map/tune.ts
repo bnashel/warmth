@@ -188,10 +188,24 @@ export const FIELD = {
   seedMinRadiusPx: 56,
   /** Kernel falloff exponent on (1 − t²): higher = tighter heart,
    *  longer relative skirt. The edge ALWAYS reaches zero — no rims. */
-  kernelSoftness: 2.0,
+  kernelSoftness: 2.5,
   /** Filmic knee: brightness = 1 − exp(−exposure · pooledWeight).
    *  Raises how fast pooled feeling brightens; never clips to white. */
-  exposure: 0.78,
+  exposure: 1.05,
+  /** THE LUMINOUS HEART: where density peaks, the hue itself lifts toward
+   *  light (OKLab L, capped well below white) — aurora over a dark planet,
+   *  never fog banks. Rides the knee output b across [from, to]. */
+  heart: { from: 0.55, to: 0.95, lift: 0.1 },
+  /** LAND MASK: the field clips to the coastline (rivers and harbor stay
+   *  pure void; fields inherit the city's silhouette). Built by
+   *  scripts/build-landmask.mjs from the neighborhood polygons; sampled in
+   *  mercator space. waterAtten = what survives over open water. */
+  landMask: { url: "/data/nyc-landmask.png", waterAtten: 0.12 },
+  /** ZOOM NARRATIVE: wide = weather systems, mid = neighborhood pools,
+   *  close = the field THINS into breathing ambient light so the city
+   *  shows through (never to zero). Applies to the field + bloom passes;
+   *  the streetlight stays — it IS the city glowing through. */
+  zoomThin: { from: 13.5, to: 16.0, floor: 0.35 },
   /** Dominance power (the mud rule knob): hues mix by Iᵖ share in OKLab.
    *  Higher p = dominant emotion snaps harder, narrower weather fronts. */
   dominance: 5.0,
@@ -203,7 +217,7 @@ export const FIELD = {
    *  light (raw brand hues span L .62–.87). */
   anchorL: 0.76,
   /** Overall field gain on the additive composite. */
-  gain: 0.88,
+  gain: 1.0,
   /** Ambient-seed weight dimmer: the placeholder city is a thin translucent
    *  water layer — REAL feelings (your commit, realtime) burn through it at
    *  full strength. Applies to `seed: true` moments only. */
@@ -319,8 +333,10 @@ export const ATMOSPHERE = {
 export const SHAPES = {
   /** The original: soft circular blooms, edges untouched. */
   bloom: { warpAmp: 0, scale: 8, drift: 0, streak: 0, band: 0 },
-  /** Ink on wet paper: blotted, seeping edges; barely-moving weather. */
-  watercolor: { warpAmp: 0.06, scale: 10, drift: 0.01, streak: 0, band: 0 },
+  /** Ink on wet paper: blotted, seeping edges; barely-moving weather.
+   *  warpAmp raised 2026-07-06: silhouettes come from data + geography,
+   *  never perfect circles (constitution / phase 3). */
+  watercolor: { warpAmp: 0.085, scale: 10, drift: 0.01, streak: 0, band: 0 },
   /** Drops dispersing in water: streakier, curling, visibly alive. */
   ink: { warpAmp: 0.095, scale: 14, drift: 0.05, streak: 0.5, band: 0 },
   /** Northern lights: feeling stretched into flowing ribbons. */
