@@ -135,7 +135,16 @@ export function buildTrailLayers(
       new EmotionGlowLayer({
         id: "trail-stains",
         ...shared,
-        light: { ...TRAIL.light, gain: TRAIL.gain * fade, pigment: paper },
+        // Pigment pools, light spills: the stain wears a tighter skirt and
+        // a smaller quad than the night dot, and marks a touch deeper —
+        // a crisp diary mark, not a blur (Ben's report).
+        radiusScale: shared.radiusScale * TRAIL.stain.radiusScale,
+        light: {
+          ...TRAIL.light,
+          tailFalloff: TRAIL.stain.tailFalloff,
+          gain: TRAIL.gain * TRAIL.stain.gainBoost * fade,
+          pigment: paper,
+        },
         parameters: PIGMENT_STAIN,
       }),
     );
