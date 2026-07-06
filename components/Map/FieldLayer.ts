@@ -108,6 +108,40 @@ void main() {
 }
 `;
 
+/* BLOOM (v2): Kawase-style blur — 4 diagonal taps, widening offset per
+ * pass. The first pass subtracts a threshold so only the brighter feeling
+ * blooms, never the ambient wash. */
+const BLUR_FS = /* glsl */ `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uSrc;
+uniform vec2 uTexel;
+uniform float uOffset;
+uniform float uThreshold;
+out vec4 fragColor;
+void main() {
+  vec2 off = uTexel * uOffset;
+  vec3 c = texture(uSrc, vUv + vec2( off.x,  off.y)).rgb
+         + texture(uSrc, vUv + vec2(-off.x,  off.y)).rgb
+         + texture(uSrc, vUv + vec2( off.x, -off.y)).rgb
+         + texture(uSrc, vUv + vec2(-off.x, -off.y)).rgb;
+  c = max(vec3(0.0), c * 0.25 - vec3(uThreshold));
+  fragColor = vec4(c, 1.0);
+}
+`;
+
+/* Bloom composite: the halo, added over the night city. */
+const COMPOSITE_FS = /* glsl */ `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uSrc;
+uniform float uGain;
+out vec4 fragColor;
+void main() {
+  fragColor = vec4(texture(uSrc, vUv).rgb * uGain, 0.0);
+}
+`;
+
 const RESOLVE_FS = /* glsl */ `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -346,8 +380,17 @@ export class FieldLayer implements CustomLayerInterface {
   private gl: WebGL2RenderingContext | null = null;
   private accumProgram: WebGLProgram | null = null;
   private resolveProgram: WebGLProgram | null = null;
+  private blurProgram: WebGLProgram | null = null;
+  private compositeProgram: WebGLProgram | null = null;
   private fbo: WebGLFramebuffer | null = null;
+  private fbo2: WebGLFramebuffer | null = null; // single-attachment passes
   private tex: [WebGLTexture | null, WebGLTexture | null] = [null, null];
+  private fieldColorTex: WebGLTexture | null = null;
+  private bloomTex: [WebGLTexture | null, WebGLTexture | null] = [null, null];
+  private bloomW = 0;
+  private bloomH = 0;
+  private timeSec = 0;
+  private bloomReady = false;
   private texW = 0;
   private texH = 0;
   private halfFloat = false;
@@ -410,6 +453,8 @@ export class FieldLayer implements CustomLayerInterface {
     this.halfFloat = gl.getExtension("EXT_color_buffer_half_float") !== null;
     this.accumProgram = compile(gl, ACCUM_VS, ACCUM_FS);
     this.resolveProgram = compile(gl, RESOLVE_VS, RESOLVE_FS);
+    this.blurProgram = compile(gl, RESOLVE_VS, BLUR_FS);
+    this.compositeProgram = compile(gl, RESOLVE_VS, COMPOSITE_FS);
 
     // Quad geometry + instance buffer.
     this.quadVao = gl.createVertexArray();
@@ -435,6 +480,19 @@ export class FieldLayer implements CustomLayerInterface {
     this.resolveVao = gl.createVertexArray(); // fullscreen triangle: no attribs
     gl.bindVertexArray(null);
     this.fbo = gl.createFramebuffer();
+    this.fbo2 = gl.createFramebuffer();
+  }
+
+  /** Make (or remake on resize) a plain RGBA8 linear-clamped texture. */
+  private makeTex(gl: WebGL2RenderingContext, w: number, h: number): WebGLTexture {
+    const t = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    return t;
   }
 
   private ensureTargets(gl: WebGL2RenderingContext) {
@@ -469,11 +527,27 @@ export class FieldLayer implements CustomLayerInterface {
       this.tex[i] = t;
     }
     gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+
+    // Bloom targets: field-res color + two blur ping-pongs at bloom scale.
+    if (this.fieldColorTex) gl.deleteTexture(this.fieldColorTex);
+    for (const t of this.bloomTex) if (t) gl.deleteTexture(t);
+    this.fieldColorTex = this.makeTex(gl, w, h);
+    this.bloomW = Math.max(2, Math.round(w * WEATHER.bloom.scale));
+    this.bloomH = Math.max(2, Math.round(h * WEATHER.bloom.scale));
+    this.bloomTex = [
+      this.makeTex(gl, this.bloomW, this.bloomH),
+      this.makeTex(gl, this.bloomW, this.bloomH),
+    ];
   }
 
   /** Offscreen accumulation — mapbox's sanctioned hook for FBO work. */
   prerender(gl: WebGL2RenderingContext, matrix: number[]) {
+    this.bloomReady = false;
     if (!this.accumProgram || !this.map || this.fade < 0.01) return;
+    // One clock per frame, shared by every pass — the bloom's halo must
+    // warp in perfect sync with the sharp field beneath it.
+    if (this.epoch === 0) this.epoch = performance.now();
+    this.timeSec = (performance.now() - this.epoch) / 1000;
     this.ensureTargets(gl);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
@@ -528,8 +602,47 @@ export class FieldLayer implements CustomLayerInterface {
     gl.blendFunc(gl.ONE, gl.ONE);
     gl.disable(gl.DEPTH_TEST);
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, this.count);
-
     gl.bindVertexArray(null);
+
+    // BLOOM (v2, night only): resolve the field into a color texture, blur
+    // it wide (Kawase ×2, thresholded so only bright feeling blooms), and
+    // let render() add the halo. All FBO work stays in this sanctioned hook.
+    const night = 1 - this.paper;
+    if (WEATHER.bloom.gain > 0 && night > 0.01 && this.fbo2) {
+      gl.disable(gl.BLEND);
+      // 1) the field's own color, full resolve, into fieldColorTex.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo2);
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.fieldColorTex, 0,
+      );
+      gl.viewport(0, 0, this.texW, this.texH);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      this.bindResolve(gl);
+      gl.uniform1i(this.loc(gl, this.resolveProgram!, "res", "uMode"), 0);
+      gl.uniform1f(this.loc(gl, this.resolveProgram!, "res", "uGain"), FIELD.gain);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      // 2) blur down into bloomTex[0] (thresholded), then widen into [1].
+      gl.useProgram(this.blurProgram!);
+      const passes: [WebGLTexture | null, WebGLTexture | null, number, number, number, number][] = [
+        [this.fieldColorTex, this.bloomTex[0], 1 / this.texW, 1 / this.texH, 1.5, WEATHER.bloom.threshold],
+        [this.bloomTex[0], this.bloomTex[1], 1 / this.bloomW, 1 / this.bloomH, 2.5, 0],
+      ];
+      for (const [src, dst, tx, ty, offset, threshold] of passes) {
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dst, 0);
+        gl.viewport(0, 0, this.bloomW, this.bloomH);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, src);
+        gl.uniform1i(this.loc(gl, this.blurProgram!, "blur", "uSrc"), 0);
+        gl.uniform2f(this.loc(gl, this.blurProgram!, "blur", "uTexel"), tx, ty);
+        gl.uniform1f(this.loc(gl, this.blurProgram!, "blur", "uOffset"), offset);
+        gl.uniform1f(this.loc(gl, this.blurProgram!, "blur", "uThreshold"), threshold);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
+      gl.bindVertexArray(null);
+      this.bloomReady = true;
+    }
+
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
   }
@@ -538,25 +651,27 @@ export class FieldLayer implements CustomLayerInterface {
   private floorPx = new Float32Array(0);
   private uniformCache = new Map<string, WebGLUniformLocation | null>();
 
-  render(gl: WebGL2RenderingContext) {
-    if (!this.resolveProgram || this.count === 0 || this.fade < 0.01) return;
-    if (this.epoch === 0) this.epoch = performance.now();
-    const periodSec = FIELD.breath.periodMs / 1000;
-    // Continuous, NOT modulo the breath period: the flow warp and aurora
-    // curtains drift on this clock, and a wrap would visibly snap them.
-    // sin() keeps the breath periodic regardless.
-    const timeSec = (performance.now() - this.epoch) / 1000;
+  /** Uniform-location cache across our four programs. */
+  private loc(
+    gl: WebGL2RenderingContext,
+    prog: WebGLProgram,
+    tag: string,
+    name: string,
+  ): WebGLUniformLocation | null {
+    const key = `${tag}:${name}`;
+    let l = this.uniformCache.get(key);
+    if (l === undefined) {
+      l = gl.getUniformLocation(prog, name);
+      this.uniformCache.set(key, l);
+    }
+    return l;
+  }
 
-    gl.useProgram(this.resolveProgram);
+  /** Program + VAO + every shared resolve uniform (mode/gain per pass). */
+  private bindResolve(gl: WebGL2RenderingContext) {
+    gl.useProgram(this.resolveProgram!);
     gl.bindVertexArray(this.resolveVao);
-    const u = (name: string) => {
-      let loc = this.uniformCache.get(name);
-      if (loc === undefined) {
-        loc = gl.getUniformLocation(this.resolveProgram!, name);
-        this.uniformCache.set(name, loc);
-      }
-      return loc;
-    };
+    const u = (name: string) => this.loc(gl, this.resolveProgram!, "res", name);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.tex[0]);
     gl.activeTexture(gl.TEXTURE1);
@@ -567,8 +682,8 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform1f(u("uExposure"), FIELD.exposure);
     gl.uniform1f(u("uDominance"), FIELD.dominance);
     gl.uniform1f(u("uChromaFloor"), FIELD.chromaFloor);
-    gl.uniform1f(u("uTimeSec"), timeSec);
-    gl.uniform1f(u("uBreathPeriod"), periodSec);
+    gl.uniform1f(u("uTimeSec"), this.timeSec);
+    gl.uniform1f(u("uBreathPeriod"), FIELD.breath.periodMs / 1000);
     gl.uniform1f(u("uBreathAmp"), FIELD.breath.amp);
     gl.uniform4f(u("uShape"), this.look.warpAmp, this.look.scale, this.look.drift, this.look.streak);
     gl.uniform1f(u("uBand"), this.look.band);
@@ -578,12 +693,19 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform1f(u("uCloud"), w.cloud);
     gl.uniform1f(u("uWet"), w.wet);
     gl.uniform1f(u("uSnow"), w.snow);
+  }
+
+  render(gl: WebGL2RenderingContext) {
+    if (!this.resolveProgram || this.count === 0 || this.fade < 0.01) return;
+    this.bindResolve(gl);
+    const u = (name: string) => this.loc(gl, this.resolveProgram!, "res", name);
     gl.enable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
 
     // By day (paper → 1) the glow passes hand off to the pigment pass:
     // light added to a light map is invisible, so feeling stains instead.
     const night = 1 - this.paper;
+    const w = this.weather;
     // Fog: the feeling recedes into the veil, whichever way it's painted.
     const fogDim = 1 - WEATHER.fogFieldDim * w.fog;
 
@@ -617,14 +739,34 @@ export class FieldLayer implements CustomLayerInterface {
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
 
+    // Pass 3 — BLOOM: the halo of feeling, added over the night city.
+    // (Prepared in prerender; clouds diffuse it a touch further.)
+    if (this.bloomReady && this.compositeProgram) {
+      gl.useProgram(this.compositeProgram);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.bloomTex[1]);
+      gl.uniform1i(this.loc(gl, this.compositeProgram, "comp", "uSrc"), 0);
+      gl.uniform1f(
+        this.loc(gl, this.compositeProgram, "comp", "uGain"),
+        WEATHER.bloom.gain * this.fade * night * fogDim * (1 - 0.3 * w.cloud),
+      );
+      gl.blendFunc(gl.ONE, gl.ONE);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
     gl.bindVertexArray(null);
   }
 
   onRemove(_map: MapboxMap, gl: WebGL2RenderingContext) {
     for (const t of this.tex) if (t) gl.deleteTexture(t);
+    for (const t of this.bloomTex) if (t) gl.deleteTexture(t);
+    if (this.fieldColorTex) gl.deleteTexture(this.fieldColorTex);
     if (this.fbo) gl.deleteFramebuffer(this.fbo);
+    if (this.fbo2) gl.deleteFramebuffer(this.fbo2);
     if (this.accumProgram) gl.deleteProgram(this.accumProgram);
     if (this.resolveProgram) gl.deleteProgram(this.resolveProgram);
+    if (this.blurProgram) gl.deleteProgram(this.blurProgram);
+    if (this.compositeProgram) gl.deleteProgram(this.compositeProgram);
     this.map = null;
     this.gl = null;
   }

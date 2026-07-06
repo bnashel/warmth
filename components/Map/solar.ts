@@ -83,7 +83,10 @@ export function solarDate(): Date {
 export function atmosphereInk(a: AtmosphereState): Record<InkKey, string> {
   const snow = a.wetKind === "snow" ? a.wet : 0;
   const rain = a.wetKind === "rain" ? a.wet : 0;
+  const night = 1 - a.light;
   const mist = hexToRgb(a.paper > 0.5 ? WEATHER.fogMist.day : WEATHER.fogMist.night);
+  const glow = hexToRgb(WEATHER.skyGlow.color);
+  const moonInk = hexToRgb(WEATHER.moonLift.color);
   const out = {} as Record<InkKey, string>;
 
   for (const k of INK_KEYS) {
@@ -98,7 +101,18 @@ export function atmosphereInk(a: AtmosphereState): Record<InkKey, string> {
       const l = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
       c = lerpRgb(c, [l, l, l], a.cloud * WEATHER.cloudDesat);
       c = scaleRgb(c, 1 - WEATHER.cloudDayDim * a.cloud * a.light);
+      // …and at NIGHT the city glows the way real cities do under clouds:
+      // the void lifts toward a warm sky-glow, never staying pure black —
+      // this is how overcast READS after dark (Ben's field report).
+      if (k !== "road") {
+        c = lerpRgb(c, glow, a.cloud * WEATHER.skyGlow.lift * night * (1 - a.ember));
+      }
     }
+
+    // Moonlight: a faint cool wash on clear nights, scaled by the moon's
+    // illuminated fraction — a full moon genuinely reads brighter.
+    const moonW = a.moon * (1 - a.cloud) * night * WEATHER.moonLift.weight;
+    if (moonW > 0.001 && k !== "road") c = lerpRgb(c, moonInk, moonW);
 
     // Snow: paper goes cold-bright; the night lifts a breath (snow-lit sky).
     if (snow > 0.001) {

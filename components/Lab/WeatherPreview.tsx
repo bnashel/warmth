@@ -90,6 +90,20 @@ function Row<T extends { key: string; label: string }>({
   );
 }
 
+/** Plain-English read of the live targets — trust that it's really live. */
+function describeRealSky(): string {
+  const s = atmosphere.realSky();
+  if (!s.live) return "live sky: fetching…";
+  const parts: string[] = [];
+  if (s.wet > 0.02) parts.push(s.wetKind === "snow" ? "snowing" : "raining");
+  else if (s.fog > 0.3) parts.push("foggy");
+  else if (s.cloud > 0.85) parts.push("overcast");
+  else if (s.cloud > 0.4) parts.push("partly cloudy");
+  else parts.push("clear");
+  if (s.rawWindKmh >= 8) parts.push(`wind ${s.rawWindKmh} km/h`);
+  return `live sky: ${parts.join(", ")}`;
+}
+
 export function WeatherPreview() {
   const [open, setOpen] = useState(false);
   const [time, setTime] = useState("now");
@@ -189,6 +203,16 @@ export function WeatherPreview() {
               <p
                 style={{
                   margin: 0,
+                  fontSize: 10.5,
+                  letterSpacing: "0.04em",
+                  color: "rgba(233,236,244,0.5)",
+                }}
+              >
+                {describeRealSky()}
+              </p>
+              <p
+                style={{
+                  margin: "-9px 0 0",
                   fontSize: 10,
                   letterSpacing: "0.04em",
                   color: "rgba(233,236,244,0.3)",

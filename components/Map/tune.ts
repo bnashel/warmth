@@ -329,6 +329,9 @@ export const WEATHER = {
   /** Exponential ease for every atmosphere value: real weather rolls in
    *  like weather (~20s to settle a big change); nothing ever switches. */
   easeTauMs: 6_000,
+  /** Under a dev-preview override the ease runs fast (~6s to settle) —
+   *  Ben toggles to SEE, not to wait (his field report, 2026-07-06). */
+  previewTauMs: 1_800,
 
   /* -- overcast: the sky's gray weight ------------------------------ */
   cloudFieldDim: 0.26, // field brightness loss under full overcast
@@ -357,6 +360,31 @@ export const WEATHER = {
   windWarp: 0.05, // + warp amplitude at full wind
   windDrift: 0.06, // + drift speed at full wind
   windStreak: 0.35, // anisotropy along the real wind axis
+
+  /* -- the night sky (v2): weather must READ at night ----------------- */
+  /** Overcast night: real cities glow under clouds — the ink lifts toward
+   *  a warm sky-glow instead of staying void-black. */
+  skyGlow: { color: "#231F1A", lift: 0.5 },
+  /** Moonlight: clear nights take a faint cool wash, scaled by the moon's
+   *  illuminated fraction while it's up (suncalc). */
+  moonLift: { color: "#131722", weight: 0.55 },
+
+  /* -- bloom (v2): feeling blooms real light into the night ---------- */
+  bloom: {
+    gain: 0.55, // strength of the halo pass (night only; 0 kills it)
+    threshold: 0.25, // only the brighter field blooms, never the wash
+    scale: 0.25, // blur-target scale vs field target (quarter = soft+cheap)
+  },
+
+  /* -- precipitation (v2): visible weather between you and the city --- */
+  precip: {
+    count: 320, // instanced streaks/flakes — capped, fill-rate friendly
+    rain: { speed: 1.1, lengthPx: 46, widthPx: 1.4, alpha: 0.20, windTilt: 0.55 },
+    snow: { speed: 0.12, sizePx: 3.2, alpha: 0.5, sway: 0.35 },
+    /** Streaks are pale light on the ink night, graphite mist on paper. */
+    night: "#C9D2E4",
+    day: "#5A6478",
+  },
 
   /* -- rain sound (patter under everything; gesture-unlocked) -------- */
   rainSound: { maxGain: 0.045, lfoHz: 0.19, lfoDepth: 0.35 },

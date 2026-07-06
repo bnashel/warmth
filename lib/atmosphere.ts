@@ -20,6 +20,7 @@
  * previews time the same way. Offline or fetch failure degrades to clear
  * sky — the sun half needs no network, so the map is never wrong or frozen.
  */
+import * as SunCalc from "suncalc";
 import { CAMERA, SOLAR, WEATHER } from "@/components/Map/tune";
 import { solarDate } from "@/components/Map/solar";
 import { sunElevationDeg } from "./sun";
@@ -45,6 +46,9 @@ export type AtmosphereState = {
   /** Unit-ish vector the air flows toward, in map-screen terms (north-up). */
   axisX: number;
   axisY: number;
+  /** Moonlight 0..1: illuminated fraction while the moon is up (suncalc).
+   *  Visuals additionally scale it by clearness — clouds hide the moon. */
+  moon: number;
 };
 
 export type AtmosphereOverride = Partial<
@@ -81,6 +85,10 @@ type WeatherTargets = {
   wind: number;
   axisX: number;
   axisY: number;
+  /** Raw km/h — for the dev panel's "live sky" readout only. */
+  rawWindKmh: number;
+  /** True once a real fetch has landed (the readout says so). */
+  live: boolean;
 };
 
 const CLEAR: WeatherTargets = {
@@ -91,6 +99,8 @@ const CLEAR: WeatherTargets = {
   wind: 0.15, // a whisper of drift even on a still day — the map breathes
   axisX: 0.94,
   axisY: 0.33, // the old fixed diagonal: calm default flow
+  rawWindKmh: 0,
+  live: false,
 };
 
 /** Parse ?cloud=&wet=&kind=&fog=&wind=&windDir= into an initial override. */
@@ -127,6 +137,7 @@ class AtmosphereEngine {
     wind: CLEAR.wind,
     axisX: CLEAR.axisX,
     axisY: CLEAR.axisY,
+    moon: 0,
   };
 
   private weather: WeatherTargets = { ...CLEAR };
@@ -136,8 +147,14 @@ class AtmosphereEngine {
   private sunLight = 0;
   private sunEmber = 0;
   private sunPaper = 0;
+  private sunMoon = 0;
   private fetching = false;
   private started = false;
+
+  /** The live sky's targets (for the dev panel readout). */
+  realSky(): Readonly<WeatherTargets> {
+    return this.weather;
+  }
 
   /** Lazy start — first tick begins the fetch loop (client only). */
   private start() {
@@ -179,13 +196,19 @@ class AtmosphereEngine {
     const now = performance.now();
     if (!force && now - this.lastSun < 1000) return; // trig once a second is plenty
     this.lastSun = now;
-    const elev = sunElevationDeg(solarDate(), CAMERA.initial.latitude, CAMERA.initial.longitude);
+    const date = solarDate();
+    const elev = sunElevationDeg(date, CAMERA.initial.latitude, CAMERA.initial.longitude);
     this.sunLight = smoothstep(SOLAR.dayRamp.from, SOLAR.dayRamp.to, elev) * SOLAR.strength;
     this.sunEmber =
       smoothstep(SOLAR.emberRamp.rise.from, SOLAR.emberRamp.rise.to, elev) *
       (1 - smoothstep(SOLAR.emberRamp.fade.from, SOLAR.emberRamp.fade.to, elev)) *
       SOLAR.strength;
     this.sunPaper = smoothstep(SOLAR.paperRamp.from, SOLAR.paperRamp.to, elev) * SOLAR.strength;
+    // The moon (suncalc): illuminated fraction while it's up, fading in
+    // across its first ~10° of altitude so moonrise never steps.
+    const mp = SunCalc.getMoonPosition(date, CAMERA.initial.latitude, CAMERA.initial.longitude);
+    const up = smoothstep(0, 10, (mp.altitude * 180) / Math.PI);
+    this.sunMoon = up * SunCalc.getMoonIllumination(date).fraction;
   }
 
   private async fetchWeather() {
@@ -227,6 +250,8 @@ class AtmosphereEngine {
         wind: clamp01(1 - Math.exp(-(c.wind_speed_10m ?? 0) / 18)),
         axisX: ax,
         axisY: ay,
+        rawWindKmh: Math.round(c.wind_speed_10m ?? 0),
+        live: true,
       };
     } catch {
       // offline — the sun keeps living, the sky stays as last seen
@@ -241,7 +266,10 @@ class AtmosphereEngine {
     this.computeSun();
     const dt = this.lastTick ? Math.min(100, nowMs - this.lastTick) : 16;
     this.lastTick = nowMs;
-    const k = 1 - Math.exp(-dt / WEATHER.easeTauMs);
+    // Real weather rolls in slowly; a dev-preview toggle answers in seconds
+    // (Ben toggles to SEE — his field report).
+    const tau = this.override ? WEATHER.previewTauMs : WEATHER.easeTauMs;
+    const k = 1 - Math.exp(-dt / tau);
     const o = this.override;
     const t = this.weather;
     const cur = this.current;
@@ -257,6 +285,7 @@ class AtmosphereEngine {
     cur.wind = ease(cur.wind, o?.wind ?? t.wind);
     cur.axisX = ease(cur.axisX, t.axisX);
     cur.axisY = ease(cur.axisY, t.axisY);
+    cur.moon = ease(cur.moon, this.sunMoon);
     // Rain never teleports into snow: a kind change DRIVES the wet to zero
     // first (the sky drying for a beat), flips, then eases back up — so a
     // mid-storm changeover actually happens (review finding).

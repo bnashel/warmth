@@ -13,6 +13,7 @@ import { CAMERA, CHOREO, INK, MOTION, PERF, SHAPES, SOLAR, WEATHER } from "./tun
 import { buildStyle } from "./styles";
 import { applyAtmosphereInk } from "./solar";
 import { FieldLayer } from "./FieldLayer";
+import { PrecipLayer } from "./PrecipLayer";
 import { buildLabelLayers, loadLabels } from "./neighborhoods";
 import { buildTrailLayers } from "@/components/Trail/glow";
 import type { Map as MapboxMap } from "mapbox-gl";
@@ -51,6 +52,7 @@ export default function MapStage({
   const mapRef = useRef<MapRef | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const fieldRef = useRef<FieldLayer | null>(null);
+  const precipRef = useRef<PrecipLayer | null>(null);
   const labelData = useRef<Awaited<ReturnType<typeof loadLabels>>>([]);
   const labelCache = useRef<{
     zoom: number;
@@ -146,11 +148,11 @@ export default function MapStage({
       const trailOn = viewMix.current > 0.01;
 
       // Hand the atmosphere to the field — in-place mutation, no allocation.
+      const rain = atmo.wetKind === "rain" ? atmo.wet : 0;
+      const snow = atmo.wetKind === "snow" ? atmo.wet : 0;
       if (field) {
         field.fade = 1 - viewMix.current;
         field.paper = atmo.paper;
-        const rain = atmo.wetKind === "rain" ? atmo.wet : 0;
-        const snow = atmo.wetKind === "snow" ? atmo.wet : 0;
         const look = field.look;
         look.warpAmp = SHAPES.watercolor.warpAmp + atmo.wind * WEATHER.windWarp + rain * WEATHER.wetWarp;
         look.drift =
@@ -165,15 +167,26 @@ export default function MapStage({
         w.axisX = atmo.axisX;
         w.axisY = atmo.axisY;
       }
+      // …and to the falling weather (it rains on both views alike).
+      const precip = precipRef.current;
+      if (precip) {
+        precip.wet = atmo.wet;
+        precip.snow = snow > rain ? 1 : 0;
+        precip.windX = atmo.axisX * atmo.wind;
+        precip.paper = atmo.paper;
+      }
 
       // Rain patter follows the wet (snow is a hush — silent by design).
       if (now - lastRainPush > 800) {
         lastRainPush = now;
-        setRainLevel(atmo.wetKind === "rain" ? atmo.wet : 0);
+        setRainLevel(rain);
       }
 
-      // Rest-throttle — bypassed while moving, blooming, or crossfading.
-      if (!map.isMoving() && !arriving && !fading && now - lastPush < PERF.restFrameMs) return;
+      // Rest-throttle — bypassed while moving, blooming, crossfading, or
+      // precipitating (falling drops need full rate; only while it rains).
+      const precipitating = atmo.wet > 0.03;
+      if (!map.isMoving() && !arriving && !fading && !precipitating && now - lastPush < PERF.restFrameMs)
+        return;
       lastPush = now;
 
       if (field && momentsStore.version !== dataVersion.current) {
@@ -251,6 +264,14 @@ export default function MapStage({
           } catch (err) {
             console.error("warmth: field layer failed to start", err);
           }
+          // Falling weather, above the field (still under the deck labels).
+          try {
+            const precip = new PrecipLayer();
+            map.addLayer(precip);
+            precipRef.current = precip;
+          } catch (err) {
+            console.error("warmth: precip layer failed to start", err);
+          }
           // First coat of atmosphere ink (real sun + weather, or preview).
           atmosphere.tick(performance.now());
           applyAtmosphereInk(map, atmosphere.current);
@@ -275,6 +296,15 @@ export default function MapStage({
               dataVersion.current = -1; // force the tick to re-feed the data
             } catch (err) {
               console.error("warmth: field layer failed to restore", err);
+            }
+            // The falling weather needs the same resurrection.
+            try {
+              if (map.getLayer("precip")) map.removeLayer("precip");
+              const freshPrecip = new PrecipLayer();
+              map.addLayer(freshPrecip);
+              precipRef.current = freshPrecip; // tick re-feeds it next frame
+            } catch (err) {
+              console.error("warmth: precip layer failed to restore", err);
             }
           });
           // Lab-only hook so the screenshot/perf harness can set exact cameras.
