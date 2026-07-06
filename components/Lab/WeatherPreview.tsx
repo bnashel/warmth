@@ -10,7 +10,7 @@
  * code paths of its own, and the whole component renders null in production
  * (same gate as /lab and /maplab), so it never ships.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { SPRING } from "@/lib/theme";
 import { atmosphere, type AtmosphereOverride } from "@/lib/atmosphere";
@@ -108,6 +108,14 @@ export function WeatherPreview() {
   const [open, setOpen] = useState(false);
   const [time, setTime] = useState("now");
   const [sky, setSky] = useState("now");
+  // Re-read the live sky while the panel is open, so "fetching…" resolves
+  // on its own the moment Open-Meteo answers (review finding).
+  const [, setSkyTick] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    const iv = window.setInterval(() => setSkyTick((n) => n + 1), 2_000);
+    return () => window.clearInterval(iv);
+  }, [open]);
 
   if (!DEV) return null;
 

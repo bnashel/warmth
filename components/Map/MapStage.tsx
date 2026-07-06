@@ -297,11 +297,16 @@ export default function MapStage({
             } catch (err) {
               console.error("warmth: field layer failed to restore", err);
             }
-            // The falling weather needs the same resurrection.
+            // The falling weather needs the same resurrection — re-added in
+            // place, or it would land on top of the deck labels (review).
             try {
-              if (map.getLayer("precip")) map.removeLayer("precip");
+              const pLayers = map.getStyle()?.layers ?? [];
+              const pAt = pLayers.findIndex((l) => l.id === "precip");
+              const pBefore =
+                pAt >= 0 && pAt + 1 < pLayers.length ? pLayers[pAt + 1].id : undefined;
+              if (pAt >= 0) map.removeLayer("precip");
               const freshPrecip = new PrecipLayer();
-              map.addLayer(freshPrecip);
+              map.addLayer(freshPrecip, pBefore);
               precipRef.current = freshPrecip; // tick re-feeds it next frame
             } catch (err) {
               console.error("warmth: precip layer failed to restore", err);

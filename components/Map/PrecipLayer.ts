@@ -21,7 +21,9 @@ layout(location=1) in vec4 seed;     // 4 per-instance hashes (0..1)
 uniform float uTime;
 uniform float uMode;                 // 0 rain, 1 snow
 uniform float uWindX;                // horizontal drift (signed, 0..~1)
-uniform vec2 uSizeClip;              // streak length/width (or flake size) in clip units
+uniform vec2 uSizePx;                // half length/width (or flake radius), CSS px
+uniform vec2 uPxToClip;              // (2/clientW, 2/clientH)
+uniform float uAspect;               // clientW / clientH
 uniform float uSpeed;
 out vec2 vUv;
 out float vShade;
@@ -29,17 +31,21 @@ void main() {
   vUv = corner;
   vShade = 0.45 + 0.55 * seed.w;     // per-drop presence variation
   float sp = uSpeed * (0.65 + 0.7 * seed.z);
+  float tilt = ${WEATHER.precip.rain.windTilt.toFixed(2)};
   // Diagonal loop: every instance falls forever, wrapping a 2.6-wide band.
+  // ONE tilt constant drives both the motion and the orientation, so drops
+  // always point exactly where they travel (review finding).
   float sway = uMode * sin(6.2831853 * (uTime * 0.13 + seed.y * 7.0)) * ${WEATHER.precip.snow.sway.toFixed(2)};
-  float x = fract(seed.x + uTime * sp * uWindX * 0.22) * 2.6 - 1.3 + sway * 0.08;
+  float x = fract(seed.x + uTime * sp * uWindX * tilt) * 2.6 - 1.3 + sway * 0.08;
   float y = 1.3 - fract(seed.y + uTime * sp) * 2.6;
-  // Streak orientation follows the fall direction (rain); snow stays round.
-  vec2 dir = normalize(vec2(uWindX * ${WEATHER.precip.rain.windTilt.toFixed(2)}, -1.0));
-  vec2 axis = mix(dir, vec2(0.0, -1.0), uMode);
-  vec2 perp = vec2(-axis.y, axis.x);
-  vec2 pos = vec2(x, y)
-           + axis * corner.y * uSizeClip.x
-           + perp * corner.x * uSizeClip.y;
+  // The quad is built in PIXEL space (clip x and y scale differently with
+  // the window shape — a clip-space normalize sheared streaks on wide
+  // screens; review finding). Clip slope tilt·wind → pixel slope ×aspect.
+  vec2 dirPx = normalize(vec2(uWindX * tilt * uAspect, -1.0));
+  vec2 axisPx = mix(dirPx, vec2(0.0, -1.0), uMode);
+  vec2 perpPx = vec2(-axisPx.y, axisPx.x);
+  vec2 offPx = axisPx * corner.y * uSizePx.x + perpPx * corner.x * uSizePx.y;
+  vec2 pos = vec2(x, y) + offPx * uPxToClip;
   gl_Position = vec4(pos, 0.0, 1.0);
 }
 `;
@@ -151,27 +157,33 @@ export class PrecipLayer implements CustomLayerInterface {
 
   render(gl: WebGL2RenderingContext) {
     const intensity = this.wet * this.fade;
-    if (!this.program || !this.map || intensity < 0.02) return;
+    if (!this.program || !this.map || intensity < 0.02) {
+      // Rebase the clock while nothing is falling: fp32 time inside fract()
+      // quantizes after hours of uptime; a dry moment is a free reshuffle.
+      this.epoch = 0;
+      return;
+    }
     if (this.epoch === 0) this.epoch = performance.now();
     const t = (performance.now() - this.epoch) / 1000;
     const mode = this.snow > 0.5 ? 1 : 0;
     const p = WEATHER.precip;
 
-    // CSS px → clip units (drawingBuffer already carries the DPR).
     const canvas = this.map.getCanvas();
-    const pxY = 2 / Math.max(1, canvas.clientHeight);
-    const pxX = 2 / Math.max(1, canvas.clientWidth);
-    const sizeClip: [number, number] =
+    const cw = Math.max(1, canvas.clientWidth);
+    const ch = Math.max(1, canvas.clientHeight);
+    const sizePx: [number, number] =
       mode === 1
-        ? [p.snow.sizePx * pxY * 0.5, p.snow.sizePx * pxX * 0.5]
-        : [p.rain.lengthPx * pxY * 0.5, p.rain.widthPx * pxX * 0.5];
+        ? [p.snow.sizePx * 0.5, p.snow.sizePx * 0.5]
+        : [p.rain.lengthPx * 0.5, p.rain.widthPx * 0.5];
 
     gl.useProgram(this.program);
     gl.bindVertexArray(this.vao);
     gl.uniform1f(this.loc(gl, "uTime"), t);
     gl.uniform1f(this.loc(gl, "uMode"), mode);
     gl.uniform1f(this.loc(gl, "uWindX"), this.windX);
-    gl.uniform2f(this.loc(gl, "uSizeClip"), sizeClip[0], sizeClip[1]);
+    gl.uniform2f(this.loc(gl, "uSizePx"), sizePx[0], sizePx[1]);
+    gl.uniform2f(this.loc(gl, "uPxToClip"), 2 / cw, 2 / ch);
+    gl.uniform1f(this.loc(gl, "uAspect"), cw / ch);
     gl.uniform1f(this.loc(gl, "uSpeed"), mode === 1 ? p.snow.speed : p.rain.speed);
     const rgb = [
       NIGHT_RGB[0] + (DAY_RGB[0] - NIGHT_RGB[0]) * this.paper,
