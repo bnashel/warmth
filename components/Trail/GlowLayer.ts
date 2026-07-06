@@ -122,13 +122,16 @@ void main(void) {
     float wash = smoothstep(1.0, glow.stainEdge, rr);
     float pool = 1.0 + glow.stainRing * smoothstep(glow.stainEdge * 0.55, glow.stainEdge, rr);
     float heart = 1.0 - glow.stainHeart * (1.0 - smoothstep(0.0, glow.stainEdge * 0.7, rr));
-    float s = (glow.peakBase + glow.peakPerIntensity * w) * glow.gain * wash * pool * heart;
+    float s = (glow.peakBase + glow.peakPerIntensity * w) * glow.gain * wash * pool;
     s *= smoothstep(0.0, 0.12, w);          // arrivals/fades still reach zero
     s += (n - 0.5) * 0.006;                 // dither the edge, band-free
     // Soft-knee depth cap: saturates toward 0.9, slope never breaks — a
     // fresh mark is confident ink (~0.85 at center, pooled rim deeper), a
     // week-old one visibly lighter; never a bruise, no plateau rim.
-    float stain = 0.9 * (1.0 - exp(-max(s, 0.0) / 0.5)) * glow.pigment;
+    // The heart lightens AFTER the knee — pre-knee it compresses to
+    // nothing on fresh marks (design review) — so 0.12 means 0.12 at
+    // every age and no mark ever reads as a flat disc.
+    float stain = 0.9 * (1.0 - exp(-max(s, 0.0) / 0.5)) * heart * glow.pigment;
     fragColor = vec4(mix(vec3(1.0), pig, stain), 1.0);
     DECKGL_FILTER_COLOR(fragColor, geometry);
     return;
