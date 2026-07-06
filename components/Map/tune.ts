@@ -48,6 +48,10 @@ export const JOURNEY = {
   avenueFade: { from: 11.8, to: 13.4 }, // primary/secondary (5th Ave, Bedford)
   localFade: { from: 13.2, to: 14.9 }, // tertiary/street (the residential grid)
   serviceFade: { from: 14.8, to: 15.9 }, // service/alley
+  /** Bridges ride the earliest ramp in EVERY wave — at z13 the tiles re-cut
+   *  spans into structure pieces that can land in a later class; without this
+   *  a bridge fades OUT as you zoom IN (Eli: bridges vanish z12–14). */
+  bridgeFade: { from: 11.2, to: 12.4 },
   /** Buildings (mass texture). */
   buildingFade: { from: 13.2, to: 15.0 },
   /** Neighborhood boundaries: present at rest, dissolving as streets take over. */

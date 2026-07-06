@@ -48,6 +48,28 @@ export const roadWidthExpr = (from: number, w: number, widen = 1) => {
   ] as unknown as number;
 };
 
+/**
+ * Road presence. Bridges ride JOURNEY.bridgeFade — the earliest ramp — in
+ * every wave; the rest of the wave keeps its stagger. At z13 the tiles
+ * re-cut spans into structure pieces that can land in a later class, and a
+ * bridge would fade OUT as you zoom IN (Eli: bridges vanish z12–14).
+ * Mapbox forbids ["zoom"] inside "case", so this is one TOP-LEVEL zoom
+ * interpolate whose stops output a match on structure — sampling both
+ * linear ramps at the union of their breakpoints reproduces each exactly.
+ * Exported: the style and the 1s re-ink MUST agree.
+ */
+export const roadOpacityExpr = (fade: { from: number; to: number }, alpha: number) => {
+  const b = JOURNEY.bridgeFade;
+  if (b.from >= fade.from) return fadeIn(fade.from, fade.to, alpha); // highways already lead
+  const ramp = (z: number, f: { from: number; to: number }) =>
+    alpha * Math.min(1, Math.max(0, (z - f.from) / (f.to - f.from)));
+  const stops = [...new Set([b.from, b.to, fade.from, fade.to])].sort((x, y) => x - y);
+  const expr: unknown[] = ["interpolate", ["linear"], ["zoom"]];
+  for (const z of stops)
+    expr.push(z, ["match", ["get", "structure"], "bridge", ramp(z, b), ramp(z, fade)]);
+  return expr as unknown as number;
+};
+
 function roadLayer(
   id: string,
   classes: string[],
@@ -69,7 +91,7 @@ function roadLayer(
     layout: { "line-cap": "round", "line-join": "round" },
     paint: {
       "line-color": color,
-      "line-opacity": fadeIn(fade.from, fade.to, alpha),
+      "line-opacity": roadOpacityExpr(fade, alpha),
       "line-width": roadWidthExpr(fade.from, width),
     },
   };

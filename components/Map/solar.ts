@@ -12,7 +12,7 @@
 import type { ExpressionSpecification, Map as MapboxMap } from "mapbox-gl";
 import type { AtmosphereState } from "@/lib/atmosphere";
 import { INK, JOURNEY, SOLAR, WEATHER } from "./tune";
-import { roadWidthExpr } from "./styles";
+import { roadOpacityExpr, roadWidthExpr } from "./styles";
 
 type InkKey = "bg" | "water" | "park" | "building" | "road";
 const INK_KEYS: InkKey[] = ["bg", "water", "park", "building", "road"];
@@ -224,15 +224,11 @@ export function applyAtmosphereInk(map: MapboxMap, a: AtmosphereState): void {
         map.setPaintProperty(id, prop, { duration: SOLAR.transitionMs, delay: 0 });
       }
     }
-    map.setPaintProperty(id, "line-opacity", [
-      "interpolate",
-      ["linear"],
-      ["zoom"],
-      fade.from,
-      0,
-      fade.to,
-      Math.min(0.95, alpha * boost),
-    ] as ExpressionSpecification);
+    map.setPaintProperty(
+      id,
+      "line-opacity",
+      roadOpacityExpr(fade, Math.min(0.95, alpha * boost)) as unknown as ExpressionSpecification,
+    );
     map.setPaintProperty(id, "line-width", roadWidthExpr(fade.from, width, widen));
   }
   eased.add(map);
