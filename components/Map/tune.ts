@@ -221,7 +221,7 @@ export const FIELD = {
    *  close = the field THINS into breathing ambient light so the city
    *  shows through (never to zero). Applies to the field + bloom passes;
    *  the streetlight stays — it IS the city glowing through. */
-  zoomThin: { from: 13.5, to: 16.0, floor: 0.35 },
+  zoomThin: { from: 13.0, to: 16.3, floor: 0.35 },
   /** Dominance power (the mud rule knob): hues mix by Iᵖ share in OKLab.
    *  Higher p = dominant emotion snaps harder, narrower weather fronts. */
   dominance: 5.0,

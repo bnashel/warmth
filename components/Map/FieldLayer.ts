@@ -174,12 +174,16 @@ uniform float uAspect; // target width / height, so the flow isn't squashed
 // this shader at all.
 uniform vec2 uAxis;    // direction the air flows toward (unit-ish)
 // LAND MASK: the field inherits the coastline (rivers/harbor stay void).
-// Sampled in mercator space via the inverse view matrix — geography, not
-// screen space, so rotation and zoom cannot smear the shore.
+// Screen → mercator is a plain affine at pitch 0, built on the CPU from
+// three unprojections (the camera matrix itself is PERSPECTIVE even flat,
+// so inverting it at one clip plane samples the wrong plane — review
+// finding: that collapsed the whole field when the center sat on water).
 uniform sampler2D uMask;
 uniform float uMaskOn;
 uniform vec4 uMaskRect;   // mercX0, mercY0, 1/width, 1/height
-uniform mat4 uInvMatrix;  // clip → mercator (pitch is off: affine, exact)
+uniform vec2 uMercOrigin; // mercator at vUv (0,0) — screen bottom-left
+uniform vec2 uMercDx;     // mercator delta across vUv.x (bottom-left → bottom-right)
+uniform vec2 uMercDy;     // mercator delta across vUv.y (bottom-left → top-left)
 uniform float uWaterAtten;
 // THE LUMINOUS HEART: density peaks lift toward light (OKLab L), capped
 // far below white — aurora, never fog.
@@ -292,8 +296,7 @@ void main() {
   // inherits the coastline. Sampled at the TRUE pixel (vUv, unwarped):
   // the shore is a fact, not weather.
   if (uMaskOn > 0.5) {
-    vec4 mp = uInvMatrix * vec4(vUv * 2.0 - 1.0, 0.0, 1.0);
-    vec2 merc = mp.xy / mp.w;
+    vec2 merc = uMercOrigin + uMercDx * vUv.x + uMercDy * vUv.y;
     vec2 muv = vec2((merc.x - uMaskRect.x) * uMaskRect.z,
                     (merc.y - uMaskRect.y) * uMaskRect.w);
     float land = smoothstep(0.12, 0.82, texture(uMask, muv).r);
@@ -354,46 +357,6 @@ const CHANNEL: Record<string, number> = Object.fromEntries(
 );
 const FLOATS_PER_INSTANCE = 5; // mercX, mercY, radiusMerc, weight, channel
 
-/** 4×4 inverse (general adjugate) — the camera matrix is affine with pitch
- *  off, but the full inverse is cheap once per frame and never wrong. */
-function invert4(out: Float32Array, m: ArrayLike<number>): boolean {
-  const a00 = m[0], a01 = m[1], a02 = m[2], a03 = m[3];
-  const a10 = m[4], a11 = m[5], a12 = m[6], a13 = m[7];
-  const a20 = m[8], a21 = m[9], a22 = m[10], a23 = m[11];
-  const a30 = m[12], a31 = m[13], a32 = m[14], a33 = m[15];
-  const b00 = a00 * a11 - a01 * a10;
-  const b01 = a00 * a12 - a02 * a10;
-  const b02 = a00 * a13 - a03 * a10;
-  const b03 = a01 * a12 - a02 * a11;
-  const b04 = a01 * a13 - a03 * a11;
-  const b05 = a02 * a13 - a03 * a12;
-  const b06 = a20 * a31 - a21 * a30;
-  const b07 = a20 * a32 - a22 * a30;
-  const b08 = a20 * a33 - a23 * a30;
-  const b09 = a21 * a32 - a22 * a31;
-  const b10 = a21 * a33 - a23 * a31;
-  const b11 = a22 * a33 - a23 * a32;
-  let det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
-  if (!det) return false;
-  det = 1.0 / det;
-  out[0] = (a11 * b11 - a12 * b10 + a13 * b09) * det;
-  out[1] = (a02 * b10 - a01 * b11 - a03 * b09) * det;
-  out[2] = (a31 * b05 - a32 * b04 + a33 * b03) * det;
-  out[3] = (a22 * b04 - a21 * b05 - a23 * b03) * det;
-  out[4] = (a12 * b08 - a10 * b11 - a13 * b07) * det;
-  out[5] = (a00 * b11 - a02 * b08 + a03 * b07) * det;
-  out[6] = (a32 * b02 - a30 * b05 - a33 * b01) * det;
-  out[7] = (a20 * b05 - a22 * b02 + a23 * b01) * det;
-  out[8] = (a10 * b10 - a11 * b08 + a13 * b06) * det;
-  out[9] = (a01 * b08 - a00 * b10 - a03 * b06) * det;
-  out[10] = (a30 * b04 - a31 * b02 + a33 * b00) * det;
-  out[11] = (a21 * b02 - a20 * b04 - a23 * b00) * det;
-  out[12] = (a11 * b07 - a10 * b09 - a12 * b06) * det;
-  out[13] = (a00 * b09 - a01 * b07 + a02 * b06) * det;
-  out[14] = (a31 * b01 - a30 * b03 - a32 * b00) * det;
-  out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * det;
-  return true;
-}
 
 function compile(gl: WebGL2RenderingContext, vsSrc: string, fsSrc: string): WebGLProgram {
   const sh = (type: number, src: string) => {
@@ -471,8 +434,9 @@ export class FieldLayer implements CustomLayerInterface {
   private maskTex: WebGLTexture | null = null;
   private maskReady = false;
   private maskRect: [number, number, number, number] = [0, 0, 1, 1];
-  private invMatrix = new Float32Array(16);
-  private invOk = false;
+  /** Screen→mercator affine (pitch 0): origin at screen bottom-left plus
+   *  the two screen-edge deltas, rebuilt each frame from unproject. */
+  private mercFrame = { ox: 0, oy: 0, dxx: 0, dxy: 0, dyx: 0, dyy: 0, ok: false };
 
   constructor() {
     EMOTIONS.forEach((e, i) => {
@@ -645,9 +609,28 @@ export class FieldLayer implements CustomLayerInterface {
     // warp in perfect sync with the sharp field beneath it.
     if (this.epoch === 0) this.epoch = performance.now();
     this.timeSec = (performance.now() - this.epoch) / 1000;
-    // Land mask sampling needs clip → mercator: invert the camera once per
-    // frame (pitch is off, so this is exact for every pixel).
-    this.invOk = invert4(this.invMatrix, matrix);
+    // Land mask sampling needs screen → mercator. With pitch locked at 0
+    // that map is an exact affine; three unprojections define it. (Never
+    // invert the camera matrix here — it is perspective even when flat,
+    // and a one-plane inversion collapses the field: review finding.)
+    try {
+      const w = this.map.getContainer().clientWidth;
+      const h = this.map.getContainer().clientHeight;
+      const bl = mapboxgl.MercatorCoordinate.fromLngLat(this.map.unproject([0, h]));
+      const br = mapboxgl.MercatorCoordinate.fromLngLat(this.map.unproject([w, h]));
+      const tl = mapboxgl.MercatorCoordinate.fromLngLat(this.map.unproject([0, 0]));
+      this.mercFrame = {
+        ox: bl.x,
+        oy: bl.y,
+        dxx: br.x - bl.x,
+        dxy: br.y - bl.y,
+        dyx: tl.x - bl.x,
+        dyy: tl.y - bl.y,
+        ok: true,
+      };
+    } catch {
+      this.mercFrame.ok = false;
+    }
     this.ensureTargets(gl);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
@@ -799,14 +782,17 @@ export class FieldLayer implements CustomLayerInterface {
     const w = this.weather;
     gl.uniform2f(u("uAxis"), w.axisX, w.axisY);
     // The coastline (off until the mask texture lands — never a blocker).
-    const maskOn = this.maskReady && this.invOk;
+    const mf = this.mercFrame;
+    const maskOn = this.maskReady && mf.ok;
     gl.uniform1f(u("uMaskOn"), maskOn ? 1 : 0);
     if (maskOn) {
       gl.activeTexture(gl.TEXTURE2);
       gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
       gl.uniform1i(u("uMask"), 2);
       gl.uniform4f(u("uMaskRect"), ...this.maskRect);
-      gl.uniformMatrix4fv(u("uInvMatrix"), false, this.invMatrix);
+      gl.uniform2f(u("uMercOrigin"), mf.ox, mf.oy);
+      gl.uniform2f(u("uMercDx"), mf.dxx, mf.dxy);
+      gl.uniform2f(u("uMercDy"), mf.dyx, mf.dyy);
       gl.uniform1f(u("uWaterAtten"), FIELD.landMask.waterAtten);
     }
     gl.uniform3f(u("uHeart"), FIELD.heart.from, FIELD.heart.to, FIELD.heart.lift);
@@ -858,11 +844,15 @@ export class FieldLayer implements CustomLayerInterface {
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
 
-    // Pass 2 — the field itself, additive (alpha 0 under premultiplied).
+    // Pass 2 — the field itself. SCREEN blend, not raw addition: light
+    // saturates asymptotically toward its own hue and the pass stack can
+    // never sum to pure white on the map (constitution rule 3 — review
+    // blocker: five pooled commits used to clip to rgb(253,253,253)).
+    // Over the near-black base, screen ≈ additive; only the top end bends.
     if (night > 0.01) {
       gl.uniform1i(u("uMode"), 0);
       gl.uniform1f(u("uGain"), FIELD.gain * this.fade * night * thin);
-      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.blendFunc(gl.ONE_MINUS_DST_COLOR, gl.ONE);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
 
@@ -877,7 +867,9 @@ export class FieldLayer implements CustomLayerInterface {
         this.loc(gl, this.compositeProgram, "comp", "uGain"),
         WEATHER.bloom.gain * this.fade * night * thin,
       );
-      gl.blendFunc(gl.ONE, gl.ONE);
+      // Screen, like the field pass: the halo brightens what is dim and
+      // asymptotes over what is already lit — never white (rule 3).
+      gl.blendFunc(gl.ONE_MINUS_DST_COLOR, gl.ONE);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
 

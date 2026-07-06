@@ -450,11 +450,17 @@ export default function OneScreen() {
             style={{
               position: "absolute",
               left: whisper.x,
-              top: whisper.y - 30,
+              // Above the bloom's radius — the words must never sit on the
+              // brightest light (design review: illegible on a big commit).
+              top: whisper.y - 56,
               x: "-50%",
               fontSize: 12,
               letterSpacing: "0.05em",
               color: paperText(0.85),
+              // A soft ink micro-plate so the whisper reads over any hue.
+              background: "rgba(6,7,10,0.55)",
+              padding: "3px 10px",
+              borderRadius: 999,
               whiteSpace: "nowrap",
               pointerEvents: "none",
               zIndex: 6,
