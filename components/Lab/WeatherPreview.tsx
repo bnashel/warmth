@@ -29,12 +29,12 @@ const TIMES: { key: string; label: string; hour: number | null }[] = [
 /** Sky presets → atmosphere overrides (null = the real weather). */
 const SKIES: { key: string; label: string; o: AtmosphereOverride | null }[] = [
   { key: "now", label: "now", o: null },
-  { key: "clear", label: "clear", o: { cloud: 0, wet: 0, fog: 0, wind: 0.15 } },
-  { key: "clouds", label: "clouds", o: { cloud: 0.9, wet: 0, fog: 0, wind: 0.3 } },
-  { key: "fog", label: "fog", o: { cloud: 0.55, wet: 0, fog: 0.8, wind: 0.1 } },
-  { key: "rain", label: "rain", o: { cloud: 0.8, wet: 0.65, wetKind: "rain", fog: 0.1, wind: 0.45 } },
-  { key: "storm", label: "storm", o: { cloud: 0.97, wet: 0.95, wetKind: "rain", fog: 0.15, wind: 0.85 } },
-  { key: "snow", label: "snow", o: { cloud: 0.75, wet: 0.7, wetKind: "snow", fog: 0.2, wind: 0.25 } },
+  { key: "clear", label: "clear", o: { cloud: 0, wet: 0, fog: 0, wind: 0.15, storm: 0 } },
+  { key: "clouds", label: "clouds", o: { cloud: 0.9, wet: 0, fog: 0, wind: 0.3, storm: 0 } },
+  { key: "fog", label: "fog", o: { cloud: 0.55, wet: 0, fog: 0.8, wind: 0.1, storm: 0 } },
+  { key: "rain", label: "rain", o: { cloud: 0.8, wet: 0.65, wetKind: "rain", fog: 0.1, wind: 0.45, storm: 0 } },
+  { key: "storm", label: "storm", o: { cloud: 0.97, wet: 0.95, wetKind: "rain", fog: 0.15, wind: 0.85, storm: 1 } },
+  { key: "snow", label: "snow", o: { cloud: 0.75, wet: 0.7, wetKind: "snow", fog: 0.2, wind: 0.25, storm: 0 } },
 ];
 
 function Row<T extends { key: string; label: string }>({
@@ -95,7 +95,8 @@ function describeRealSky(): string {
   const s = atmosphere.realSky();
   if (!s.live) return "live sky: fetching…";
   const parts: string[] = [];
-  if (s.wet > 0.02) parts.push(s.wetKind === "snow" ? "snowing" : "raining");
+  if (s.storm > 0.5) parts.push("thunderstorm");
+  else if (s.wet > 0.02) parts.push(s.wetKind === "snow" ? "snowing" : "raining");
   else if (s.fog > 0.3) parts.push("foggy");
   else if (s.cloud > 0.85) parts.push("overcast");
   else if (s.cloud > 0.4) parts.push("partly cloudy");

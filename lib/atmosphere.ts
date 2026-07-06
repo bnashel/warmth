@@ -49,10 +49,12 @@ export type AtmosphereState = {
   /** Moonlight 0..1: illuminated fraction while the moon is up (suncalc).
    *  Visuals additionally scale it by clearness — clouds hide the moon. */
   moon: number;
+  /** Thunderstorm weight 0..1 (WMO 95/96/99) — gates lightning + thunder. */
+  storm: number;
 };
 
 export type AtmosphereOverride = Partial<
-  Pick<AtmosphereState, "cloud" | "wet" | "fog" | "wind" | "wetKind">
+  Pick<AtmosphereState, "cloud" | "wet" | "fog" | "wind" | "wetKind" | "storm">
 >;
 
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
@@ -83,6 +85,7 @@ type WeatherTargets = {
   wetKind: WetKind;
   fog: number;
   wind: number;
+  storm: number;
   axisX: number;
   axisY: number;
   /** Raw km/h — for the dev panel's "live sky" readout only. */
@@ -97,6 +100,7 @@ const CLEAR: WeatherTargets = {
   wetKind: "rain",
   fog: 0,
   wind: 0.15, // a whisper of drift even on a still day — the map breathes
+  storm: 0,
   axisX: 0.94,
   axisY: 0.33, // the old fixed diagonal: calm default flow
   rawWindKmh: 0,
@@ -116,10 +120,12 @@ function overrideFromUrl(): AtmosphereOverride | null {
   const wet = num("wet");
   const fog = num("fog");
   const wind = num("wind");
+  const storm = num("storm");
   if (cloud !== undefined) o.cloud = cloud;
   if (wet !== undefined) o.wet = wet;
   if (fog !== undefined) o.fog = fog;
   if (wind !== undefined) o.wind = wind;
+  if (storm !== undefined) o.storm = storm;
   if (q.get("kind") === "snow") o.wetKind = "snow";
   return Object.keys(o).length ? o : null;
 }
@@ -138,6 +144,7 @@ class AtmosphereEngine {
     axisX: CLEAR.axisX,
     axisY: CLEAR.axisY,
     moon: 0,
+    storm: CLEAR.storm,
   };
 
   private weather: WeatherTargets = { ...CLEAR };
@@ -173,6 +180,7 @@ class AtmosphereEngine {
       this.current.fog = o.fog ?? this.current.fog;
       this.current.wind = o.wind ?? this.current.wind;
       this.current.wetKind = o.wetKind ?? this.current.wetKind;
+      this.current.storm = o.storm ?? this.current.storm;
     }
     void this.fetchWeather();
     window.setInterval(() => void this.fetchWeather(), WEATHER.refetchMs);
@@ -237,7 +245,8 @@ class AtmosphereEngine {
       };
       const c = json.current;
       if (!c) return;
-      const snow = (c.snowfall ?? 0) > 0 || ((c.weather_code ?? 0) >= 71 && (c.weather_code ?? 0) <= 86 && (c.weather_code ?? 0) !== 80 && (c.weather_code ?? 0) !== 81 && (c.weather_code ?? 0) !== 82);
+      const code = c.weather_code ?? 0;
+      const snow = (c.snowfall ?? 0) > 0 || (code >= 71 && code <= 86 && code !== 80 && code !== 81 && code !== 82);
       const precip = c.precipitation ?? 0;
       const [ax, ay] = windAxis(c.wind_direction_10m ?? 250);
       this.weather = {
@@ -245,7 +254,9 @@ class AtmosphereEngine {
         // mm/h through a knee: drizzle registers, a downpour saturates.
         wet: clamp01(1 - Math.exp(-precip / 2)),
         wetKind: snow ? "snow" : "rain",
-        fog: fogFromCode(c.weather_code ?? 0),
+        fog: fogFromCode(code),
+        // WMO 95/96/99: thunderstorm (96/99 = with hail) — lightning lives.
+        storm: code === 95 || code === 96 || code === 99 ? 1 : 0,
         // km/h through a knee: 10 = breeze, 40+ = full flow.
         wind: clamp01(1 - Math.exp(-(c.wind_speed_10m ?? 0) / 18)),
         axisX: ax,
@@ -283,6 +294,7 @@ class AtmosphereEngine {
     cur.cloud = ease(cur.cloud, o?.cloud ?? t.cloud);
     cur.fog = ease(cur.fog, o?.fog ?? t.fog);
     cur.wind = ease(cur.wind, o?.wind ?? t.wind);
+    cur.storm = ease(cur.storm, o?.storm ?? t.storm);
     cur.axisX = ease(cur.axisX, t.axisX);
     cur.axisY = ease(cur.axisY, t.axisY);
     cur.moon = ease(cur.moon, this.sunMoon);

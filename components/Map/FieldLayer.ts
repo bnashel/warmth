@@ -65,6 +65,12 @@ void main() {
   vUv = corner;
   vWeight = instWC.x;
   vChannel = int(instWC.y + 0.5);
+  // Invisible kernels (faded seeds, dying moments) collapse off-clip here:
+  // a zero-weight splat still costs full fill at ONE,ONE blend otherwise.
+  if (vWeight < 0.0015) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    return;
+  }
   vec2 pos = inst.xy + corner * inst.z;
   gl_Position = uMatrix * vec4(pos, 0.0, 1.0);
 }
@@ -423,6 +429,7 @@ export class FieldLayer implements CustomLayerInterface {
         Math.max(64, n * 2) * FLOATS_PER_INSTANCE,
       );
       this.floorPx = new Float32Array(Math.max(64, n * 2));
+      this.isSeed = new Uint8Array(Math.max(64, n * 2));
     }
     const d = this.instanceData;
     for (let i = 0; i < n; i++) {
@@ -430,6 +437,7 @@ export class FieldLayer implements CustomLayerInterface {
       // The lonely-commit floor is for real feelings; the seed sheet keeps
       // its geographic scale (small floor) so it can't pool into blobs.
       this.floorPx[i] = p.seed ? FIELD.seedMinRadiusPx : FIELD.minRadiusPx;
+      this.isSeed[i] = p.seed ? 1 : 0;
       const mc = mapboxgl.MercatorCoordinate.fromLngLat({
         lng: p.position[0],
         lat: p.position[1],
@@ -577,10 +585,17 @@ export class FieldLayer implements CustomLayerInterface {
         this.clamped = new Float32Array(src.length);
       }
       this.clamped.set(src.subarray(0, n * FLOATS_PER_INSTANCE));
+      // The ambient wash is a city-scale impression: it dissolves as you
+      // zoom into a neighborhood (real commits stay). Smoothstep, so the
+      // fade is continuous with the camera.
+      const sf = FIELD.seedZoomFade;
+      const zt = Math.min(1, Math.max(0, (zoom - sf.from) / (sf.to - sf.from)));
+      const seedFade = 1 - zt * zt * (3 - 2 * zt);
       for (let i = 0; i < n; i++) {
         const o = i * FLOATS_PER_INSTANCE + 2;
         const minMerc = this.floorPx[i] * mercPerCssPx;
         this.clamped[o] = Math.min(maxMerc, Math.max(minMerc, src[o]));
+        if (this.isSeed[i]) this.clamped[o + 1] = src[o + 1] * seedFade;
       }
       gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuf);
       gl.bufferData(gl.ARRAY_BUFFER, this.clamped.subarray(0, n * FLOATS_PER_INSTANCE), gl.DYNAMIC_DRAW);
@@ -649,6 +664,7 @@ export class FieldLayer implements CustomLayerInterface {
   private clamped = new Float32Array(0);
   private clampScale = -1;
   private floorPx = new Float32Array(0);
+  private isSeed = new Uint8Array(0);
   private uniformCache = new Map<string, WebGLUniformLocation | null>();
 
   /** Uniform-location cache across our four programs. */

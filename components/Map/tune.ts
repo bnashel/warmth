@@ -174,6 +174,12 @@ export const FIELD = {
    *  water layer — REAL feelings (your commit, realtime) burn through it at
    *  full strength. Applies to `seed: true` moments only. */
   seedGain: 0.38,
+  /** The wash is a CITY-SCALE impression: as you zoom into a neighborhood
+   *  it dissolves (real commits stay). Kills the giant murky blobs a single
+   *  dim seed became at street zoom (Ben's field report) — and drops ~290
+   *  max-size kernels of GPU overdraw right when tiles are loading, which
+   *  is most of the zoom-in stutter. */
+  seedZoomFade: { from: 12.6, to: 14.0 },
   /** Living tide: subtle brightness breath. */
   breath: { periodMs: 2500, amp: 0.045 },
   /** Streetlight signature: the field multiplied onto the base map so
@@ -210,6 +216,10 @@ export const TRAIL = {
     peakBase: 0.45,
     peakPerIntensity: 0.55,
   },
+  /** The paper-day stain wears a CRISPER edge than the night glow: pigment
+   *  pools, light spills. Tighter falloff + a smaller quad + a deeper mark —
+   *  Ben's report: "they look good, just too blurry." */
+  stain: { tailFalloff: 7.5, radiusScale: 0.82, gainBoost: 1.25 },
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -386,8 +396,43 @@ export const WEATHER = {
     day: "#5A6478",
   },
 
-  /* -- rain sound (patter under everything; gesture-unlocked) -------- */
-  rainSound: { maxGain: 0.045, lfoHz: 0.19, lfoDepth: 0.35 },
+  /* -- rain sound v3 (patter under everything; gesture-unlocked) ------ */
+  /** Two detuned copies of one LONG noise bed (their loop points drift
+   *  apart, so the repeat is inaudible — v2's 0.5s loop read as a cycle,
+   *  Ben's report), gusts as slow FILTER drift (gain wobbles read as ocean
+   *  waves — same report), and randomized droplet ticks so it's rain on
+   *  YOUR window, never a texture. */
+  rainSound: {
+    maxGain: 0.045,
+    bedSeconds: 6, // noise bed length; second copy at detune rate
+    detune: 0.913, // playbackRate of copy #2 (irrational-ish vs 1.0)
+    breathDepth: 0.08, // tiny residual gain breath (was 0.35 = waves)
+    breathHz: 0.11,
+    /** Gusts: the window-glass lowpass wanders instead of the volume. */
+    filterBaseHz: 2200,
+    filterWetHz: 1100, // + cutoff at full wet (harder rain = brighter hiss)
+    driftHz: [0.071, 0.023], // two incommensurate wander rates
+    driftDepthHz: [320, 520],
+    /** Droplets: sparse bandpassed ticks, panned, level-scaled. */
+    droplet: { gain: 0.05, minMs: 70, maxMs: 380, bandHz: [1400, 4200], decayS: [0.02, 0.06] },
+  },
+
+  /* -- storm (v3): lightning + thunder ------------------------------- */
+  /** Real thunderstorms (WMO 95/96/99, or the panel's storm preset) flash
+   *  the sky and answer with distant thunder. Sparse and felt, never a
+   *  strobe: strikes seconds-to-a-minute apart, thunder delayed like it's
+   *  streets away. Flash is one composited opacity layer — costs nothing. */
+  lightning: {
+    /** Seconds between strikes at full storm (randomized ±50%). */
+    intervalS: [8, 26],
+    /** First strike lands quickly once a storm settles in — the arrival. */
+    firstS: [2.5, 7],
+    flashAlphaNight: 0.16,
+    flashAlphaDay: 0.05, // daylight swallows lightning; a breath, no more
+    /** Thunder trails the flash like distance (seconds). */
+    thunderDelayS: [1.4, 4.5],
+    thunderGain: 0.055,
+  },
 } as const;
 
 /* ------------------------------------------------------------------ */

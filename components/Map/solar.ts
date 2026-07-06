@@ -9,9 +9,9 @@
  * plain paint-property updates with their own slow transitions — no style
  * swap, no re-render, no new frames: the same layers, re-inked.
  */
-import type { Map as MapboxMap } from "mapbox-gl";
+import type { ExpressionSpecification, Map as MapboxMap } from "mapbox-gl";
 import type { AtmosphereState } from "@/lib/atmosphere";
-import { INK, SOLAR, WEATHER } from "./tune";
+import { INK, JOURNEY, SOLAR, WEATHER } from "./tune";
 
 type InkKey = "bg" | "water" | "park" | "building" | "road";
 const INK_KEYS: InkKey[] = ["bg", "water", "park", "building", "road"];
@@ -79,15 +79,16 @@ export function solarDate(): Date {
   return new Date();
 }
 
-/** The graded ink for the current atmosphere. Exposed for the harness. */
-export function atmosphereInk(a: AtmosphereState): Record<InkKey, string> {
+/** The graded ink as raw RGB — one pass shared by the paint applier and
+ *  the street-zoom park re-base below. */
+function gradeInk(a: AtmosphereState): Record<InkKey, Rgb> {
   const snow = a.wetKind === "snow" ? a.wet : 0;
   const rain = a.wetKind === "rain" ? a.wet : 0;
   const night = 1 - a.light;
   const mist = hexToRgb(a.paper > 0.5 ? WEATHER.fogMist.day : WEATHER.fogMist.night);
   const glow = hexToRgb(WEATHER.skyGlow.color);
   const moonInk = hexToRgb(WEATHER.moonLift.color);
-  const out = {} as Record<InkKey, string>;
+  const out = {} as Record<InkKey, Rgb>;
 
   for (const k of INK_KEYS) {
     // The sun's blend: night → day, warmed toward the ember.
@@ -128,9 +129,40 @@ export function atmosphereInk(a: AtmosphereState): Record<InkKey, string> {
       c = scaleRgb(c, 1 - WEATHER.wetWaterDarken * rain);
     }
 
-    out[k] = fmt(c);
+    out[k] = c;
   }
   return out;
+}
+
+/** The graded ink for the current atmosphere. Exposed for the harness. */
+export function atmosphereInk(a: AtmosphereState): Record<InkKey, string> {
+  const rgb = gradeInk(a);
+  const out = {} as Record<InkKey, string>;
+  for (const k of INK_KEYS) out[k] = fmt(rgb[k]);
+  return out;
+}
+
+/**
+ * The park ink at STREET zoom. At the wide view, park is "the faintest lift
+ * above land" — but as buildings + neighborhood plates fade in they lift all
+ * BUILT land past it, and parks/cemeteries flip into black holes with hard
+ * polygon edges (Ben's field report: "that shape shouldn't be like that").
+ * So up close, park re-bases on what built land actually reads as — ground
+ * mixed with building mass and the plate lift — keeping its designed offset
+ * above the ground. The zoom blend rides the buildings' own fade ramp.
+ */
+function parkNear(ink: Record<InkKey, Rgb>): Rgb {
+  const effLand = lerpRgb(
+    lerpRgb(ink.bg, ink.building, INK.buildingAlpha),
+    [233, 236, 244],
+    INK.plateBase,
+  );
+  const clamp255 = (x: number) => Math.min(255, Math.max(0, x));
+  return [
+    clamp255(effLand[0] + ink.park[0] - ink.bg[0]),
+    clamp255(effLand[1] + ink.park[1] - ink.bg[1]),
+    clamp255(effLand[2] + ink.park[2] - ink.bg[2]),
+  ];
 }
 
 /** Maps whose paint transitions are already set to the slow solar ease. */
@@ -138,7 +170,7 @@ const eased = new WeakSet<MapboxMap>();
 
 /** Re-ink the base map for the current atmosphere. Cheap: 8 paint sets. */
 export function applyAtmosphereInk(map: MapboxMap, a: AtmosphereState): void {
-  const ink = atmosphereInk(a);
+  const rgb = gradeInk(a);
   const firstTouch = !eased.has(map);
   for (const [id, prop, key] of PAINT) {
     if (!map.getLayer(id)) continue;
@@ -148,7 +180,21 @@ export function applyAtmosphereInk(map: MapboxMap, a: AtmosphereState): void {
         delay: 0,
       });
     }
-    map.setPaintProperty(id, prop, ink[key]);
+    // Park blends toward its street-zoom re-base as buildings fade in —
+    // continuous with the camera, so no zoom level ever steps.
+    const value =
+      key === "park"
+        ? ([
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            JOURNEY.buildingFade.from,
+            fmt(rgb.park),
+            JOURNEY.buildingFade.to,
+            fmt(parkNear(rgb)),
+          ] as ExpressionSpecification)
+        : fmt(rgb[key]);
+    map.setPaintProperty(id, prop, value);
   }
   eased.add(map);
 }

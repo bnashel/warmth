@@ -284,33 +284,88 @@ export function stopHum(): void {
 }
 
 /* ---------------------------------------------------------------- */
-/* Rain (continuous ambient, atmosphere-driven)                      */
+/* Rain (continuous ambient, atmosphere-driven) — v3                 */
 /* ---------------------------------------------------------------- */
-let rainSrc: AudioBufferSourceNode | null = null;
-let rainGain: GainNode | null = null;
-let rainLfo: OscillatorNode | null = null;
-let rainDepth: GainNode | null = null;
+let rainNodes: {
+  srcA: AudioBufferSourceNode;
+  srcB: AudioBufferSourceNode;
+  gain: GainNode;
+  lowpass: BiquadFilterNode;
+  breath: OscillatorNode;
+  breathDepth: GainNode;
+  drifts: OscillatorNode[];
+} | null = null;
+let rainLevel = 0;
 let rainStopTimer: number | null = null;
+let dropletTimer: number | null = null;
+let rainBedBuffer: AudioBuffer | null = null;
+
+/** The LONG rain bed — v2's 0.5s loop repeated twice a second and read as
+ *  a cycle (Ben heard it). Cached once; the tick/swell keep the short one. */
+function rainBed(ac: AudioContext): AudioBuffer {
+  if (rainBedBuffer) return rainBedBuffer;
+  const buf = ac.createBuffer(1, ac.sampleRate * WEATHER.rainSound.bedSeconds, ac.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  rainBedBuffer = buf;
+  return buf;
+}
+
+/** One droplet: a tiny bandpassed tick, random pitch/decay/pan — rain on
+ *  YOUR window. Poisson-ish scheduling; density rides the level. */
+function scheduleDroplet(): void {
+  const p = WEATHER.rainSound.droplet;
+  const level = rainLevel;
+  const gapMs =
+    (p.maxMs - (p.maxMs - p.minMs) * level) * (0.6 + Math.random() * 0.8);
+  dropletTimer = window.setTimeout(() => {
+    dropletTimer = null;
+    if (!rainNodes || rainLevel <= 0.02) return;
+    try {
+      if (ctx && master) {
+        const t = ctx.currentTime;
+        const src = ctx.createBufferSource();
+        src.buffer = whiteNoise(ctx);
+        const band = ctx.createBiquadFilter();
+        band.type = "bandpass";
+        band.frequency.value = p.bandHz[0] + Math.random() * (p.bandHz[1] - p.bandHz[0]);
+        band.Q.value = 8;
+        const g = ctx.createGain();
+        const decay = p.decayS[0] + Math.random() * (p.decayS[1] - p.decayS[0]);
+        g.gain.setValueAtTime(p.gain * rainLevel * (0.4 + Math.random() * 0.6), t);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + decay);
+        const pan = ctx.createStereoPanner();
+        pan.pan.value = (Math.random() * 2 - 1) * 0.7;
+        src.connect(band).connect(g).connect(pan).connect(master);
+        src.start(t);
+        src.stop(t + decay + 0.02);
+      }
+    } catch {
+      /* one lost droplet */
+    }
+    scheduleDroplet();
+  }, gapMs);
+}
 
 /**
- * Rain patter under everything, felt more than heard: looped noise through
- * a band shaped like rain on a window, a slow LFO swelling it so it never
- * reads as a flat hiss. Level rides the atmosphere's `wet`; audio starts
- * only after the usual gesture unlock, and panic() silences it.
- *
- * The LFO depth SCALES with the level (depth < base always, so the swell
- * never drives the gain through zero) and when the rain ends the whole
- * node graph is torn down after the fade — no eternal ghost swell
- * (review findings).
+ * Rain patter under everything, felt more than heard. Three layers, none
+ * of which can read as a loop:
+ *  - the bed: TWO copies of one long noise buffer, the second detuned, so
+ *    their loop points drift apart forever (v2's audible cycle — fixed);
+ *  - the gusts: the window-glass lowpass WANDERS on two incommensurate
+ *    slow LFOs (v2 swelled the volume, which read as ocean waves — fixed);
+ *  - the droplets: sparse randomized ticks, panned across the window.
+ * Level rides the atmosphere's `wet`; teardown after the fade (review).
  */
 export function setRainLevel(level01: number): void {
   try {
     if (!ready() || !ctx || !master) return;
     const level = Math.min(1, Math.max(0, level01));
+    rainLevel = level;
+    const R = WEATHER.rainSound;
     if (level <= 0.001) {
-      if (rainGain && rainStopTimer === null) {
-        rainGain.gain.setTargetAtTime(0.0001, ctx.currentTime, 1.2);
-        rainDepth?.gain.setTargetAtTime(0, ctx.currentTime, 1.2);
+      if (rainNodes && rainStopTimer === null) {
+        rainNodes.gain.gain.setTargetAtTime(0.0001, ctx.currentTime, 1.2);
         // Tear down once the fade has settled (~5τ) — silence costs nothing.
         rainStopTimer = window.setTimeout(() => {
           rainStopTimer = null;
@@ -323,33 +378,56 @@ export function setRainLevel(level01: number): void {
       window.clearTimeout(rainStopTimer);
       rainStopTimer = null;
     }
-    if (!rainSrc) {
-      rainGain = ctx.createGain();
-      rainGain.gain.value = 0.0001;
+    if (!rainNodes) {
+      const gain = ctx.createGain();
+      gain.gain.value = 0.0001;
       // The window-glass band: soft highs, no rumble, no hiss.
-      const lp = ctx.createBiquadFilter();
-      lp.type = "lowpass";
-      lp.frequency.value = 2400;
+      const lowpass = ctx.createBiquadFilter();
+      lowpass.type = "lowpass";
+      lowpass.frequency.value = R.filterBaseHz;
       const hp = ctx.createBiquadFilter();
       hp.type = "highpass";
       hp.frequency.value = 400;
-      rainSrc = ctx.createBufferSource();
-      rainSrc.buffer = whiteNoise(ctx);
-      rainSrc.loop = true;
-      rainSrc.connect(hp).connect(lp).connect(rainGain).connect(master);
-      rainSrc.start();
-      // The swell: a slow wobble on the gain — weather, not static.
-      rainLfo = ctx.createOscillator();
-      rainLfo.frequency.value = WEATHER.rainSound.lfoHz;
-      rainDepth = ctx.createGain();
-      rainDepth.gain.value = 0;
-      rainLfo.connect(rainDepth).connect(rainGain.gain);
-      rainLfo.start();
+      const bed = rainBed(ctx);
+      const srcA = ctx.createBufferSource();
+      srcA.buffer = bed;
+      srcA.loop = true;
+      const srcB = ctx.createBufferSource();
+      srcB.buffer = bed;
+      srcB.loop = true;
+      srcB.playbackRate.value = R.detune;
+      const mixB = ctx.createGain();
+      mixB.gain.value = 0.7;
+      srcA.connect(hp);
+      srcB.connect(mixB).connect(hp);
+      hp.connect(lowpass).connect(gain).connect(master);
+      srcA.start();
+      srcB.start();
+      // Gusts: the filter wanders; the volume only breathes, barely.
+      const drifts = R.driftHz.map((hz, i) => {
+        const lfo = ctx!.createOscillator();
+        lfo.frequency.value = hz;
+        const depth = ctx!.createGain();
+        depth.gain.value = R.driftDepthHz[i];
+        lfo.connect(depth).connect(lowpass.frequency);
+        lfo.start(ctx!.currentTime + Math.random() * 5); // decorrelate phases
+        return lfo;
+      });
+      const breath = ctx.createOscillator();
+      breath.frequency.value = R.breathHz;
+      const breathDepth = ctx.createGain();
+      breathDepth.gain.value = 0;
+      breath.connect(breathDepth).connect(gain.gain);
+      breath.start();
+      rainNodes = { srcA, srcB, gain, lowpass, breath, breathDepth, drifts };
+      scheduleDroplet();
     }
     const t = ctx.currentTime;
-    const base = WEATHER.rainSound.maxGain * level;
-    rainGain!.gain.setTargetAtTime(base, t, 2); // rain fades in like rain
-    rainDepth!.gain.setTargetAtTime(base * WEATHER.rainSound.lfoDepth, t, 2);
+    const base = R.maxGain * level;
+    rainNodes.gain.gain.setTargetAtTime(base, t, 2); // rain fades in like rain
+    rainNodes.breathDepth.gain.setTargetAtTime(base * R.breathDepth, t, 2);
+    // Harder rain hisses brighter — the cutoff rides the level.
+    rainNodes.lowpass.frequency.setTargetAtTime(R.filterBaseHz + R.filterWetHz * level, t, 2);
   } catch {
     /* silent degrade */
   }
@@ -362,18 +440,77 @@ function stopRain(): void {
       window.clearTimeout(rainStopTimer);
       rainStopTimer = null;
     }
-    if (!ctx || !rainSrc) return;
+    if (dropletTimer !== null) {
+      window.clearTimeout(dropletTimer);
+      dropletTimer = null;
+    }
+    if (!ctx || !rainNodes) return;
     const t = ctx.currentTime;
-    rainGain?.gain.setTargetAtTime(0.0001, t, 0.1);
-    rainSrc.stop(t + 0.4);
-    rainLfo?.stop(t + 0.4);
+    rainNodes.gain.gain.setTargetAtTime(0.0001, t, 0.1);
+    rainNodes.srcA.stop(t + 0.4);
+    rainNodes.srcB.stop(t + 0.4);
+    rainNodes.breath.stop(t + 0.4);
+    for (const d of rainNodes.drifts) d.stop(t + 0.4);
   } catch {
     /* ignore */
   } finally {
-    rainSrc = null;
-    rainGain = null;
-    rainLfo = null;
-    rainDepth = null;
+    rainNodes = null;
+    rainLevel = 0;
+  }
+}
+
+/* ---------------------------------------------------------------- */
+/* Thunder (storm one-shots, scheduled by the lightning)             */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Distant thunder: a low rolling rumble `delayS` after the flash (sound
+ * trails light — the storm is streets away). Two overlapping brown-ish
+ * bursts through a falling lowpass + a sub swell underneath. One-shot,
+ * self-cleaning; respects mute via the master bus.
+ */
+export function thunderRumble(delayS = 0): void {
+  try {
+    if (!ready() || !ctx || !master) return;
+    const t0 = ctx.currentTime + Math.max(0, delayS);
+    const peak = WEATHER.lightning.thunderGain;
+
+    const burst = (at: number, gainMul: number, decayS: number) => {
+      const src = ctx!.createBufferSource();
+      src.buffer = rainBed(ctx!);
+      src.loop = true;
+      src.playbackRate.value = 0.35 + Math.random() * 0.15; // darken the noise
+      const lp = ctx!.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.frequency.setValueAtTime(160 + Math.random() * 60, at);
+      lp.frequency.exponentialRampToValueAtTime(55, at + decayS);
+      const g = ctx!.createGain();
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(peak * gainMul, at + 0.14);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + decayS);
+      src.connect(lp).connect(g).connect(master!);
+      src.start(at);
+      src.stop(at + decayS + 0.1);
+    };
+    // The crack's body, then its echo off the far buildings.
+    const mainDecay = 2.6 + Math.random() * 1.8;
+    burst(t0, 1, mainDecay);
+    burst(t0 + 0.6 + Math.random() * 0.7, 0.45, mainDecay * 1.3);
+
+    // The sub — felt in the chest more than heard.
+    const sub = ctx.createOscillator();
+    sub.type = "sine";
+    sub.frequency.setValueAtTime(48 + Math.random() * 10, t0);
+    sub.frequency.exponentialRampToValueAtTime(32, t0 + mainDecay);
+    const sg = ctx.createGain();
+    sg.gain.setValueAtTime(0.0001, t0);
+    sg.gain.exponentialRampToValueAtTime(peak * 0.8, t0 + 0.2);
+    sg.gain.exponentialRampToValueAtTime(0.0001, t0 + mainDecay);
+    sub.connect(sg).connect(master);
+    sub.start(t0);
+    sub.stop(t0 + mainDecay + 0.1);
+  } catch {
+    /* silent degrade */
   }
 }
 
