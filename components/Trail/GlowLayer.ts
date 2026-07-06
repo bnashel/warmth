@@ -31,6 +31,8 @@ layout(std140) uniform glowUniforms {
   float peakPerIntensity;
   float gain;
   float pigment;
+  float stainEdge;
+  float stainRing;
 } glow;
 `,
   uniformTypes: {
@@ -46,6 +48,8 @@ layout(std140) uniform glowUniforms {
     peakPerIntensity: "f32" as const,
     gain: "f32" as const,
     pigment: "f32" as const,
+    stainEdge: "f32" as const,
+    stainRing: "f32" as const,
   },
 };
 
@@ -104,12 +108,20 @@ void main(void) {
   // a deep watercolor mark, never a bruise.
   if (glow.pigment > 0.0) {
     vec3 pig = vFillColor.rgb * vFillColor.rgb;
-    // Soft-knee depth cap (same filmic idea as the field): a hard min()
-    // clipped the kernel center into a flat plateau whose boundary read as
-    // a rim on big close-zoom stains (review finding). The knee saturates
-    // toward the same 0.78 ceiling but its slope never breaks.
-    float s = max(lum, 0.0) * glow.gain;
-    float stain = 0.78 * (1.0 - exp(-s / 0.45)) * glow.pigment;
+    // A MARK, not a glow (Ben: the glow tail read as an out-of-focus blob).
+    // Real watercolor: a flat wash inside, a defined-but-hand-soft edge,
+    // and pigment POOLING at the rim as the water dries. So the stain
+    // ignores the light's core/tail shape entirely:
+    //   wash — full depth until stainEdge of the radius, then eases to 0;
+    //   pool — the rim runs stainRing deeper than the heart.
+    float wash = smoothstep(1.0, glow.stainEdge, rr);
+    float pool = 1.0 + glow.stainRing * smoothstep(glow.stainEdge * 0.55, glow.stainEdge, rr);
+    float s = (glow.peakBase + glow.peakPerIntensity * w) * glow.gain * wash * pool;
+    s *= smoothstep(0.0, 0.12, w);          // arrivals/fades still reach zero
+    s += (n - 0.5) * 0.006;                 // dither the edge, band-free
+    // Soft-knee depth cap: saturates toward 0.78, slope never breaks —
+    // deep watercolor, never a bruise, no plateau rim (review finding).
+    float stain = 0.78 * (1.0 - exp(-max(s, 0.0) / 0.45)) * glow.pigment;
     fragColor = vec4(mix(vec3(1.0), pig, stain), 1.0);
     DECKGL_FILTER_COLOR(fragColor, geometry);
     return;
@@ -141,6 +153,11 @@ type LightParams = {
   /** 0 = additive light (night); >0 = watercolor stain on the paper day
    *  (pair with PIGMENT_STAIN parameters — the value is the stain weight). */
   pigment: number;
+  /** Stain shape: the wash holds full depth to this fraction of the radius,
+   *  then eases to the edge. */
+  stainEdge: number;
+  /** Extra pigment pooled at the rim (watercolor dries darker at its edge). */
+  stainRing: number;
 };
 
 type EmotionGlowLayerProps = ScatterplotLayerProps<GlowDatum> & {
@@ -183,6 +200,8 @@ export class EmotionGlowLayer extends ScatterplotLayer<
       peakPerIntensity: GLOW.peakPerIntensity,
       gain: 1,
       pigment: 0,
+      stainEdge: 0.8,
+      stainRing: 0,
       ...light,
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -201,6 +220,8 @@ export class EmotionGlowLayer extends ScatterplotLayer<
         peakPerIntensity: p.peakPerIntensity,
         gain: p.gain,
         pigment: p.pigment,
+        stainEdge: p.stainEdge,
+        stainRing: p.stainRing,
       },
     });
     super.draw(params as never);
