@@ -30,10 +30,17 @@ export function Orb({
 }) {
   const size = ORB.size;
 
+  // On paper, spilled light is GLARE: the halo pulls in and the white-hot
+  // core quiets so the orb reads as a colored object on the page, not a
+  // wash of brightness (Ben: "the blob is too much" at noon). Continuous
+  // on the same paper ramp as everything else; 0 at night = untouched.
+  const glare = 1 - 0.55 * paper;
+  const coreWhite = 1 - 0.35 * paper;
+
   // Gradient strings derived from the live color — recomputed off-render.
   const haloBg = useTransform(() => {
     const c = rgb.get();
-    const a = haloAlpha.get();
+    const a = haloAlpha.get() * glare;
     return `radial-gradient(circle, rgba(${c},${a.toFixed(3)}) 0%, rgba(${c},${(
       a * 0.45
     ).toFixed(3)}) 38%, rgba(${c},0) 68%)`;
@@ -46,9 +53,9 @@ export function Orb({
   });
   const coreBg = useTransform(() => {
     const c = rgb.get();
-    return `radial-gradient(circle, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.55) ${
-      GLOW.coreFrac * 100
-    }%, rgba(${c},0.28) 46%, rgba(${c},0) 62%)`;
+    return `radial-gradient(circle, rgba(255,255,255,${(0.95 * coreWhite).toFixed(3)}) 0%, rgba(255,255,255,${(
+      0.55 * coreWhite
+    ).toFixed(3)}) ${GLOW.coreFrac * 100}%, rgba(${c},0.28) 46%, rgba(${c},0) 62%)`;
   });
 
   return (
