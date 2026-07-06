@@ -11,6 +11,7 @@ import { panic, unlockAudio } from "@/lib/sound";
 import { ORB } from "@/components/Orb/feel";
 import { SPRING, type Emotion } from "@/lib/theme";
 import { Atmosphere, MissingToken } from "@/components/Map/Atmosphere";
+import { Lightning } from "@/components/Map/Lightning";
 import MapStage from "@/components/Map/MapStage";
 import { ambientSeedMoments } from "@/components/Map/ambientSeed";
 import { CAMERA, CHOREO, MOTION } from "@/components/Map/tune";
@@ -224,6 +225,9 @@ export default function OneScreen() {
       )}
       <Atmosphere />
 
+      {/* The storm answers back: flicker + distant thunder (storm-gated). */}
+      <Lightning />
+
       {/* Dev-only: force any weather/hour to see it (renders null in prod). */}
       <WeatherPreview />
 
@@ -370,6 +374,7 @@ export default function OneScreen() {
         <OrbFlow
           hintWord="hold"
           hintColor={paperText(1)}
+          paper={paper}
           gestureDepth={gestureDepth}
           onCommit={handleCommit}
         />

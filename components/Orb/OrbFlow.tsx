@@ -108,12 +108,16 @@ type Phase = "idle" | "wheel" | "bar" | "bursting";
 export function OrbFlow({
   hintWord,
   hintColor = "#FFFFFF",
+  paper = 0,
   gestureDepth,
   onCommit,
 }: {
   hintWord: string;
   /** Hint ink — the screen passes graphite when the map is paper (day). */
   hintColor?: string;
+  /** Solar day-weight 0..1 — the glass, label, and knob take graphite ink
+   *  as the map turns to paper (white on white is unreadable at noon). */
+  paper?: number;
   gestureDepth: MotionValue<number>;
   /**
    * Fires the instant a feeling is committed (start of the burst, not the
@@ -194,7 +198,12 @@ export function OrbFlow({
     const st = g.current;
     if (st.pointerId !== null) return; // one finger owns the gesture
     st.pointerId = e.pointerId;
-    e.currentTarget.setPointerCapture(e.pointerId);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // A pointer can vanish between the event and the capture (rare touch
+      // race; also synthetic test pointers). The gesture works uncaptured.
+    }
     unlockAudio();
     colorAnim.current?.stop(); // fast re-press: afterglow must not fight the new hue
 
@@ -463,6 +472,11 @@ export function OrbFlow({
   const fillHex = lockedEmotion ? EMOTION_HUES[lockedEmotion] : ORB.restHue;
   // Hot filament color: the hue pulled 35% toward white (OKLCH, stays vivid).
   const coreRgb = mixHexRgbString(fillHex, "#FFFFFF", 0.35);
+  // Day ink: white chrome trades continuously for graphite as the map turns
+  // to paper — the same ramp the captions ride (nothing ever switches).
+  const inkCh = (a: number, b: number) => Math.round(a + (b - a) * paper);
+  const chromeInk = (alpha: number) =>
+    `rgba(${inkCh(255, 52)},${inkCh(255, 58)},${inkCh(255, 70)},${alpha})`;
 
   return (
     <div
@@ -511,11 +525,12 @@ export function OrbFlow({
               </clipPath>
             </defs>
 
-            {/* THE GLASS TUBE — frosted translucent body + thin rim. */}
+            {/* THE GLASS TUBE — frosted translucent body + thin rim.
+                On paper the glass is ink-drawn: white glass vanishes at noon. */}
             <motion.path
               d={TUBE_D}
-              fill={`rgba(255,255,255,${BAR.tube.bodyAlpha})`}
-              stroke={`rgba(255,255,255,${BAR.tube.rimAlpha})`}
+              fill={chromeInk(BAR.tube.bodyAlpha)}
+              stroke={chromeInk(BAR.tube.rimAlpha * (1 + 0.9 * paper))}
               strokeWidth={1}
               style={{ opacity: tubeOpacity }}
             />
@@ -567,7 +582,9 @@ export function OrbFlow({
             marginTop: -BAR.knobPx / 2,
             borderRadius: "50%",
             background: "#FFFFFF",
-            boxShadow: `0 0 14px 2px ${fillHex}`,
+            // On paper the white bead takes a graphite hairline so it reads
+            // as an object, not a hole in the light.
+            boxShadow: `0 0 0 1px rgba(52,58,70,${(0.45 * paper).toFixed(3)}), 0 0 14px 2px ${fillHex}`,
             x: knobX,
             y: knobY,
             scale: knobScale,
@@ -641,7 +658,7 @@ export function OrbFlow({
               x: "-50%",
               fontSize: TEXT.label.sizePx,
               letterSpacing: TEXT.label.letterSpacing,
-              color: "#FFFFFF",
+              color: chromeInk(1),
               whiteSpace: "nowrap",
               pointerEvents: "none",
             }}
@@ -651,7 +668,7 @@ export function OrbFlow({
         )}
       </AnimatePresence>
 
-      <Orb rgb={rgb} scale={scale} haloAlpha={haloAlpha} />
+      <Orb rgb={rgb} scale={scale} haloAlpha={haloAlpha} paper={paper} />
 
       {/* The reward — never the same twice. */}
       {burst && (

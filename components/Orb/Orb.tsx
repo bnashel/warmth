@@ -14,6 +14,7 @@ export function Orb({
   scale,
   scaleY,
   haloAlpha,
+  paper = 0,
 }: {
   /** "R,G,B" string (already OKLCH-mixed upstream). */
   rgb: MotionValue<string>;
@@ -23,6 +24,9 @@ export function Orb({
   scaleY?: MotionValue<number>;
   /** Halo strength 0..1 → alpha between rest and max reach. */
   haloAlpha: MotionValue<number>;
+  /** Solar day-weight 0..1: on paper the orb casts a soft contact shadow —
+   *  an object resting on the page, not light washed out by daylight. */
+  paper?: number;
 }) {
   const size = ORB.size;
 
@@ -58,6 +62,26 @@ export function Orb({
         position: "relative",
       }}
     >
+      {/* Contact shadow — only on paper (opacity 0 at night, composited,
+          costs nothing). Grounds the glow as a thing you can touch. */}
+      {paper > 0.01 && (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: "50%",
+            width: size * 1.15,
+            height: size * 0.5,
+            transform: "translate(-50%, 24%)",
+            borderRadius: "50%",
+            background:
+              "radial-gradient(closest-side, rgba(38,42,54,0.30) 0%, rgba(38,42,54,0.10) 55%, rgba(38,42,54,0) 100%)",
+            opacity: paper,
+            filter: "blur(6px)",
+          }}
+        />
+      )}
       {/* Outer halo — the light that spills into the void. */}
       <motion.div
         style={{
