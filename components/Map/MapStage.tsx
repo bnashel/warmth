@@ -9,7 +9,7 @@ import { MAPBOX_TOKEN } from "@/lib/map";
 import { momentsStore } from "@/lib/momentsStore";
 import { atmosphere } from "@/lib/atmosphere";
 import { setRainLevel } from "@/lib/sound";
-import { CAMERA, CHOREO, INK, MOTION, PERF, SHAPES, SOLAR, WEATHER } from "./tune";
+import { CAMERA, CHOREO, INK, LABELS, MOTION, PERF, SHAPES, SOLAR, WEATHER } from "./tune";
 import { buildStyle } from "./styles";
 import { applyAtmosphereInk } from "./solar";
 import { FieldLayer } from "./FieldLayer";
@@ -57,6 +57,7 @@ export default function MapStage({
   const labelCache = useRef<{
     zoom: number;
     paper: number;
+    dimsKey: string;
     layers: ReturnType<typeof buildLabelLayers>;
   } | null>(null);
   const dataVersion = useRef(-1);
@@ -193,17 +194,37 @@ export default function MapStage({
         field.setData(momentsStore.points);
       }
       const zoom = map.getZoom();
+      // Borough caps yield to feeling: pooled field weight near each anchor
+      // dims its cap (rule: no label ever fights a feeling). Quantized to
+      // eighths so the label cache only rebuilds on a real change.
+      const bd = LABELS.boroughFieldDim;
+      const boroughsGone = zoom > LABELS.boroughFadeOut.to + 0.1;
+      const boroughDims = LABELS.boroughs.map((b) => {
+        if (boroughsGone) return 1; // invisible caps never churn the cache
+        let pooled = 0;
+        for (const p of momentsStore.points) {
+          if (p.seed) continue; // the ambient wash never dims a name
+          const dx = p.position[0] - b.anchor[0];
+          const dy = p.position[1] - b.anchor[1];
+          if (dx * dx + dy * dy < bd.radiusDeg * bd.radiusDeg) pooled += p.weight;
+        }
+        const dim = 1 - bd.dimMax * (pooled / (pooled + bd.halfWeight));
+        return Math.round(dim * 8) / 8;
+      });
+      const dimsKey = boroughDims.join(",");
       // Labels re-ink when the camera moves OR the paperness drifts (dawn,
       // dusk, a preview jump) — graphite on paper, whisper-white on ink.
       const labelsStale =
         !labelCache.current ||
         Math.abs(labelCache.current.zoom - zoom) > 0.02 ||
-        Math.abs(labelCache.current.paper - atmo.paper) > 0.04;
+        Math.abs(labelCache.current.paper - atmo.paper) > 0.04 ||
+        labelCache.current.dimsKey !== dimsKey;
       if (labelsStale) {
         labelCache.current = {
           zoom,
           paper: atmo.paper,
-          layers: buildLabelLayers(labelData.current, zoom, atmo.paper),
+          dimsKey,
+          layers: buildLabelLayers(labelData.current, zoom, atmo.paper, boroughDims),
         };
       }
       // Trail dots breathe via a time uniform, so while visible they re-set

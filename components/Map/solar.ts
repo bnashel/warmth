@@ -34,6 +34,7 @@ const PAINT: [layerId: string, prop: PaintProp, key: InkKey][] = [
   ["water", "fill-color", "water"],
   ["parks", "fill-color", "park"],
   ["buildings", "fill-color", "building"],
+  ["buildings-outline", "line-color", "road"], // footprints ride the road ink
   ["roads-highway", "line-color", "road"],
   ["roads-avenue", "line-color", "road"],
   ["roads-local", "line-color", "road"],
@@ -195,11 +196,12 @@ const ROADS: [
   fade: { from: number; to: number },
   alpha: number,
   width: number,
+  lift: number,
 ][] = [
-  ["roads-highway", JOURNEY.highwayFade, INK.roadAlpha.highway, INK.roadWidth.highway],
-  ["roads-avenue", JOURNEY.avenueFade, INK.roadAlpha.avenue, INK.roadWidth.avenue],
-  ["roads-local", JOURNEY.localFade, INK.roadAlpha.local, INK.roadWidth.local],
-  ["roads-service", JOURNEY.serviceFade, INK.roadAlpha.service, INK.roadWidth.service],
+  ["roads-highway", JOURNEY.highwayFade, INK.roadAlpha.highway, INK.roadWidth.highway, JOURNEY.streetPresence.boost.highway],
+  ["roads-avenue", JOURNEY.avenueFade, INK.roadAlpha.avenue, INK.roadWidth.avenue, JOURNEY.streetPresence.boost.avenue],
+  ["roads-local", JOURNEY.localFade, INK.roadAlpha.local, INK.roadWidth.local, JOURNEY.streetPresence.boost.local],
+  ["roads-service", JOURNEY.serviceFade, INK.roadAlpha.service, INK.roadWidth.service, JOURNEY.streetPresence.boost.service],
 ];
 
 /** Maps whose paint transitions are already set to the slow solar ease. */
@@ -238,7 +240,7 @@ export function applyAtmosphereInk(map: MapboxMap, a: AtmosphereState): void {
   // style itself — only the landing alpha breathes.
   const boost = 1 + (SOLAR.dayRoadBoost - 1) * a.paper;
   const widen = 1 + (SOLAR.dayRoadWiden - 1) * a.paper;
-  for (const [id, fade, alpha, width] of ROADS) {
+  for (const [id, fade, alpha, width, lift] of ROADS) {
     if (!map.getLayer(id)) continue;
     if (firstTouch) {
       for (const prop of ["line-opacity-transition", "line-width-transition"] as const) {
@@ -248,7 +250,7 @@ export function applyAtmosphereInk(map: MapboxMap, a: AtmosphereState): void {
     map.setPaintProperty(
       id,
       "line-opacity",
-      roadOpacityExpr(fade, Math.min(0.95, alpha * boost)) as unknown as ExpressionSpecification,
+      roadOpacityExpr(fade, Math.min(0.95, alpha * boost), lift) as unknown as ExpressionSpecification,
     );
     map.setPaintProperty(id, "line-width", roadWidthExpr(fade.from, width, widen));
   }

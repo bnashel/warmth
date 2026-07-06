@@ -71,6 +71,17 @@ export const JOURNEY = {
   buildingFade: { from: 13.6, to: 15.4 },
   /** Neighborhood boundaries: present at rest, dissolving as streets take over. */
   boundaryFade: { peak: 11.0, gone: 14.5 },
+  /** STREET PRESENCE — the quiet human scale at max zoom. The city was
+   *  nearly empty at street level; over the last 1.5 zoom levels the quiet
+   *  tiers lift into a fine hairline grid. Arterials barely move (rule 3:
+   *  nothing on the base may compete with a feeling). */
+  streetPresence: {
+    from: 15.0,
+    to: 16.5,
+    boost: { highway: 1.15, avenue: 1.4, local: 1.9, service: 2.2 },
+  },
+  /** Building footprints: whisper-faint outlines arriving with the grid. */
+  footprintFade: { from: 15.0, to: 16.5, alpha: 0.075 },
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -108,6 +119,10 @@ export const LABELS = {
   boroughAlpha: 76,
   boroughSizePx: 11.5,
   boroughFadeOut: { from: 10.9, to: 11.6 },
+  /** Borough caps dim further when bright feeling pools beneath them —
+   *  no label ever fights a feeling. Pooled weight within radiusDeg of the
+   *  anchor dims alpha by up to dimMax (half-effect at halfWeight). */
+  boroughFieldDim: { radiusDeg: 0.035, halfWeight: 2.5, dimMax: 0.55 },
 } as const;
 
 /* ------------------------------------------------------------------ */

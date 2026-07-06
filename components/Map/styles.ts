@@ -71,15 +71,31 @@ const parkOpacityExpr = () => {
  * linear ramps at the union of their breakpoints reproduces each exactly.
  * Exported: the style and the 1s re-ink MUST agree.
  */
-export const roadOpacityExpr = (fade: { from: number; to: number }, alpha: number) => {
+export const roadOpacityExpr = (
+  fade: { from: number; to: number },
+  alpha: number,
+  /** Street-presence lift (JOURNEY.streetPresence.boost.*): ×1 at sp.from
+   *  easing to ×lift at sp.to — the quiet human grid returns at max zoom. */
+  lift = 1,
+) => {
   const b = JOURNEY.bridgeFade;
-  if (b.from >= fade.from) return fadeIn(fade.from, fade.to, alpha); // highways already lead
-  const ramp = (z: number, f: { from: number; to: number }) =>
-    alpha * Math.min(1, Math.max(0, (z - f.from) / (f.to - f.from)));
-  const stops = [...new Set([b.from, b.to, fade.from, fade.to])].sort((x, y) => x - y);
+  const sp = JOURNEY.streetPresence;
+  const t01 = (z: number, from: number, to: number) =>
+    Math.min(1, Math.max(0, (z - from) / (to - from)));
+  const liftAt = (z: number) => 1 + (lift - 1) * t01(z, sp.from, sp.to);
+  const ramp = (z: number, f: { from: number; to: number }) => alpha * t01(z, f.from, f.to);
+  const stops = [
+    ...new Set([b.from, b.to, fade.from, fade.to, sp.from, (sp.from + sp.to) / 2, sp.to]),
+  ].sort((x, y) => x - y);
   const expr: unknown[] = ["interpolate", ["linear"], ["zoom"]];
   for (const z of stops)
-    expr.push(z, ["match", ["get", "structure"], "bridge", ramp(z, b), ramp(z, fade)]);
+    expr.push(z, [
+      "match",
+      ["get", "structure"],
+      "bridge",
+      ramp(z, b) * liftAt(z),
+      ramp(z, fade) * liftAt(z),
+    ]);
   return expr as unknown as number;
 };
 
@@ -90,6 +106,7 @@ function roadLayer(
   color: string,
   alpha: number,
   width: number,
+  lift = 1,
 ): LayerSpecification {
   return {
     id,
@@ -104,7 +121,7 @@ function roadLayer(
     layout: { "line-cap": "round", "line-join": "round" },
     paint: {
       "line-color": color,
-      "line-opacity": roadOpacityExpr(fade, alpha),
+      "line-opacity": roadOpacityExpr(fade, alpha, lift),
       "line-width": roadWidthExpr(fade.from, width),
     },
   };
@@ -170,15 +187,33 @@ export function buildStyle(p: CandidatePalette, name: string): StyleSpecificatio
         ),
       },
     });
+    // Footprints: whisper-faint outlines that arrive with the street-zoom
+    // grid — the quiet human scale the empty max-zoom city was missing.
+    layers.push({
+      id: "buildings-outline",
+      type: "line",
+      source: "streets",
+      "source-layer": "building",
+      paint: {
+        "line-color": p.road,
+        "line-opacity": fadeIn(
+          JOURNEY.footprintFade.from,
+          JOURNEY.footprintFade.to,
+          JOURNEY.footprintFade.alpha,
+        ),
+        "line-width": 0.5,
+      },
+    });
   }
 
   layers.push(
     // The street journey, four waves: highways → avenues → side streets →
-    // alleys. Weight and opacity step down per wave so the grid has rhythm.
-    roadLayer("roads-service", SERVICE, JOURNEY.serviceFade, p.road, p.roadAlpha.service, p.roadWidth.service),
-    roadLayer("roads-local", LOCAL, JOURNEY.localFade, p.road, p.roadAlpha.local, p.roadWidth.local),
-    roadLayer("roads-avenue", AVENUE, JOURNEY.avenueFade, p.road, p.roadAlpha.avenue, p.roadWidth.avenue),
-    roadLayer("roads-highway", HIGHWAY, JOURNEY.highwayFade, p.road, p.roadAlpha.highway, p.roadWidth.highway),
+    // alleys. Weight and opacity step down per wave so the grid has rhythm;
+    // the quiet tiers lift again at street zoom (streetPresence).
+    roadLayer("roads-service", SERVICE, JOURNEY.serviceFade, p.road, p.roadAlpha.service, p.roadWidth.service, JOURNEY.streetPresence.boost.service),
+    roadLayer("roads-local", LOCAL, JOURNEY.localFade, p.road, p.roadAlpha.local, p.roadWidth.local, JOURNEY.streetPresence.boost.local),
+    roadLayer("roads-avenue", AVENUE, JOURNEY.avenueFade, p.road, p.roadAlpha.avenue, p.roadWidth.avenue, JOURNEY.streetPresence.boost.avenue),
+    roadLayer("roads-highway", HIGHWAY, JOURNEY.highwayFade, p.road, p.roadAlpha.highway, p.roadWidth.highway, JOURNEY.streetPresence.boost.highway),
     // Neighborhood boundaries — hand-softened seams that dissolve as the
     // street texture takes over.
     {

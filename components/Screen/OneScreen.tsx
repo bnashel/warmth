@@ -361,6 +361,26 @@ export default function OneScreen() {
           // next touch arms for real, still inside a user gesture.
           if (committedOnce.current) armLocation();
         }}
+        onWheel={(e) => {
+          // The island must never eat the map's zoom: a wheel over the orb
+          // forwards a clone to the map canvas (trackpad pinch arrives as
+          // ctrl+wheel and rides the same path).
+          const map = mapRef.current;
+          if (!map) return;
+          map.getCanvas().dispatchEvent(
+            new WheelEvent("wheel", {
+              deltaX: e.deltaX,
+              deltaY: e.deltaY,
+              deltaMode: e.deltaMode,
+              clientX: e.clientX,
+              clientY: e.clientY,
+              ctrlKey: e.ctrlKey,
+              metaKey: e.metaKey,
+              bubbles: true,
+              cancelable: true,
+            }),
+          );
+        }}
         style={{
           position: "absolute",
           left: "50%",
