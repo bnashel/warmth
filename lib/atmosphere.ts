@@ -278,8 +278,13 @@ class AtmosphereEngine {
     const dt = this.lastTick ? Math.min(100, nowMs - this.lastTick) : 16;
     this.lastTick = nowMs;
     // Real weather rolls in slowly; a dev-preview toggle answers in seconds
-    // (Ben toggles to SEE — his field report).
-    const tau = this.override ? WEATHER.previewTauMs : WEATHER.easeTauMs;
+    // (Ben toggles to SEE — his field report). Time-of-day previews count
+    // too: noon→night at the real ~20s pace read as lag (his follow-up).
+    const previewing =
+      this.override !== null ||
+      (typeof window !== "undefined" &&
+        (window as unknown as { __warmthSolarHour?: number }).__warmthSolarHour !== undefined);
+    const tau = previewing ? WEATHER.previewTauMs : WEATHER.easeTauMs;
     const k = 1 - Math.exp(-dt / tau);
     const o = this.override;
     const t = this.weather;

@@ -216,10 +216,10 @@ export const TRAIL = {
     peakBase: 0.45,
     peakPerIntensity: 0.55,
   },
-  /** The paper-day stain wears a CRISPER edge than the night glow: pigment
-   *  pools, light spills. Tighter falloff + a smaller quad + a deeper mark —
-   *  Ben's report: "they look good, just too blurry." */
-  stain: { tailFalloff: 7.5, radiusScale: 0.82, gainBoost: 1.25 },
+  /** The paper-day stain is a MARK, not a glow (Ben: the glow tail read as
+   *  180p blur). Real watercolor: flat wash to `edge` of the radius, a
+   *  defined-but-soft boundary, pigment pooling `ring` deeper at the rim. */
+  stain: { edge: 0.74, ring: 0.32, radiusScale: 0.82, gainBoost: 1.25 },
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -308,12 +308,13 @@ export const SOLAR = {
   /** The ember rises through late twilight and burns off as the sun
    *  climbs — nonzero only around sunrise and sunset. */
   emberRamp: { rise: { from: -8, to: -1 }, fade: { from: 3, to: 11 } },
-  /** Re-apply the graded ink this often (8 paint sets — trivial); paint
+  /** Re-apply the graded ink this often (12 paint sets — trivial); paint
    *  eases over transitionMs on top of the atmosphere's own easing.
-   *  transitionMs === updateMs so the pulses CHAIN — a big preview jump
-   *  glides instead of breathing stop-start (design-review finding). */
-  updateMs: 2_500,
-  transitionMs: 2_500,
+   *  transitionMs === updateMs so the pulses CHAIN — and the cadence is
+   *  FINE (1s, was 2.5s): a preview jump is a smooth ramp, not three
+   *  visible pulses (Ben: switching should be smoother). */
+  updateMs: 1_000,
+  transitionMs: 1_000,
   /** Paper (glow→pigment handoff) rides a LATER ramp than the base ink:
    *  the glow holds full strength through the ember twilight and pigment
    *  takes over only once the ground is genuinely light (design-review). */
@@ -322,9 +323,17 @@ export const SOLAR = {
    *  true Apple-Maps day/night. By day the city is light paper, streets
    *  white, water a soft cool gray-blue; twilight passes through a warm
    *  mid-dark ember on its way to the ink night. Emotion is watercolor
-   *  pigment on the paper (FieldLayer uMode 2), glow on the night ink. */
-  day: { bg: "#E7E9EE", water: "#C9D4E0", park: "#DCE3DB", building: "#D8DBE3", road: "#FBFCFE" },
+   *  pigment on the paper (FieldLayer uMode 2), glow on the night ink.
+   *  Deepened 2026-07-06 (Ben: "so bright and white you can't see roads") —
+   *  the ground dropped a step so the white road network actually reads,
+   *  water holds real weight, parks are visibly green-gray. */
+  day: { bg: "#DFE2E8", water: "#B7C4D6", park: "#CDD8CA", building: "#D2D5DD", road: "#FDFDFE" },
   ember: { bg: "#3A2C26", water: "#241A16", park: "#40332B", building: "#4A3A30", road: "#E8C9A4" },
+  /** Day roads: the night opacities (0.05–0.26) are hairline whispers that
+   *  vanish on paper — white-on-white was Ben's report. By day the road
+   *  network brightens toward Apple-Maps presence; the boost rides `paper`
+   *  continuously through applyAtmosphereInk. ×4 ≈ full white arterials. */
+  dayRoadBoost: 3.2,
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -444,13 +453,18 @@ export const WEATHER = {
 
 /** INK & GLOW: near-black glass city; streets as quiet hairlines. */
 export const INK = {
-  bg: "#0A0B0F", // the void itself — land is the absence of feature
+  /** The land tone carries what the neighborhood plates used to add: the
+   *  plates ride a polygon file with GAPS (Stuy Town, plazas, slivers
+   *  between NTAs), and every gap read as a hard-edged darker patch after
+   *  dark (Ben: "weird shapes of darkness"). The ground itself is lifted
+   *  instead — gapless by construction — and the plates drop to a whisper. */
+  bg: "#0E0F14", // the land — one even ink, no polygon seams
   water: "#06070A", // water darker than land: rivers as deep cuts
-  park: "#0D0F13", // parks: the faintest lift above land (a held breath)
-  building: "#12141B", // human-scale mass at street zoom — still ink
+  park: "#12141A", // parks: the faintest lift above land (a held breath)
+  building: "#151720", // human-scale mass at street zoom — still ink
   buildingAlpha: 0.6,
-  plateBase: 0.03, // neighborhood tonal plates — UNIFORM: every dark patch
-  // on the map is a park or water, never an accident
+  plateBase: 0.01, // neighborhood tonal plates — now just a breath of
+  // landmass identity; every dark patch is a park or water, never a gap
   boundary: "rgba(233,236,244,0.075)", // hand-drawn seams between places
   boundaryWidth: 1.0,
   road: "#C7CBD6", // hairlines in cool gray — structure, not light

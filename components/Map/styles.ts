@@ -105,13 +105,16 @@ export function buildStyle(p: CandidatePalette, name: string): StyleSpecificatio
   );
 
   // Buildings — the mass texture (Graphite; faint density in Fog).
+  // NO minzoom: crossing a layer's minzoom makes mapbox build the building
+  // geometry for every loaded tile in one burst — the zoom-in hitch Ben
+  // felt. Always-on costs nothing below ~z13 (the source has no building
+  // features there) and the opacity ramp alone stages the arrival.
   if ("building" in p && p.building) {
     layers.push({
       id: "buildings",
       type: "fill",
       source: "streets",
       "source-layer": "building",
-      minzoom: JOURNEY.buildingFade.from - 0.2,
       paint: {
         "fill-color": p.building,
         "fill-opacity": fadeIn(

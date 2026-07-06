@@ -165,6 +165,16 @@ function parkNear(ink: Record<InkKey, Rgb>): Rgb {
   ];
 }
 
+/** Road waves: fade ramp + base alpha per layer (mirrors styles.ts). By day
+ *  the whole network brightens (SOLAR.dayRoadBoost) — the night hairline
+ *  opacities are invisible white-on-paper (Ben's report). */
+const ROADS: [layerId: string, fade: { from: number; to: number }, alpha: number][] = [
+  ["roads-highway", JOURNEY.highwayFade, INK.roadAlpha.highway],
+  ["roads-avenue", JOURNEY.avenueFade, INK.roadAlpha.avenue],
+  ["roads-local", JOURNEY.localFade, INK.roadAlpha.local],
+  ["roads-service", JOURNEY.serviceFade, INK.roadAlpha.service],
+];
+
 /** Maps whose paint transitions are already set to the slow solar ease. */
 const eased = new WeakSet<MapboxMap>();
 
@@ -195,6 +205,28 @@ export function applyAtmosphereInk(map: MapboxMap, a: AtmosphereState): void {
           ] as ExpressionSpecification)
         : fmt(rgb[key]);
     map.setPaintProperty(id, prop, value);
+  }
+  // The road network's presence follows the paper: hairlines on ink,
+  // an Apple-Maps-bright web on the day page. Same zoom ramps as the
+  // style itself — only the landing alpha breathes.
+  const boost = 1 + (SOLAR.dayRoadBoost - 1) * a.paper;
+  for (const [id, fade, alpha] of ROADS) {
+    if (!map.getLayer(id)) continue;
+    if (firstTouch) {
+      map.setPaintProperty(id, "line-opacity-transition", {
+        duration: SOLAR.transitionMs,
+        delay: 0,
+      });
+    }
+    map.setPaintProperty(id, "line-opacity", [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      fade.from,
+      0,
+      fade.to,
+      Math.min(0.95, alpha * boost),
+    ] as ExpressionSpecification);
   }
   eased.add(map);
 }
