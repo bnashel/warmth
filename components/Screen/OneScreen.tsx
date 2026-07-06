@@ -15,7 +15,8 @@ import MapStage from "@/components/Map/MapStage";
 import { ambientSeedMoments } from "@/components/Map/ambientSeed";
 import { CAMERA, CHOREO, MOTION } from "@/components/Map/tune";
 import { OrbFlow } from "@/components/Orb/OrbFlow";
-import { solarPaperWeight } from "@/components/Map/solar";
+import { atmosphere } from "@/lib/atmosphere";
+import { WeatherPreview } from "@/components/Lab/WeatherPreview";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
 
@@ -68,9 +69,10 @@ export default function OneScreen() {
   // lands on the real sun in the effect below.
   const [paper, setPaper] = useState(0);
   useEffect(() => {
-    const update = () => setPaper(solarPaperWeight());
+    // Quantized so React only re-renders when the ink meaningfully moves.
+    const update = () => setPaper(Math.round(atmosphere.current.paper * 40) / 40);
     update();
-    const iv = window.setInterval(update, 60_000);
+    const iv = window.setInterval(update, 2_000);
     document.addEventListener("visibilitychange", update);
     return () => {
       window.clearInterval(iv);
@@ -221,6 +223,9 @@ export default function OneScreen() {
         <MissingToken />
       )}
       <Atmosphere />
+
+      {/* Dev-only: force any weather/hour to see it (renders null in prod). */}
+      <WeatherPreview />
 
       {/* PUBLIC / PRIVATE — the two ways of seeing, named plainly. The pill
           slides on a spring; a whisper under it says what each view means. */}

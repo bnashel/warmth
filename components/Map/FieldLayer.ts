@@ -19,7 +19,7 @@
 import mapboxgl, { type CustomLayerInterface, type Map as MapboxMap } from "mapbox-gl";
 import { EMOTION_HUES, EMOTIONS } from "@/lib/theme";
 import type { LivePoint } from "@/lib/momentsStore";
-import { FIELD, SHAPES } from "./tune";
+import { FIELD, SHAPES, WEATHER } from "./tune";
 
 /* ---------------- OKLab (Björn Ottosson, via components/Orb/oklch.ts) --- */
 
@@ -122,12 +122,18 @@ uniform float uTimeSec;
 uniform float uBreathPeriod;
 uniform float uBreathAmp;
 uniform int uMode;
-// THE SHAPE OF FEELING (Look panel): domain-warp the field lookup so blooms
-// stop being circles. x=warp amplitude (uv), y=noise scale, z=drift speed,
+// THE SHAPE OF FEELING: domain-warp the field lookup so blooms stop being
+// circles. x=warp amplitude (uv), y=noise scale, z=drift speed,
 // w=streak (anisotropy along the flow axis).
 uniform vec4 uShape;
 uniform float uBand;   // aurora curtains: brightness modulation (0 = off)
 uniform float uAspect; // target width / height, so the flow isn't squashed
+// THE LIVING ATMOSPHERE (lib/atmosphere.ts, eased): the flow axis follows
+// the real wind; the sky's weight grades the light. All subtle.
+uniform vec2 uAxis;    // direction the air flows toward (unit-ish)
+uniform float uCloud;  // 0 clear → 1 overcast
+uniform float uWet;    // rain intensity (0 when snowing)
+uniform float uSnow;   // snow intensity
 out vec4 fragColor;
 
 // Value-noise fbm, 3 octaves — cheap enough for a half-res target.
@@ -177,8 +183,8 @@ void main() {
   vec2 uv = vUv;
   if (uShape.x > 0.0) {
     vec2 q = vec2(vUv.x * uAspect, vUv.y) * uShape.y;
-    // The flow axis: a fixed gentle diagonal, like prevailing wind.
-    vec2 axis = normalize(vec2(1.0, 0.35));
+    // The flow axis IS the real wind (a gentle diagonal when calm).
+    vec2 axis = normalize(uAxis);
     // Streak stretches the noise domain along the axis (ribbons), and the
     // drift crawls the domain over time so the weather is alive, not stuck.
     vec2 along = axis * dot(q, axis);
@@ -238,15 +244,30 @@ void main() {
   // Aurora curtains: slow luminous banding across the flow axis. Modulation
   // only — never to zero, so the field's coverage is untouched.
   if (uBand > 0.0) {
-    vec2 axis = normalize(vec2(1.0, 0.35));
+    vec2 axis = normalize(uAxis);
     float across = dot(vec2(uv.x * uAspect, uv.y), vec2(-axis.y, axis.x));
     float curtain = fbm(vec2(across * 9.0, uTimeSec * 0.05));
     b *= 1.0 + uBand * (curtain - 0.5) * 1.6;
   }
 
-  // Dither so the long tail never bands on 8-bit output.
+  // THE SKY'S WEIGHT — all modulation, never to zero, always subtle.
+  // Overcast flattens the light.
+  b *= 1.0 - ${WEATHER.cloudFieldDim.toFixed(3)} * uCloud;
+  // Rain streaks the feeling faintly along the wind — alive, not drawn.
+  if (uWet > 0.001) {
+    vec2 ax = normalize(uAxis);
+    vec2 qw = vec2(uv.x * uAspect, uv.y);
+    float streak = vnoise(vec2(dot(qw, ax) * 3.0 - uTimeSec * 0.55,
+                               dot(qw, vec2(-ax.y, ax.x)) * 42.0));
+    b *= 1.0 + uWet * ${WEATHER.wetStreak.toFixed(3)} * (streak - 0.5);
+  }
+  // Snow hush: the floor lifts a breath, the peaks soften.
+  if (uSnow > 0.001) b = mix(b, b * 0.9 + 0.02, uSnow * 0.6);
+
+  // Dither so the long tail never bands on 8-bit output — snow adds a
+  // whisper of sparkle to it.
   float n = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
-  b += (n - 0.5) * 0.004;
+  b += (n - 0.5) * (0.004 + ${WEATHER.snowSparkle.toFixed(3)} * uSnow);
 
   // uMode 2 — WATERCOLOR PIGMENT (the light "paper" day): instead of adding
   // light, stain the paper. Caller blends ZERO/SRC_COLOR (true multiply);
@@ -313,8 +334,13 @@ export class FieldLayer implements CustomLayerInterface {
   };
 
   /** 0 = dark ink night (glow), 1 = light paper day (pigment). Set from
-   *  MapStage on every solar apply; crossfades the two ways of painting. */
+   *  MapStage every frame from the atmosphere; crossfades the two ways of
+   *  painting. */
   paper = 0;
+
+  /** THE LIVING ATMOSPHERE — plain fields mutated in place from MapStage
+   *  every push (no allocation): the sky's weight on the light. */
+  weather = { cloud: 0, wet: 0, snow: 0, fog: 0, axisX: 0.94, axisY: 0.33 };
 
   private map: MapboxMap | null = null;
   private gl: WebGL2RenderingContext | null = null;
@@ -495,7 +521,8 @@ export class FieldLayer implements CustomLayerInterface {
     );
     gl.uniform1f(
       gl.getUniformLocation(this.accumProgram, "uSoftness"),
-      FIELD.kernelSoftness,
+      // Overcast diffuses the feeling: softer kernels under a gray sky.
+      FIELD.kernelSoftness + WEATHER.cloudSoften * this.weather.cloud,
     );
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE);
@@ -546,17 +573,24 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform4f(u("uShape"), this.look.warpAmp, this.look.scale, this.look.drift, this.look.streak);
     gl.uniform1f(u("uBand"), this.look.band);
     gl.uniform1f(u("uAspect"), this.texW / Math.max(1, this.texH));
+    const w = this.weather;
+    gl.uniform2f(u("uAxis"), w.axisX, w.axisY);
+    gl.uniform1f(u("uCloud"), w.cloud);
+    gl.uniform1f(u("uWet"), w.wet);
+    gl.uniform1f(u("uSnow"), w.snow);
     gl.enable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
 
     // By day (paper → 1) the glow passes hand off to the pigment pass:
     // light added to a light map is invisible, so feeling stains instead.
     const night = 1 - this.paper;
+    // Fog: the feeling recedes into the veil, whichever way it's painted.
+    const fogDim = 1 - WEATHER.fogFieldDim * w.fog;
 
     // Pass 0 — watercolor pigment onto the paper (true multiply).
     if (this.paper > 0.01) {
       gl.uniform1i(u("uMode"), 2);
-      gl.uniform1f(u("uGain"), this.paper * this.fade);
+      gl.uniform1f(u("uGain"), this.paper * this.fade * fogDim);
       gl.blendFunc(gl.ZERO, gl.SRC_COLOR);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
@@ -564,9 +598,13 @@ export class FieldLayer implements CustomLayerInterface {
     // Pass 1 — streetlight: field × base map (dst is the pure ink city).
     // Gated past half-paper: brightening a light ground is invisible, so
     // twilight never pays for three full passes (design-review flag).
+    // Wet streets catch more of the light — the rain's glisten.
     if (FIELD.streetlightGain > 0 && night > 0.01 && this.paper <= 0.5) {
       gl.uniform1i(u("uMode"), 1);
-      gl.uniform1f(u("uGain"), FIELD.streetlightGain * this.fade * night);
+      gl.uniform1f(
+        u("uGain"),
+        FIELD.streetlightGain * this.fade * night * fogDim * (1 + WEATHER.glistenGain * w.wet),
+      );
       gl.blendFunc(gl.DST_COLOR, gl.ONE);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
@@ -574,7 +612,7 @@ export class FieldLayer implements CustomLayerInterface {
     // Pass 2 — the field itself, additive (alpha 0 under premultiplied).
     if (night > 0.01) {
       gl.uniform1i(u("uMode"), 0);
-      gl.uniform1f(u("uGain"), FIELD.gain * this.fade * night);
+      gl.uniform1f(u("uGain"), FIELD.gain * this.fade * night * fogDim);
       gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }

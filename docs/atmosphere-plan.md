@@ -1,7 +1,9 @@
 # The Living Atmosphere — Plan
 
-*Proposed 2026-07-05 (Ben's direction). Status: awaiting Ben's go, then Eli
-alignment. Supersedes the Look panel's light modes.*
+*Proposed 2026-07-05 (Ben's direction); Ben approved same day (rain sound
+pulled forward). Status: Phases A–D + rain sound + the dev weather preview
+are BUILT (see lib/atmosphere.ts); Phases E (art pass) and F (feel pass)
+are next. Eli still needs the heads-up that the Look panel is gone.*
 
 ## The idea in one paragraph
 

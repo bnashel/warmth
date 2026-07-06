@@ -14,6 +14,7 @@
  *   sine beep; master gain raised — v1 was inaudible on phone speakers.
  */
 import { SOUND, tickHzForStep } from "@/components/Orb/feel";
+import { WEATHER } from "@/components/Map/tune";
 import type { Emotion } from "./theme";
 
 let ctx: AudioContext | null = null;
@@ -282,7 +283,79 @@ export function stopHum(): void {
   }
 }
 
+/* ---------------------------------------------------------------- */
+/* Rain (continuous ambient, atmosphere-driven)                      */
+/* ---------------------------------------------------------------- */
+let rainSrc: AudioBufferSourceNode | null = null;
+let rainGain: GainNode | null = null;
+let rainLfo: OscillatorNode | null = null;
+
+/**
+ * Rain patter under everything, felt more than heard: looped noise through
+ * a band shaped like rain on a window, a slow LFO swelling it so it never
+ * reads as a flat hiss. Level rides the atmosphere's `wet`; audio starts
+ * only after the usual gesture unlock, and panic() silences it.
+ */
+export function setRainLevel(level01: number): void {
+  try {
+    if (!ready() || !ctx || !master) return;
+    const level = Math.min(1, Math.max(0, level01));
+    if (level <= 0.001) {
+      if (rainGain) rainGain.gain.setTargetAtTime(0.0001, ctx.currentTime, 1.2);
+      return;
+    }
+    if (!rainSrc) {
+      rainGain = ctx.createGain();
+      rainGain.gain.value = 0.0001;
+      // The window-glass band: soft highs, no rumble, no hiss.
+      const lp = ctx.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.frequency.value = 2400;
+      const hp = ctx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.value = 400;
+      rainSrc = ctx.createBufferSource();
+      rainSrc.buffer = whiteNoise(ctx);
+      rainSrc.loop = true;
+      rainSrc.connect(hp).connect(lp).connect(rainGain).connect(master);
+      rainSrc.start();
+      // The swell: a slow wobble on the gain — weather, not static.
+      rainLfo = ctx.createOscillator();
+      rainLfo.frequency.value = WEATHER.rainSound.lfoHz;
+      const depth = ctx.createGain();
+      depth.gain.value = WEATHER.rainSound.maxGain * WEATHER.rainSound.lfoDepth;
+      rainLfo.connect(depth).connect(rainGain.gain);
+      rainLfo.start();
+    }
+    rainGain!.gain.setTargetAtTime(
+      WEATHER.rainSound.maxGain * level,
+      ctx.currentTime,
+      2, // rain fades in like rain
+    );
+  } catch {
+    /* silent degrade */
+  }
+}
+
+/** Stop the rain now (tab hidden). The atmosphere restarts it when back. */
+function stopRain(): void {
+  try {
+    if (!ctx || !rainSrc) return;
+    const t = ctx.currentTime;
+    rainGain?.gain.setTargetAtTime(0.0001, t, 0.1);
+    rainSrc.stop(t + 0.4);
+    rainLfo?.stop(t + 0.4);
+  } catch {
+    /* ignore */
+  } finally {
+    rainSrc = null;
+    rainGain = null;
+    rainLfo = null;
+  }
+}
+
 /** Hard-stop everything that can sustain (tab hidden / pointercancel). */
 export function panic(): void {
   stopHum();
+  stopRain();
 }

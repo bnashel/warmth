@@ -7,9 +7,11 @@ import type { MapRef } from "react-map-gl/mapbox";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { MAPBOX_TOKEN } from "@/lib/map";
 import { momentsStore } from "@/lib/momentsStore";
-import { CAMERA, CHOREO, INK, MOTION, PERF, SHAPES, SOLAR } from "./tune";
+import { atmosphere } from "@/lib/atmosphere";
+import { setRainLevel } from "@/lib/sound";
+import { CAMERA, CHOREO, INK, MOTION, PERF, SHAPES, SOLAR, WEATHER } from "./tune";
 import { buildStyle } from "./styles";
-import { applySolarInk, solarPaperWeight } from "./solar";
+import { applyAtmosphereInk } from "./solar";
 import { FieldLayer } from "./FieldLayer";
 import { buildLabelLayers, loadLabels } from "./neighborhoods";
 import { buildTrailLayers } from "@/components/Trail/glow";
@@ -50,9 +52,11 @@ export default function MapStage({
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const fieldRef = useRef<FieldLayer | null>(null);
   const labelData = useRef<Awaited<ReturnType<typeof loadLabels>>>([]);
-  const labelCache = useRef<{ zoom: number; layers: ReturnType<typeof buildLabelLayers> } | null>(
-    null,
-  );
+  const labelCache = useRef<{
+    zoom: number;
+    paper: number;
+    layers: ReturnType<typeof buildLabelLayers>;
+  } | null>(null);
   const dataVersion = useRef(-1);
   const loaded = useRef(false);
   const [rotated, setRotated] = useState(false);
@@ -90,18 +94,16 @@ export default function MapStage({
     });
   }, []);
 
-  // Solar drift: the ink follows the real sun. First coat lands in onLoad;
-  // after that, re-check once a minute and whenever the tab comes back —
-  // paint changes ride their own slow transitions, so nothing ever steps.
+  // The base ink follows the living atmosphere (sun + real weather). First
+  // coat lands in onLoad; after that, re-apply on a slow cadence — the
+  // atmosphere is already eased and paint rides its own transitions, so
+  // nothing ever steps.
   useEffect(() => {
     const apply = () => {
       if (document.visibilityState !== "visible") return;
       const map = mapRef.current?.getMap();
       if (!map || !loaded.current) return;
-      applySolarInk(map);
-      paperRef.current = solarPaperWeight();
-      if (fieldRef.current) fieldRef.current.paper = paperRef.current;
-      labelCache.current = null; // re-ink the labels for the new paperness
+      applyAtmosphereInk(map, atmosphere.current);
     };
     const iv = setInterval(apply, SOLAR.updateMs);
     document.addEventListener("visibilitychange", apply);
@@ -117,6 +119,7 @@ export default function MapStage({
     let raf = 0;
     let lastPush = 0;
     let lastFrame = 0;
+    let lastRainPush = 0;
     let trailShown = false;
     const tick = () => {
       raf = requestAnimationFrame(tick);
@@ -129,6 +132,9 @@ export default function MapStage({
       const dt = lastFrame ? Math.min(50, now - lastFrame) : 16;
       lastFrame = now;
       const arriving = momentsStore.tick(now);
+      atmosphere.tick(now);
+      const atmo = atmosphere.current;
+      paperRef.current = atmo.paper;
 
       // Crossfade: exponential settle toward the view target, then snap.
       const target = viewTarget.current;
@@ -137,8 +143,34 @@ export default function MapStage({
         viewMix.current += (target - viewMix.current) * (1 - Math.exp(-dt / CHOREO.viewFade.tauMs));
         if (Math.abs(viewMix.current - target) < 0.004) viewMix.current = target;
       }
-      if (field) field.fade = 1 - viewMix.current;
       const trailOn = viewMix.current > 0.01;
+
+      // Hand the atmosphere to the field — in-place mutation, no allocation.
+      if (field) {
+        field.fade = 1 - viewMix.current;
+        field.paper = atmo.paper;
+        const rain = atmo.wetKind === "rain" ? atmo.wet : 0;
+        const snow = atmo.wetKind === "snow" ? atmo.wet : 0;
+        const look = field.look;
+        look.warpAmp = SHAPES.watercolor.warpAmp + atmo.wind * WEATHER.windWarp + rain * WEATHER.wetWarp;
+        look.drift =
+          (SHAPES.watercolor.drift + atmo.wind * WEATHER.windDrift) *
+          (1 - WEATHER.snowDriftSlow * snow);
+        look.streak = atmo.wind * WEATHER.windStreak;
+        const w = field.weather;
+        w.cloud = atmo.cloud;
+        w.fog = atmo.fog;
+        w.wet = rain;
+        w.snow = snow;
+        w.axisX = atmo.axisX;
+        w.axisY = atmo.axisY;
+      }
+
+      // Rain patter follows the wet (snow is a hush — silent by design).
+      if (now - lastRainPush > 800) {
+        lastRainPush = now;
+        setRainLevel(atmo.wetKind === "rain" ? atmo.wet : 0);
+      }
 
       // Rest-throttle — bypassed while moving, blooming, or crossfading.
       if (!map.isMoving() && !arriving && !fading && now - lastPush < PERF.restFrameMs) return;
@@ -149,12 +181,17 @@ export default function MapStage({
         field.setData(momentsStore.points);
       }
       const zoom = map.getZoom();
+      // Labels re-ink when the camera moves OR the paperness drifts (dawn,
+      // dusk, a preview jump) — graphite on paper, whisper-white on ink.
       const labelsStale =
-        !labelCache.current || Math.abs(labelCache.current.zoom - zoom) > 0.02;
+        !labelCache.current ||
+        Math.abs(labelCache.current.zoom - zoom) > 0.02 ||
+        Math.abs(labelCache.current.paper - atmo.paper) > 0.04;
       if (labelsStale) {
         labelCache.current = {
           zoom,
-          layers: buildLabelLayers(labelData.current, zoom, paperRef.current),
+          paper: atmo.paper,
+          layers: buildLabelLayers(labelData.current, zoom, atmo.paper),
         };
       }
       // Trail dots breathe via a time uniform, so while visible they re-set
@@ -214,9 +251,10 @@ export default function MapStage({
           } catch (err) {
             console.error("warmth: field layer failed to start", err);
           }
-          // First coat of solar ink (real sun, or ?solarHour= lab preview).
-          applySolarInk(map);
-          paperRef.current = solarPaperWeight();
+          // First coat of atmosphere ink (real sun + weather, or preview).
+          atmosphere.tick(performance.now());
+          applyAtmosphereInk(map, atmosphere.current);
+          paperRef.current = atmosphere.current.paper;
           if (fieldRef.current) fieldRef.current.paper = paperRef.current;
           // A backgrounded phone can lose the GL context; mapbox restores
           // its own layers but never re-onAdds custom ones — without this

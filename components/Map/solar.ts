@@ -1,27 +1,23 @@
 /**
- * components/Map/solar.ts — the ink follows the real sun.
+ * components/Map/solar.ts — the base ink follows the real sky.
  *
- * Continuous, never stepped: sun elevation over NYC (the map is NYC by
- * construction — no location permission needed) drives two weights, "day"
- * and "ember", that blend the frozen INK palette toward SOLAR.day and
- * SOLAR.ember (tune.ts). The result lands as plain paint-property updates
- * with their own long transitions — no style swap, no re-render, no new
- * frames: the same layers, re-inked.
+ * Continuous, never stepped: the eased atmosphere state (lib/atmosphere.ts —
+ * sun height + real weather) drives the ink. Night → paper day by `light`,
+ * warmed by the `ember` near the horizon, then GRADED by the sky: overcast
+ * desaturates and flattens, fog lifts everything toward mist, rain deepens
+ * the water, snow cools the paper and lifts the night. The result lands as
+ * plain paint-property updates with their own slow transitions — no style
+ * swap, no re-render, no new frames: the same layers, re-inked.
  */
 import type { Map as MapboxMap } from "mapbox-gl";
-import { sunElevationDeg } from "@/lib/sun";
-import { CAMERA, INK, SOLAR } from "./tune";
+import type { AtmosphereState } from "@/lib/atmosphere";
+import { INK, SOLAR, WEATHER } from "./tune";
 
-type SolarInk = {
-  bg: string;
-  water: string;
-  park: string;
-  building: string;
-  road: string;
-};
+type InkKey = "bg" | "water" | "park" | "building" | "road";
+const INK_KEYS: InkKey[] = ["bg", "water", "park", "building", "road"];
 
-/** Night is the frozen palette itself — solar drift never touches it. */
-const NIGHT: SolarInk = {
+/** Night is the frozen palette itself — the atmosphere never touches it. */
+const NIGHT: Record<InkKey, string> = {
   bg: INK.bg,
   water: INK.water,
   park: INK.park,
@@ -32,7 +28,7 @@ const NIGHT: SolarInk = {
 /** Which layers each ink channel paints. Road color is shared: the four
  *  road waves differ by opacity/width (zoom expressions), never by hue. */
 type PaintProp = "background-color" | "fill-color" | "line-color";
-const PAINT: [layerId: string, prop: PaintProp, key: keyof SolarInk][] = [
+const PAINT: [layerId: string, prop: PaintProp, key: InkKey][] = [
   ["bg", "background-color", "bg"],
   ["water", "fill-color", "water"],
   ["parks", "fill-color", "park"],
@@ -42,13 +38,6 @@ const PAINT: [layerId: string, prop: PaintProp, key: keyof SolarInk][] = [
   ["roads-local", "line-color", "road"],
   ["roads-service", "line-color", "road"],
 ];
-
-const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
-
-function smoothstep(from: number, to: number, x: number): number {
-  const t = clamp01((x - from) / (to - from));
-  return t * t * (3 - 2 * t);
-}
 
 type Rgb = [number, number, number];
 
@@ -63,25 +52,13 @@ const lerpRgb = (a: Rgb, b: Rgb, t: number): Rgb => [
   a[2] + (b[2] - a[2]) * t,
 ];
 
+const scaleRgb = (c: Rgb, s: number): Rgb => [c[0] * s, c[1] * s, c[2] * s];
+
 const fmt = (c: Rgb) => `rgb(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])})`;
-
-const INK_KEYS = ["bg", "water", "park", "building", "road"] as const;
-
-/** night → day by `day`, then toward the ember by `ember` — all numeric. */
-function blendInk(day: number, ember: number): SolarInk {
-  const out = {} as Record<keyof SolarInk, string>;
-  for (const k of INK_KEYS) {
-    let c = hexToRgb(NIGHT[k]);
-    if (day > 0) c = lerpRgb(c, hexToRgb(SOLAR.day[k]), day);
-    if (ember > 0) c = lerpRgb(c, hexToRgb(SOLAR.ember[k]), ember);
-    out[k] = fmt(c);
-  }
-  return out;
-}
 
 /**
  * Now — unless the lab set a preview hour. `?solarHour=17.5` seeds it;
- * `window.__warmthSolarHour = 6` steers it live (design-review harness).
+ * `window.__warmthSolarHour = 6` steers it live (dev preview + harness).
  */
 export function solarDate(): Date {
   if (typeof window !== "undefined") {
@@ -102,34 +79,52 @@ export function solarDate(): Date {
   return new Date();
 }
 
-/** The ink for a moment in time: night → day by sun height, warmed by
- *  the ember near the horizon. Exposed for tests. */
-export function solarInk(date: Date): SolarInk {
-  const elev = sunElevationDeg(date, CAMERA.initial.latitude, CAMERA.initial.longitude);
-  const day = smoothstep(SOLAR.dayRamp.from, SOLAR.dayRamp.to, elev) * SOLAR.strength;
-  const ember =
-    smoothstep(SOLAR.emberRamp.rise.from, SOLAR.emberRamp.rise.to, elev) *
-    (1 - smoothstep(SOLAR.emberRamp.fade.from, SOLAR.emberRamp.fade.to, elev)) *
-    SOLAR.strength;
-  return blendInk(day, ember);
-}
+/** The graded ink for the current atmosphere. Exposed for the harness. */
+export function atmosphereInk(a: AtmosphereState): Record<InkKey, string> {
+  const snow = a.wetKind === "snow" ? a.wet : 0;
+  const rain = a.wetKind === "rain" ? a.wet : 0;
+  const mist = hexToRgb(a.paper > 0.5 ? WEATHER.fogMist.day : WEATHER.fogMist.night);
+  const out = {} as Record<InkKey, string>;
 
-/**
- * How "paper" the map currently is (0 = dark ink, 1 = full light day).
- * The field uses it to trade glow for watercolor pigment, and labels use
- * it to trade white for ink text.
- */
-export function solarPaperWeight(date: Date = solarDate()): number {
-  const elev = sunElevationDeg(date, CAMERA.initial.latitude, CAMERA.initial.longitude);
-  return smoothstep(SOLAR.paperRamp.from, SOLAR.paperRamp.to, elev) * SOLAR.strength;
+  for (const k of INK_KEYS) {
+    // The sun's blend: night → day, warmed toward the ember.
+    let c = hexToRgb(NIGHT[k]);
+    if (a.light > 0) c = lerpRgb(c, hexToRgb(SOLAR.day[k]), a.light);
+    if (a.ember > 0) c = lerpRgb(c, hexToRgb(SOLAR.ember[k]), a.ember);
+
+    // Overcast: the gray weight — desaturate, and dim the day a touch
+    // (scaled by light so the night ink is never crushed further).
+    if (a.cloud > 0.001) {
+      const l = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+      c = lerpRgb(c, [l, l, l], a.cloud * WEATHER.cloudDesat);
+      c = scaleRgb(c, 1 - WEATHER.cloudDayDim * a.cloud * a.light);
+    }
+
+    // Snow: paper goes cold-bright; the night lifts a breath (snow-lit sky).
+    if (snow > 0.001) {
+      c = lerpRgb(c, [238, 241, 246], snow * WEATHER.snowDayCool * a.light);
+      c = lerpRgb(c, [36, 40, 50], snow * WEATHER.snowNightLift * (1 - a.light));
+    }
+
+    // Fog: everything lifts toward the mist — the milk-glass veil.
+    if (a.fog > 0.001) c = lerpRgb(c, mist, a.fog * WEATHER.fogLift);
+
+    // Rain: the water deepens.
+    if (k === "water" && rain > 0.001) {
+      c = scaleRgb(c, 1 - WEATHER.wetWaterDarken * rain);
+    }
+
+    out[k] = fmt(c);
+  }
+  return out;
 }
 
 /** Maps whose paint transitions are already set to the slow solar ease. */
 const eased = new WeakSet<MapboxMap>();
 
-/** Re-ink the base map for the current (or lab-previewed) sun. */
-export function applySolarInk(map: MapboxMap): void {
-  const ink = solarInk(solarDate());
+/** Re-ink the base map for the current atmosphere. Cheap: 8 paint sets. */
+export function applyAtmosphereInk(map: MapboxMap, a: AtmosphereState): void {
+  const ink = atmosphereInk(a);
   const firstTouch = !eased.has(map);
   for (const [id, prop, key] of PAINT) {
     if (!map.getLayer(id)) continue;

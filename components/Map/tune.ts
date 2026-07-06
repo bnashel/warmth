@@ -298,9 +298,10 @@ export const SOLAR = {
   /** The ember rises through late twilight and burns off as the sun
    *  climbs — nonzero only around sunrise and sunset. */
   emberRamp: { rise: { from: -8, to: -1 }, fade: { from: 3, to: 11 } },
-  /** Re-check the sun this often; paint eases over transitionMs so even
-   *  a stale backgrounded tab never visibly steps. */
-  updateMs: 60_000,
+  /** Re-apply the graded ink this often (8 paint sets — trivial); paint
+   *  eases over transitionMs on top of the atmosphere's own easing, so
+   *  nothing ever visibly steps. */
+  updateMs: 2_500,
   transitionMs: 1_500,
   /** Paper (glow→pigment handoff) rides a LATER ramp than the base ink:
    *  the glow holds full strength through the ember twilight and pigment
@@ -313,6 +314,51 @@ export const SOLAR = {
    *  pigment on the paper (FieldLayer uMode 2), glow on the night ink. */
   day: { bg: "#E7E9EE", water: "#C9D4E0", park: "#DCE3DB", building: "#D8DBE3", road: "#FBFCFE" },
   ember: { bg: "#3A2C26", water: "#241A16", park: "#40332B", building: "#4A3A30", road: "#E8C9A4" },
+} as const;
+
+/* ------------------------------------------------------------------ */
+/* THE LIVING ATMOSPHERE — the map reflects the real weather outside.  */
+/* Not a mode: one continuously-eased state (lib/atmosphere.ts) that   */
+/* every visual reads. All mappings are SUBTLE — you notice the vibe,  */
+/* never the trick. Full plan: docs/atmosphere-plan.md.                */
+/* ------------------------------------------------------------------ */
+export const WEATHER = {
+  /** Open-Meteo refetch cadence (free, keyless; NYC coords like solar). */
+  refetchMs: 15 * 60_000,
+  /** Exponential ease for every atmosphere value: real weather rolls in
+   *  like weather (~20s to settle a big change); nothing ever switches. */
+  easeTauMs: 6_000,
+
+  /* -- overcast: the sky's gray weight ------------------------------ */
+  cloudFieldDim: 0.26, // field brightness loss under full overcast
+  cloudSoften: 1.0, // extra kernel softness (more diffuse feeling)
+  cloudDesat: 0.32, // base-ink desaturation at full overcast
+  cloudDayDim: 0.1, // paper darkens a touch under clouds
+
+  /* -- fog: the milk-glass veil -------------------------------------- */
+  fogLift: 0.42, // base ink lifts toward the mist color
+  fogFieldDim: 0.22, // feeling recedes into the veil
+  fogMist: { night: "#20242C", day: "#DFE3E9" },
+
+  /* -- rain: wet paper, glistening streets --------------------------- */
+  wetWaterDarken: 0.16, // rivers deepen in the rain
+  glistenGain: 0.8, // streetlight boost on wet nights (×1+this×wet)
+  wetStreak: 0.15, // field brightness streaking along the wind
+  wetWarp: 0.015, // edges seep a little further when wet
+
+  /* -- snow: the hush ------------------------------------------------ */
+  snowDayCool: 0.35, // paper toward cold bright white
+  snowNightLift: 0.06, // ink lifts a breath (snow-lit sky)
+  snowDriftSlow: 0.6, // flow slows: ×(1 − this×snow)
+  snowSparkle: 0.007, // extra dither shimmer in the field
+
+  /* -- wind: the flow follows the real air --------------------------- */
+  windWarp: 0.05, // + warp amplitude at full wind
+  windDrift: 0.06, // + drift speed at full wind
+  windStreak: 0.35, // anisotropy along the real wind axis
+
+  /* -- rain sound (patter under everything; gesture-unlocked) -------- */
+  rainSound: { maxGain: 0.045, lfoHz: 0.19, lfoDepth: 0.35 },
 } as const;
 
 /* ------------------------------------------------------------------ */
