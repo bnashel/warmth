@@ -126,7 +126,34 @@ export const LABELS = {
 } as const;
 
 /* ------------------------------------------------------------------ */
-/* Glow — emotion rendered as LIGHT (additive shader; test data only)  */
+/* THE ONE GLOW RECIPE (constitution rule 5): every point of light in   */
+/* the product — trail candles, lab glows, the streetlight catch — is   */
+/* the same lamp: tight luminous core, exponential falloff, zoom-aware  */
+/* radius with min/max caps. A structureless blur is a bug.             */
+/* ------------------------------------------------------------------ */
+export const LAMP = {
+  /** Hot core: fraction of radius that burns near-peak before falloff. */
+  coreRadius: 0.26,
+  /** Extra brightness of the core above the tail's own peak. */
+  corePeak: 1.35,
+  /** How far the core whitens toward "hot filament" (0 = pure hue). */
+  coreWhiteness: 0.35,
+  /** Falloff exponent — higher = tighter, more jewel-like skirt. */
+  tailFalloff: 4.2,
+  /** Brightness floor + intensity gain: dim moments glow, big ones blaze. */
+  peakBase: 0.45,
+  peakPerIntensity: 0.55,
+  /** Radius curve: px at z12 × zoomGrowth^(zoom−12), clamped to caps.
+   *  1.12 keeps candles crisp at mid zoom — 1.18 inflated them to fuzz. */
+  zoomGrowth: 1.12,
+  /** Floor: a candle never dissolves below a visible point. */
+  minRadiusPx: 9,
+} as const;
+
+/* ------------------------------------------------------------------ */
+/* Glow — emotion rendered as LIGHT (additive shader; LAB HARNESS ONLY */
+/* — the product's area feeling is THE FIELD; its points are TRAIL).   */
+/* Shape comes from LAMP; only the lab's sizing lives here.            */
 /* ------------------------------------------------------------------ */
 export const GLOW = {
   /** Radius in px at zoom 12: base + perIntensity × intensity (0..1). */
@@ -136,17 +163,6 @@ export const GLOW = {
   zoomGrowth: 1.24,
   /** Hard pixel ceiling — fill-rate protection for DPR-3 phones. */
   maxRadiusPx: 220,
-  /** Hot core: fraction of radius that burns near-peak before falloff. */
-  coreRadius: 0.16,
-  /** Extra brightness of the core above the tail's own peak. */
-  corePeak: 0.9,
-  /** How far the core whitens toward "hot filament" (0 = pure hue). */
-  coreWhiteness: 0.18,
-  /** Brightness floor + intensity gain: dim moments glow, big ones blaze. */
-  peakBase: 0.32,
-  peakPerIntensity: 0.55,
-  /** Long-tail falloff exponent — lower = longer, softer skirt. */
-  tailFalloff: 2.6,
   /** Breathing: ±radius and ±brightness over one slow cycle. Pulse frames
    *  are driven at half rate when the camera is still (battery, phones). */
   pulse: { periodMs: 2500, radiusAmp: 0.05, brightnessAmp: 0.1 },
@@ -249,21 +265,11 @@ export const TRAIL = {
    *  Deliberately small — these are POINTS, the opposite of the field. */
   baseRadiusPx: 12,
   radiusPerIntensityPx: 30,
-  maxRadiusPx: 96,
-  zoomGrowth: 1.18,
+  /** Caps on the LAMP zoom curve: candles stay jewels, never fuzz. */
+  maxRadiusPx: 64,
   /** A week-old whisper still shows as a dim ember (0..1 weight floor). */
   weightFloor: 0.4,
   gain: 1.15,
-  /** Dot shading: tighter core, harder falloff than the old area glow —
-   *  reads as a mark on the map, not a weather cell. */
-  light: {
-    coreRadius: 0.3,
-    corePeak: 1.25,
-    coreWhiteness: 0.35,
-    tailFalloff: 3.4,
-    peakBase: 0.45,
-    peakPerIntensity: 0.55,
-  },
   /** The paper-day stain is a MARK, not a glow (Ben: the glow tail read as
    *  180p blur). Real watercolor: flat wash to `edge` of the radius with a
    *  short hand-soft feather (0.74 read as blur — Eli), pigment pooling

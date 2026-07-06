@@ -12,7 +12,7 @@
  * All look-tunables live in tune.ts (GLOW); this file is the machinery.
  */
 import { ScatterplotLayer, type ScatterplotLayerProps } from "deck.gl";
-import { GLOW } from "@/components/Map/tune";
+import { GLOW, LAMP } from "@/components/Map/tune";
 
 /* Extra uniform block (deck 9 shader-module pattern — see TripsLayer). */
 const glowUniforms = {
@@ -203,13 +203,16 @@ export class EmotionGlowLayer extends ScatterplotLayer<
 
   draw(params: unknown) {
     const { timeSec = 0, light } = this.props as EmotionGlowLayerProps;
+    // THE ONE GLOW RECIPE: every layer starts from the LAMP (constitution
+    // rule 5); per-layer `light` overrides are variations of the same lamp
+    // (the streetlight pass has no hot core), never a different recipe.
     const p: LightParams = {
-      coreRadius: GLOW.coreRadius,
-      corePeak: GLOW.corePeak,
-      coreWhiteness: GLOW.coreWhiteness,
-      tailFalloff: GLOW.tailFalloff,
-      peakBase: GLOW.peakBase,
-      peakPerIntensity: GLOW.peakPerIntensity,
+      coreRadius: LAMP.coreRadius,
+      corePeak: LAMP.corePeak,
+      coreWhiteness: LAMP.coreWhiteness,
+      tailFalloff: LAMP.tailFalloff,
+      peakBase: LAMP.peakBase,
+      peakPerIntensity: LAMP.peakPerIntensity,
       gain: 1,
       pigment: 0,
       stainEdge: 0.8,
