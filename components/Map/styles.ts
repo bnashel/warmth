@@ -49,6 +49,19 @@ export const roadWidthExpr = (from: number, w: number, widen = 1) => {
 };
 
 /**
+ * Parks arrive by size. Each ladder rung holds the sizeranks that enter at
+ * that tile zoom to 0 — solid at ≤ `solid`, gone at ≥ `gone` — and the zoom
+ * axis brushes them in across the next zoom level. Ranks 1–4 (Central Park
+ * scale) sit solid from the rest view: every dark patch stays a park.
+ */
+const parkOpacityExpr = () => {
+  const expr: unknown[] = ["interpolate", ["linear"], ["zoom"]];
+  for (const { zoom, solid, gone } of JOURNEY.parkFade.ladder)
+    expr.push(zoom, ["interpolate", ["linear"], ["get", "sizerank"], solid, 1, gone, 0]);
+  return expr as unknown as number;
+};
+
+/**
  * Road presence. Bridges ride JOURNEY.bridgeFade — the earliest ramp — in
  * every wave; the rest of the wave keeps its stagger. At z13 the tiles
  * re-cut spans into structure pieces that can land in a later class, and a
@@ -125,7 +138,7 @@ export function buildStyle(p: CandidatePalette, name: string): StyleSpecificatio
       // No pitch/scrub: playground-sized rectangles read as glitches, not
       // places, and their contrast competes with the glow.
       filter: ["match", ["get", "class"], ["park", "grass", "wood", "cemetery"], true, false],
-      paint: { "fill-color": p.park },
+      paint: { "fill-color": p.park, "fill-opacity": parkOpacityExpr() },
     },
     // Water — its own darkness, never blue.
     {

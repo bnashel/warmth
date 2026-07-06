@@ -52,6 +52,20 @@ export const JOURNEY = {
    *  spans into structure pieces that can land in a later class; without this
    *  a bridge fades OUT as you zoom IN (Eli: bridges vanish z12–14). */
   bridgeFade: { from: 11.2, to: 12.4 },
+  /** Parks arrive by size (low sizerank = big park). Each tile zoom admits
+   *  a new band of ranks, and without a fade every band POPPED in at full
+   *  ink (Eli). Each rung pins the ranks that ENTER at that zoom to zero so
+   *  they brush in over the next zoom level. Probed 2026-07-06: rest (z10.8)
+   *  holds ranks 1–4; z11 adds 5–8; z12 adds 9–12; z13 adds 13–14; z14 adds 15. */
+  parkFade: {
+    ladder: [
+      { zoom: 11, solid: 4, gone: 5 },
+      { zoom: 12, solid: 8, gone: 9 },
+      { zoom: 13, solid: 12, gone: 13 },
+      { zoom: 14, solid: 14, gone: 15 },
+      { zoom: 15, solid: 16, gone: 17 },
+    ],
+  },
   /** Buildings (mass texture). */
   buildingFade: { from: 13.2, to: 15.0 },
   /** Neighborhood boundaries: present at rest, dissolving as streets take over. */
