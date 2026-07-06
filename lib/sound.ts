@@ -366,6 +366,10 @@ export function setRainLevel(level01: number): void {
     if (level <= 0.001) {
       if (rainNodes && rainStopTimer === null) {
         rainNodes.gain.gain.setTargetAtTime(0.0001, ctx.currentTime, 1.2);
+        // The breath LFO fades WITH the gain — left at its last depth it
+        // out-swings the dying base and the tail pulses instead of settling
+        // (the v2 ghost-swell, regressed in this rewrite; review finding).
+        rainNodes.breathDepth.gain.setTargetAtTime(0, ctx.currentTime, 1.2);
         // Tear down once the fade has settled (~5τ) — silence costs nothing.
         rainStopTimer = window.setTimeout(() => {
           rainStopTimer = null;
@@ -420,8 +424,12 @@ export function setRainLevel(level01: number): void {
       breath.connect(breathDepth).connect(gain.gain);
       breath.start();
       rainNodes = { srcA, srcB, gain, lowpass, breath, breathDepth, drifts };
-      scheduleDroplet();
     }
+    // Droplets arm whenever rain is audible and the chain is idle — the
+    // chain kills itself on quiet (level ≤ 0.02), and arming only at node
+    // creation left drizzle-then-downpour with a silent window forever
+    // (review finding).
+    if (dropletTimer === null && level > 0.02) scheduleDroplet();
     const t = ctx.currentTime;
     const base = R.maxGain * level;
     rainNodes.gain.gain.setTargetAtTime(base, t, 2); // rain fades in like rain
@@ -463,15 +471,24 @@ function stopRain(): void {
 /* Thunder (storm one-shots, scheduled by the lightning)             */
 /* ---------------------------------------------------------------- */
 
+let thunderBus: GainNode | null = null;
+
 /**
  * Distant thunder: a low rolling rumble `delayS` after the flash (sound
  * trails light — the storm is streets away). Two overlapping brown-ish
  * bursts through a falling lowpass + a sub swell underneath. One-shot,
- * self-cleaning; respects mute via the master bus.
+ * self-cleaning; respects mute via the master bus. Everything rides one
+ * thunder bus so panic() can silence a rumble already in flight (a hidden
+ * tab keeps playing Web Audio; review finding).
  */
 export function thunderRumble(delayS = 0): void {
   try {
     if (!ready() || !ctx || !master) return;
+    if (!thunderBus) {
+      thunderBus = ctx.createGain();
+      thunderBus.connect(master);
+    }
+    thunderBus.gain.setValueAtTime(1, ctx.currentTime); // re-arm after panic
     const t0 = ctx.currentTime + Math.max(0, delayS);
     const peak = WEATHER.lightning.thunderGain;
 
@@ -488,7 +505,7 @@ export function thunderRumble(delayS = 0): void {
       g.gain.setValueAtTime(0.0001, at);
       g.gain.exponentialRampToValueAtTime(peak * gainMul, at + 0.14);
       g.gain.exponentialRampToValueAtTime(0.0001, at + decayS);
-      src.connect(lp).connect(g).connect(master!);
+      src.connect(lp).connect(g).connect(thunderBus!);
       src.start(at);
       src.stop(at + decayS + 0.1);
     };
@@ -506,7 +523,7 @@ export function thunderRumble(delayS = 0): void {
     sg.gain.setValueAtTime(0.0001, t0);
     sg.gain.exponentialRampToValueAtTime(peak * 0.8, t0 + 0.2);
     sg.gain.exponentialRampToValueAtTime(0.0001, t0 + mainDecay);
-    sub.connect(sg).connect(master);
+    sub.connect(sg).connect(thunderBus);
     sub.start(t0);
     sub.stop(t0 + mainDecay + 0.1);
   } catch {
@@ -518,4 +535,11 @@ export function thunderRumble(delayS = 0): void {
 export function panic(): void {
   stopHum();
   stopRain();
+  try {
+    // Kill any rumble still rolling (scheduled up to ~10s out); the next
+    // thunderRumble re-arms the bus.
+    if (ctx && thunderBus) thunderBus.gain.setValueAtTime(0, ctx.currentTime);
+  } catch {
+    /* ignore */
+  }
 }

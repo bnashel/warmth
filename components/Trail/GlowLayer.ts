@@ -104,7 +104,12 @@ void main(void) {
   // a deep watercolor mark, never a bruise.
   if (glow.pigment > 0.0) {
     vec3 pig = vFillColor.rgb * vFillColor.rgb;
-    float stain = min(0.78, max(lum, 0.0) * glow.gain) * glow.pigment;
+    // Soft-knee depth cap (same filmic idea as the field): a hard min()
+    // clipped the kernel center into a flat plateau whose boundary read as
+    // a rim on big close-zoom stains (review finding). The knee saturates
+    // toward the same 0.78 ceiling but its slope never breaks.
+    float s = max(lum, 0.0) * glow.gain;
+    float stain = 0.78 * (1.0 - exp(-s / 0.45)) * glow.pigment;
     fragColor = vec4(mix(vec3(1.0), pig, stain), 1.0);
     DECKGL_FILTER_COLOR(fragColor, geometry);
     return;

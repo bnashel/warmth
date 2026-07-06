@@ -63,6 +63,13 @@ export function Lightning() {
     };
 
     const scheduleNext = (first: boolean) => {
+      // One chain, ever: whatever asked for a strike, any pending one dies
+      // first — double chains (double-frequency storms) become impossible
+      // by construction instead of by watch-tick ordering (review finding).
+      if (strikeTimer !== null) {
+        window.clearTimeout(strikeTimer);
+        strikeTimer = null;
+      }
       const storm = Math.min(1, Math.max(0.001, atmosphere.current.storm));
       const [lo, hi] = first ? WEATHER.lightning.firstS : WEATHER.lightning.intervalS;
       // A weaker storm strikes less often; a dead one not at all (watch()).
