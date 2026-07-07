@@ -307,6 +307,12 @@ void main() {
   // toward light — bright AND saturated, capped well below white.
   lab.x += uHeart.z * smoothstep(uHeart.x, uHeart.y, b);
 
+  // THE NEVER-WHITE CEILING (Eli, 2026-07-07): no matter how much feeling
+  // pools — saturated knee, heart lift, the palest anchor (lilac) — the
+  // field's lightness is hard-capped. Dusty at its very brightest; the
+  // color must always still read as COLOR.
+  lab.x = min(lab.x, 0.8);
+
   // The living tide: a slow, subtle breath, phase-varied across hues.
   float phase = fract(lab.y * 3.7 + lab.z * 5.3);
   b *= 1.0 + uBreathAmp * sin(6.2831853 * (uTimeSec / uBreathPeriod + phase));
@@ -863,9 +869,14 @@ export class FieldLayer implements CustomLayerInterface {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.bloomTex[1]);
       gl.uniform1i(this.loc(gl, this.compositeProgram, "comp", "uSrc"), 0);
+      // The halo bows out on approach (bloom.closeFade): zoomed in, the
+      // pooled interior beats the threshold everywhere and halo-over-field
+      // converged the screen toward white (Eli's veto).
+      const bf = WEATHER.bloom.closeFade;
+      const bz = Math.min(1, Math.max(0, (zoom - bf.from) / (bf.to - bf.from)));
       gl.uniform1f(
         this.loc(gl, this.compositeProgram, "comp", "uGain"),
-        WEATHER.bloom.gain * this.fade * night * thin,
+        WEATHER.bloom.gain * this.fade * night * thin * (1 - bz * bz * (3 - 2 * bz)),
       );
       // Screen, like the field pass: the halo brightens what is dim and
       // asymptotes over what is already lit — never white (rule 3).

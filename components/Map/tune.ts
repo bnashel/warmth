@@ -495,6 +495,11 @@ export const WEATHER = {
      *  the darkness between the lights is what makes the lights read. */
     threshold: 0.26,
     scale: 0.25, // blur-target scale vs field target (quarter = soft+cheap)
+    /** The halo is a WIDE-VIEW grace: zoomed into a neighborhood the pooled
+     *  interior exceeds the threshold everywhere, and halo-over-field
+     *  converged the whole screen toward white (Eli: "I do not want it in
+     *  white"). It bows out on approach. */
+    closeFade: { from: 12.0, to: 13.2 },
   },
 
   /* -- precipitation (v2): visible weather between you and the city --- */
