@@ -154,11 +154,23 @@ void main(void) {
     return;
   }
 
-  // The filament: the very center whitens toward hot.
-  vec3 color = mix(vFillColor.rgb, vec3(1.0), glow.coreWhiteness * core);
+  // GLOW V2 — the same heatmap ramp as the field, at candle scale: cool
+  // dim tail → the hue arrives → warm near-white heart (never pure white).
+  // coreWhiteness steers how hot the heart runs; the ×1.6 restores the
+  // additive energy the knee takes off the old superwhite core.
+  float t = 1.0 - exp(-max(lum, 0.0) * 1.2);
+  vec3 hue = vFillColor.rgb;
+  vec3 coolDim = mix(hue * vec3(0.28, 0.30, 0.55), vec3(0.13, 0.15, 0.27), 0.35);
+  vec3 hot = mix(hue, vec3(1.0, 0.98, 0.94), min(1.0, 0.4 + glow.coreWhiteness));
+  vec3 color;
+  if (t <= 0.28) color = mix(vec3(0.0), coolDim, pow(t / 0.28, 0.8));
+  else if (t <= 0.72) color = mix(coolDim, hue, (t - 0.28) / 0.44);
+  else if (t <= 0.92) color = mix(hue, mix(hue, hot, 0.45), (t - 0.72) / 0.20);
+  else color = mix(mix(hue, hot, 0.45), hot, min(1.0, (t - 0.92) / 0.08));
 
-  // Additive light: color scaled by luminance; alpha adds nothing.
-  fragColor = vec4(color * max(lum, 0.0) * glow.gain, 0.0);
+  // Additive light: the ramp IS the energy curve (black at t=0); the ×1.2
+  // restores the punch the knee takes off the old superwhite core.
+  fragColor = vec4(color * 1.2 * glow.gain, 0.0);
   DECKGL_FILTER_COLOR(fragColor, geometry);
 }
 `;
