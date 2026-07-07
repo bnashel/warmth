@@ -249,17 +249,6 @@ export const FIELD = {
    *  max-size kernels of GPU overdraw right when tiles are loading, which
    *  is most of the zoom-in stutter. */
   seedZoomFade: { from: 12.6, to: 14.0 },
-  /** GLOW V2 (Eli's reference pass, 2026-07-07 — light-pollution heatmap +
-   *  river basins): the fill is never flat — slow-drifting noise variation
-   *  in brightness (fraction, ±amp/2 around 1). Screen-space, half-res. */
-  fillNoise: { amp: 0.2, scale: 22, driftPerSec: 0.008 },
-  /** TRIBUTARIES: at neighborhood zoom, ridged-noise veins brighten between
-   *  a glow's heart and its edge — world-locked (they belong to the city),
-   *  thinning as they leave the light. Invisible at rest zoom (LOD: the
-   *  strength ramps over fromZoom→toZoom; below it the branch costs 0). */
-  /** v2.1 warm edition (Eli): a whisper, not a line-drawing — and then a
-   *  notch quieter still ("maybe not as bright"). */
-  veins: { fromZoom: 12.2, toZoom: 14.0, gain: 0.14, cellPx: 26, ridge: 0.82, sharp: 1.2 },
   /** Living tide: subtle brightness breath. */
   breath: { periodMs: 2500, amp: 0.045 },
   /** Streetlight signature: the field multiplied onto the base map so

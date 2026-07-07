@@ -168,9 +168,6 @@ uniform int uMode;
 uniform vec4 uShape;
 uniform float uBand;   // aurora curtains: brightness modulation (0 = off)
 uniform float uAspect; // target width / height, so the flow isn't squashed
-uniform float uVein;     // tributary strength (zoom LOD ramp; 0 = skip)
-uniform float uVeinFreq; // world-locked ridge frequency (cells ≈ cellPx @ z13)
-uniform vec2 uVeinAnchor; // fixed merc anchor — keeps noise precision sane
 // THE LIVING ATMOSPHERE (lib/atmosphere.ts, eased): the flow axis follows
 // the real wind — the field's own living motion. CONSTITUTION RULE 2: the
 // sky may not grade the emotion's light; cloud/wet/snow no longer reach
@@ -306,12 +303,6 @@ void main() {
     b *= mix(uWaterAtten, 1.0, land);
   }
 
-  // GLOW V2 — the fill is never flat: slow-drifting noise variation rides
-  // the brightness so even a uniform pool has living texture.
-  b *= ${(1 - FIELD.fillNoise.amp / 2).toFixed(3)} + ${FIELD.fillNoise.amp.toFixed(3)}
-       * fbm(vec2(uv.x * uAspect, uv.y) * ${FIELD.fillNoise.scale.toFixed(1)}
-             + uTimeSec * ${FIELD.fillNoise.driftPerSec.toFixed(4)});
-
   // THE LUMINOUS HEART: where pooled feeling peaks, the hue itself lifts
   // toward light — bright AND saturated, capped well below white.
   lab.x += uHeart.z * smoothstep(uHeart.x, uHeart.y, b);
@@ -333,20 +324,6 @@ void main() {
   // the emotion layer renders identically in every weather. (The old
   // overcast dim, rain streak, snow hush, and snow sparkle lived here.)
 
-  // GLOW V2 — TRIBUTARIES (the river-basin reference): at neighborhood
-  // zoom, ridged-noise veins brighten between a glow's heart and its edge.
-  // World-locked (anchored merc coords — the veins belong to the city and
-  // hold still under panning), strongest mid-field, dying inside the hot
-  // core (1−b³) and at the dim tail (b×2.4) — light branches, never grids.
-  if (uVein > 0.0 && b > 0.05) {
-    vec2 vmerc = uMercOrigin + uMercDx * vUv.x + uMercDy * vUv.y;
-    vec2 vq = (vmerc - uVeinAnchor) * uVeinFreq;
-    float ridge = 1.0 - abs(2.0 * fbm(vq + uTimeSec * 0.012) - 1.0);
-    float vein = pow(max(0.0, (ridge - ${FIELD.veins.ridge.toFixed(2)}) / ${(1 - FIELD.veins.ridge).toFixed(2)}), ${FIELD.veins.sharp.toFixed(1)})
-               * min(1.0, b * 2.4) * (1.0 - b * b * b) * uVein;
-    b = min(1.0, b + vein * ${FIELD.veins.gain.toFixed(2)});
-  }
-
   // Dither so the long tail never bands on 8-bit output.
   float n = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
   b += (n - 0.5) * 0.004;
@@ -365,20 +342,7 @@ void main() {
     return;
   }
 
-  // GLOW V2.1 — THE WARM RAMP (Eli's sign-off: "warm window at night, not
-  // a data dashboard; not as bright; ALL colors feel warm"). Three stops
-  // in OKLab: dusty-warm dim tail → the hue (leaned warm) → a gentle
-  // warm-ivory lift, broad and capped low — never a white-hot spike. The
-  // ramp IS the energy curve; its L reaches black at t=0.
-  float tb = clamp(b, 0.0, 1.0);
-  vec3 dim = vec3(lab.x * 0.4, mix(lab.yz * 0.4, vec2(0.008, 0.012), 0.4));
-  vec3 warmHue = vec3(lab.x, lab.yz + vec2(0.006, 0.02));
-  vec3 lift = vec3(min(0.88, lab.x + 0.07), mix(warmHue.yz, vec2(0.02, 0.06), 0.22));
-  vec3 rl;
-  if (tb <= 0.3) rl = mix(vec3(0.0), dim, pow(tb / 0.3, 0.8));
-  else if (tb <= 0.75) rl = mix(dim, warmHue, (tb - 0.3) / 0.45);
-  else rl = mix(warmHue, lift, (tb - 0.75) / 0.25);
-  vec3 color = linearToSrgb(oklabToLinear(rl)) * uGain;
+  vec3 color = linearToSrgb(oklabToLinear(lab)) * max(b, 0.0) * uGain;
   // uMode 0: alpha 0 under mapbox's premultiplied blend == pure additive.
   // uMode 1: caller sets blendFunc(DST_COLOR, ONE) — color multiplies the
   //          base map, so streets inside the field catch its light.
@@ -832,25 +796,7 @@ export class FieldLayer implements CustomLayerInterface {
       gl.uniform1f(u("uWaterAtten"), FIELD.landMask.waterAtten);
     }
     gl.uniform3f(u("uHeart"), FIELD.heart.from, FIELD.heart.to, FIELD.heart.lift);
-    // GLOW V2 tributaries: LOD by zoom — 0 below fromZoom (branch skipped,
-    // zero cost), full past toZoom. World-locked frequency sized so ridge
-    // cells ≈ cellPx on screen at z13; anchored to the stage center so the
-    // fbm inputs stay small (float precision) and the veins never swim.
-    const vz = FIELD.veins;
-    const zNow = this.map?.getZoom() ?? 0;
-    const vt = Math.min(1, Math.max(0, (zNow - vz.fromZoom) / (vz.toZoom - vz.fromZoom)));
-    gl.uniform1f(u("uVein"), vt * vt * (3 - 2 * vt));
-    gl.uniform1f(u("uVeinFreq"), (512 * 2 ** 13) / vz.cellPx);
-    if (!this.veinAnchor) {
-      const a = mapboxgl.MercatorCoordinate.fromLngLat({
-        lng: CAMERA.initial.longitude,
-        lat: CAMERA.initial.latitude,
-      });
-      this.veinAnchor = [a.x, a.y];
-    }
-    gl.uniform2f(u("uVeinAnchor"), this.veinAnchor[0], this.veinAnchor[1]);
   }
-  private veinAnchor: [number, number] | null = null;
 
   render(gl: WebGL2RenderingContext) {
     if (!this.resolveProgram || this.count === 0 || this.fade < 0.01) return;

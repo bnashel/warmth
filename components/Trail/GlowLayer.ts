@@ -154,21 +154,11 @@ void main(void) {
     return;
   }
 
-  // GLOW V2.1 — the field's WARM RAMP at candle scale (one system): dusty
-  // warm dim tail → the hue → a gentle warm-ivory lift, never white-hot.
-  // coreWhiteness steers how far the heart may lean ivory (capped at 35%).
-  float t = 1.0 - exp(-max(lum, 0.0) * 1.2);
-  vec3 hue = vFillColor.rgb;
-  vec3 dim = mix(hue * vec3(0.42, 0.38, 0.36), vec3(0.20, 0.18, 0.16), 0.4);
-  vec3 lift = mix(hue, vec3(1.0, 0.933, 0.839), min(0.35, 0.12 + glow.coreWhiteness * 0.4));
-  vec3 color;
-  if (t <= 0.3) color = mix(vec3(0.0), dim, pow(t / 0.3, 0.8));
-  else if (t <= 0.75) color = mix(dim, hue, (t - 0.3) / 0.45);
-  else color = mix(hue, lift, (t - 0.75) / 0.25);
+  // The filament: the very center whitens toward hot.
+  vec3 color = mix(vFillColor.rgb, vec3(1.0), glow.coreWhiteness * core);
 
-  // Additive light: the ramp IS the energy curve (black at t=0); the ×1.2
-  // restores the punch the knee takes off the old superwhite core.
-  fragColor = vec4(color * 1.2 * glow.gain, 0.0);
+  // Additive light: color scaled by luminance; alpha adds nothing.
+  fragColor = vec4(color * max(lum, 0.0) * glow.gain, 0.0);
   DECKGL_FILTER_COLOR(fragColor, geometry);
 }
 `;
