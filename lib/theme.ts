@@ -16,11 +16,14 @@ export type Emotion = "joy" | "energy" | "love" | "gratitude" | "calm";
  *  Softened away from neon (Eli, 2026-07-02): rich but gentle — near-equal
  *  lightness, moderated chroma, no electric edges. */
 export const EMOTION_HUES: Record<Emotion, string> = {
-  joy: "#F0C275", // warm gold
-  energy: "#F08D5C", // soft coral
-  love: "#E693B3", // dusty pink
-  gratitude: "#B19DE6", // soft lilac (Eli's pick; chroma nudged per review)
-  calm: "#6FCBB8", // seafoam (chroma nudged per review)
+  // 2026-07-07 glow-perfection pass (Eli): each hue tuned to the color-
+  // psychology heart of its emotion, balanced so all five carry equal
+  // presence as LIGHT — rich enough to stop you, never enough to shout.
+  joy: "#F6C049", // radiant gold — optimism, sunlight
+  energy: "#EE8961", // vermilion coral — vitality, heat (gamut-safe at anchorL)
+  love: "#F282AC", // rose — tenderness, blush
+  gratitude: "#AD97EE", // lavender — serenity, quiet wonder (gamut-safe at anchorL)
+  calm: "#3ED0B0", // aqua — stillness, deep water
 };
 
 export const EMOTIONS = Object.keys(EMOTION_HUES) as Emotion[];

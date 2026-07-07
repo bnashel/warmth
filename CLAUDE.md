@@ -71,7 +71,7 @@ Commit prefixes by area: orb: · map: · field: · screen: · trail: · store: �
 - Migrations only via `supabase migration new ...`.
 
 ## Design tokens (source of truth: /lib/theme.ts once built)
-Emotion hues (final five, softened 2026-07-02): Joy #F0C275 · Energy #F08D5C · Love #E693B3 · Gratitude #B19DE6 (soft lilac) · Calm #6FCBB8.
+Emotion hues (final five; glow-perfection pass 2026-07-07): Joy #F6C049 (radiant gold) · Energy #EE8961 (vermilion coral) · Love #F282AC (rose) · Gratitude #AD97EE (lavender) · Calm #3ED0B0 (aqua).
 Motion: snappy = spring(stiffness 400, damping 32); settle = spring(stiffness 140, damping 22); glow pulse ≈ 2.5s ease-in-out loop.
 Map: hue = emotion, brightness = intensity, pulse = density.
 
