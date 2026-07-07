@@ -365,22 +365,19 @@ void main() {
     return;
   }
 
-  // GLOW V2 — THE HEATMAP RAMP (light-pollution reference): broad cool
-  // tail, small intense heart. Four stops in OKLab: barely-lifted cool-dim
-  // → the hue arrives → lifted → near-white-hot (L capped .95 — nothing
-  // pure white ever blooms; rule 3). t keeps carrying the additive energy,
-  // so the tail still truly reaches black.
+  // GLOW V2.1 — THE WARM RAMP (Eli's sign-off: "warm window at night, not
+  // a data dashboard; not as bright; ALL colors feel warm"). Three stops
+  // in OKLab: dusty-warm dim tail → the hue (leaned warm) → a gentle
+  // warm-ivory lift, broad and capped low — never a white-hot spike. The
+  // ramp IS the energy curve; its L reaches black at t=0.
   float tb = clamp(b, 0.0, 1.0);
-  vec3 coolDim = vec3(lab.x * 0.5, mix(lab.yz * 0.45, vec2(-0.02, -0.12), 0.35));
-  vec3 hot = vec3(0.95, lab.yz * 0.25);
+  vec3 dim = vec3(lab.x * 0.4, mix(lab.yz * 0.4, vec2(0.008, 0.012), 0.4));
+  vec3 warmHue = vec3(lab.x, lab.yz + vec2(0.006, 0.02));
+  vec3 lift = vec3(min(0.88, lab.x + 0.07), mix(warmHue.yz, vec2(0.02, 0.06), 0.22));
   vec3 rl;
-  if (tb <= 0.28) rl = mix(vec3(0.0), coolDim, pow(tb / 0.28, 0.8));
-  else if (tb <= 0.72) rl = mix(coolDim, lab, (tb - 0.28) / 0.44);
-  else if (tb <= 0.92) rl = mix(lab, mix(lab, hot, 0.45), (tb - 0.72) / 0.20);
-  else rl = mix(mix(lab, hot, 0.45), hot, (tb - 0.92) / 0.08);
-  // The ramp IS the energy curve (its L already reaches black at t=0) —
-  // multiplying by tb again double-darkened the whole field (verified
-  // against the approved mockup, which does exactly this).
+  if (tb <= 0.3) rl = mix(vec3(0.0), dim, pow(tb / 0.3, 0.8));
+  else if (tb <= 0.75) rl = mix(dim, warmHue, (tb - 0.3) / 0.45);
+  else rl = mix(warmHue, lift, (tb - 0.75) / 0.25);
   vec3 color = linearToSrgb(oklabToLinear(rl)) * uGain;
   // uMode 0: alpha 0 under mapbox's premultiplied blend == pure additive.
   // uMode 1: caller sets blendFunc(DST_COLOR, ONE) — color multiplies the

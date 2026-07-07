@@ -154,19 +154,17 @@ void main(void) {
     return;
   }
 
-  // GLOW V2 — the same heatmap ramp as the field, at candle scale: cool
-  // dim tail → the hue arrives → warm near-white heart (never pure white).
-  // coreWhiteness steers how hot the heart runs; the ×1.6 restores the
-  // additive energy the knee takes off the old superwhite core.
+  // GLOW V2.1 — the field's WARM RAMP at candle scale (one system): dusty
+  // warm dim tail → the hue → a gentle warm-ivory lift, never white-hot.
+  // coreWhiteness steers how far the heart may lean ivory (capped at 35%).
   float t = 1.0 - exp(-max(lum, 0.0) * 1.2);
   vec3 hue = vFillColor.rgb;
-  vec3 coolDim = mix(hue * vec3(0.28, 0.30, 0.55), vec3(0.13, 0.15, 0.27), 0.35);
-  vec3 hot = mix(hue, vec3(1.0, 0.98, 0.94), min(1.0, 0.4 + glow.coreWhiteness));
+  vec3 dim = mix(hue * vec3(0.42, 0.38, 0.36), vec3(0.20, 0.18, 0.16), 0.4);
+  vec3 lift = mix(hue, vec3(1.0, 0.933, 0.839), min(0.35, 0.12 + glow.coreWhiteness * 0.4));
   vec3 color;
-  if (t <= 0.28) color = mix(vec3(0.0), coolDim, pow(t / 0.28, 0.8));
-  else if (t <= 0.72) color = mix(coolDim, hue, (t - 0.28) / 0.44);
-  else if (t <= 0.92) color = mix(hue, mix(hue, hot, 0.45), (t - 0.72) / 0.20);
-  else color = mix(mix(hue, hot, 0.45), hot, min(1.0, (t - 0.92) / 0.08));
+  if (t <= 0.3) color = mix(vec3(0.0), dim, pow(t / 0.3, 0.8));
+  else if (t <= 0.75) color = mix(dim, hue, (t - 0.3) / 0.45);
+  else color = mix(hue, lift, (t - 0.75) / 0.25);
 
   // Additive light: the ramp IS the energy curve (black at t=0); the ×1.2
   // restores the punch the knee takes off the old superwhite core.

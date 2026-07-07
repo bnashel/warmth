@@ -257,7 +257,9 @@ export const FIELD = {
    *  a glow's heart and its edge — world-locked (they belong to the city),
    *  thinning as they leave the light. Invisible at rest zoom (LOD: the
    *  strength ramps over fromZoom→toZoom; below it the branch costs 0). */
-  veins: { fromZoom: 12.2, toZoom: 14.0, gain: 0.5, cellPx: 26, ridge: 0.82, sharp: 1.6 },
+  /** v2.1 warm edition (Eli): a whisper, not a line-drawing — and then a
+   *  notch quieter still ("maybe not as bright"). */
+  veins: { fromZoom: 12.2, toZoom: 14.0, gain: 0.14, cellPx: 26, ridge: 0.82, sharp: 1.2 },
   /** Living tide: subtle brightness breath. */
   breath: { periodMs: 2500, amp: 0.045 },
   /** Streetlight signature: the field multiplied onto the base map so
