@@ -19,11 +19,13 @@ export const EMOTION_HUES: Record<Emotion, string> = {
   // 2026-07-07 glow-perfection pass (Eli): each hue tuned to the color-
   // psychology heart of its emotion, balanced so all five carry equal
   // presence as LIGHT — rich enough to stop you, never enough to shout.
-  joy: "#F6C049", // radiant gold — optimism, sunlight
-  energy: "#EE8961", // vermilion coral — vitality, heat (gamut-safe at anchorL)
-  love: "#F282AC", // rose — tenderness, blush
-  gratitude: "#AD97EE", // lavender — serenity, quiet wonder (gamut-safe at anchorL)
-  calm: "#3ED0B0", // aqua — stillness, deep water
+  // "FIRST LIGHT" (Eli's pick, 2026-07-07 bake-off): airier and more
+  // luminous — the gentlest, most dreamlike of the candidates.
+  joy: "#FACB66", // dawn gold
+  energy: "#F79A6E", // peach coral
+  love: "#F695BC", // petal rose
+  gratitude: "#BCA8F5", // lilac veil
+  calm: "#63D6BE", // mint aqua
 };
 
 export const EMOTIONS = Object.keys(EMOTION_HUES) as Emotion[];

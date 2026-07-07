@@ -13,11 +13,11 @@ The final five (2026-07-02: awe removed; reflective became gratitude;
 palette softened away from neon the same day).
 | Emotion | Hue |
 | --- | --- |
-| Joy | `#F6C049` radiant gold |
-| Energy | `#EE8961` vermilion coral |
-| Love | `#F282AC` rose |
-| Gratitude | `#AD97EE` lavender |
-| Calm | `#3ED0B0` aqua |
+| Joy | `#FACB66` dawn gold |
+| Energy | `#F79A6E` peach coral |
+| Love | `#F695BC` petal rose |
+| Gratitude | `#BCA8F5` lilac veil |
+| Calm | `#63D6BE` mint aqua |
 
 ## Motion (Framer Motion)
 Nothing the user sees move is linear or instant — always spring.
