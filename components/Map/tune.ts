@@ -71,6 +71,17 @@ export const JOURNEY = {
   buildingFade: { from: 13.6, to: 15.4 },
   /** Neighborhood boundaries: present at rest, dissolving as streets take over. */
   boundaryFade: { peak: 11.0, gone: 14.5 },
+  /** STREET PRESENCE — the quiet human scale at max zoom. The city was
+   *  nearly empty at street level; over the last 1.5 zoom levels the quiet
+   *  tiers lift into a fine hairline grid. Arterials barely move (rule 3:
+   *  nothing on the base may compete with a feeling). */
+  streetPresence: {
+    from: 15.0,
+    to: 16.5,
+    boost: { highway: 1.15, avenue: 1.4, local: 1.9, service: 2.2 },
+  },
+  /** Building footprints: whisper-faint outlines arriving with the grid. */
+  footprintFade: { from: 15.0, to: 16.5, alpha: 0.075 },
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -108,10 +119,41 @@ export const LABELS = {
   boroughAlpha: 76,
   boroughSizePx: 11.5,
   boroughFadeOut: { from: 10.9, to: 11.6 },
+  /** Borough caps dim further when bright feeling pools beneath them —
+   *  no label ever fights a feeling. Pooled weight within radiusDeg of the
+   *  anchor dims alpha by up to dimMax (half-effect at halfWeight). */
+  boroughFieldDim: { radiusDeg: 0.035, halfWeight: 2.5, dimMax: 0.55 },
 } as const;
 
 /* ------------------------------------------------------------------ */
-/* Glow — emotion rendered as LIGHT (additive shader; test data only)  */
+/* THE ONE GLOW RECIPE (constitution rule 5): every point of light in   */
+/* the product — trail candles, lab glows, the streetlight catch — is   */
+/* the same lamp: tight luminous core, exponential falloff, zoom-aware  */
+/* radius with min/max caps. A structureless blur is a bug.             */
+/* ------------------------------------------------------------------ */
+export const LAMP = {
+  /** Hot core: fraction of radius that burns near-peak before falloff. */
+  coreRadius: 0.26,
+  /** Extra brightness of the core above the tail's own peak. */
+  corePeak: 1.35,
+  /** How far the core whitens toward "hot filament" (0 = pure hue). */
+  coreWhiteness: 0.35,
+  /** Falloff exponent — higher = tighter, more jewel-like skirt. */
+  tailFalloff: 4.2,
+  /** Brightness floor + intensity gain: dim moments glow, big ones blaze. */
+  peakBase: 0.45,
+  peakPerIntensity: 0.55,
+  /** Radius curve: px at z12 × zoomGrowth^(zoom−12), clamped to caps.
+   *  1.12 keeps candles crisp at mid zoom — 1.18 inflated them to fuzz. */
+  zoomGrowth: 1.12,
+  /** Floor: a candle never dissolves below a visible point. */
+  minRadiusPx: 9,
+} as const;
+
+/* ------------------------------------------------------------------ */
+/* Glow — emotion rendered as LIGHT (additive shader; LAB HARNESS ONLY */
+/* — the product's area feeling is THE FIELD; its points are TRAIL).   */
+/* Shape comes from LAMP; only the lab's sizing lives here.            */
 /* ------------------------------------------------------------------ */
 export const GLOW = {
   /** Radius in px at zoom 12: base + perIntensity × intensity (0..1). */
@@ -121,17 +163,6 @@ export const GLOW = {
   zoomGrowth: 1.24,
   /** Hard pixel ceiling — fill-rate protection for DPR-3 phones. */
   maxRadiusPx: 220,
-  /** Hot core: fraction of radius that burns near-peak before falloff. */
-  coreRadius: 0.16,
-  /** Extra brightness of the core above the tail's own peak. */
-  corePeak: 0.9,
-  /** How far the core whitens toward "hot filament" (0 = pure hue). */
-  coreWhiteness: 0.18,
-  /** Brightness floor + intensity gain: dim moments glow, big ones blaze. */
-  peakBase: 0.32,
-  peakPerIntensity: 0.55,
-  /** Long-tail falloff exponent — lower = longer, softer skirt. */
-  tailFalloff: 2.6,
   /** Breathing: ±radius and ±brightness over one slow cycle. Pulse frames
    *  are driven at half rate when the camera is still (battery, phones). */
   pulse: { periodMs: 2500, radiusAmp: 0.05, brightnessAmp: 0.1 },
@@ -172,13 +203,25 @@ export const FIELD = {
    *  hard enough to out-vote a real commit's hue (and cost ~26× overdraw). */
   seedMinRadiusPx: 56,
   /** Kernel falloff exponent on (1 − t²): higher = tighter heart,
-   *  longer relative skirt. The edge ALWAYS reaches zero — no rims.
-   *  2.5 (glow-perfection pass): a hotter luminous heart with a longer,
-   *  more delicate skirt — structure you can see, never a flat blob. */
+   *  longer relative skirt. The edge ALWAYS reaches zero — no rims. */
   kernelSoftness: 2.5,
   /** Filmic knee: brightness = 1 − exp(−exposure · pooledWeight).
    *  Raises how fast pooled feeling brightens; never clips to white. */
-  exposure: 1.0,
+  exposure: 1.05,
+  /** THE LUMINOUS HEART: where density peaks, the hue itself lifts toward
+   *  light (OKLab L, capped well below white) — aurora over a dark planet,
+   *  never fog banks. Rides the knee output b across [from, to]. */
+  heart: { from: 0.55, to: 0.95, lift: 0.1 },
+  /** LAND MASK: the field clips to the coastline (rivers and harbor stay
+   *  pure void; fields inherit the city's silhouette). Built by
+   *  scripts/build-landmask.mjs from the neighborhood polygons; sampled in
+   *  mercator space. waterAtten = what survives over open water. */
+  landMask: { url: "/data/nyc-landmask.png", waterAtten: 0.12 },
+  /** ZOOM NARRATIVE: wide = weather systems, mid = neighborhood pools,
+   *  close = the field THINS into breathing ambient light so the city
+   *  shows through (never to zero). Applies to the field + bloom passes;
+   *  the streetlight stays — it IS the city glowing through. */
+  zoomThin: { from: 13.0, to: 16.3, floor: 0.35 },
   /** Dominance power (the mud rule knob): hues mix by Iᵖ share in OKLab.
    *  Higher p = dominant emotion snaps harder, narrower weather fronts.
    *  Lowered in the wow pass: wider, lusher blend bands between feelings. */
@@ -191,7 +234,7 @@ export const FIELD = {
    *  light (raw brand hues span L .62–.87). */
   anchorL: 0.78,
   /** Overall field gain on the additive composite. */
-  gain: 0.95,
+  gain: 1.0,
   /** Ambient-seed weight dimmer: the placeholder city is a thin translucent
    *  water layer — REAL feelings (your commit, realtime) burn through it at
    *  full strength. Applies to `seed: true` moments only. */
@@ -221,46 +264,26 @@ export const TRAIL = {
   windowDays: 7,
   /** Dot radius in px at zoom 12: base + perWeight × weight (0..1).
    *  Deliberately small — these are POINTS, the opposite of the field. */
-  baseRadiusPx: 14,
-  radiusPerIntensityPx: 36,
-  maxRadiusPx: 96,
-  zoomGrowth: 1.18,
+  baseRadiusPx: 12,
+  radiusPerIntensityPx: 30,
+  /** Caps on the LAMP zoom curve: candles stay jewels, never fuzz. */
+  maxRadiusPx: 64,
   /** A week-old whisper still shows as a dim ember (0..1 weight floor). */
   weightFloor: 0.4,
   /** Freshness floor for entries OLDER than the window: the journal is
    *  forever — an old spark settles to this steady ember, never to zero. */
   emberFloor: 0.35,
   gain: 1.15,
-  /** Dot shading: tighter core, harder falloff than the old area glow —
-   *  reads as a mark on the map, not a weather cell. */
-  light: {
-    coreRadius: 0.3,
-    corePeak: 1.25,
-    coreWhiteness: 0.35,
-    tailFalloff: 3.4,
-    peakBase: 0.45,
-    peakPerIntensity: 0.55,
-  },
   /** The paper-day stain is a MARK, not a glow (Ben: the glow tail read as
    *  180p blur). Real watercolor: flat wash to `edge` of the radius with a
    *  short hand-soft feather (0.74 read as blur — Eli), pigment pooling
    *  `ring` deeper at the rim, and a `heart` faintly lighter at the center
    *  (water pushes pigment outward as it dries) so it never reads as a disc. */
   stain: { edge: 0.88, ring: 0.28, radiusScale: 0.85, gainBoost: 1.25, heart: 0.12 },
-  /** THE NIGHT SKY (journal, revised 2026-07-07 — Eli: "like the public,
-   *  a little different"): entries wear the ONE GLOW RECIPE (constitution
-   *  rule 5 — same core, same falloff as the public light), just smaller
-   *  and more personal — a slightly brighter heart, the per-point breath
-   *  reading as a slow twinkle, rings on remembered moments. */
+  /** THE JOURNAL EXTRAS (2026-07-07): the candle itself is pure LAMP —
+   *  the one glow recipe, no overrides. These are only what a journal
+   *  adds around it: memory rings and world-scale constellations. */
   spark: {
-    light: {
-      coreRadius: GLOW.coreRadius, // the shared recipe…
-      corePeak: GLOW.corePeak * 1.15, // …with a touch more heart (mine, not weather)
-      coreWhiteness: GLOW.coreWhiteness,
-      tailFalloff: GLOW.tailFalloff,
-      peakBase: 0.5,
-      peakPerIntensity: 0.5,
-    },
     /** A named star: entries carrying a memory wear a delicate ring. */
     ring: { radiusFactor: 1.55, widthPx: 1.2, alpha: 130 },
     /** Constellations: below this zoom, nearby sparks gather into one
@@ -332,8 +355,10 @@ export const ATMOSPHERE = {
 export const SHAPES = {
   /** The original: soft circular blooms, edges untouched. */
   bloom: { warpAmp: 0, scale: 8, drift: 0, streak: 0, band: 0 },
-  /** Ink on wet paper: blotted, seeping edges; barely-moving weather. */
-  watercolor: { warpAmp: 0.06, scale: 10, drift: 0.01, streak: 0, band: 0 },
+  /** Ink on wet paper: blotted, seeping edges; barely-moving weather.
+   *  warpAmp raised 2026-07-06: silhouettes come from data + geography,
+   *  never perfect circles (constitution / phase 3). */
+  watercolor: { warpAmp: 0.085, scale: 10, drift: 0.01, streak: 0, band: 0 },
   /** Drops dispersing in water: streakier, curling, visibly alive. */
   ink: { warpAmp: 0.095, scale: 14, drift: 0.05, streak: 0.5, band: 0 },
   /** Northern lights: feeling stretched into flowing ribbons. */
@@ -348,6 +373,19 @@ export const SHAPES = {
 /* Night is INK itself in every mode, untouched.                       */
 /* ------------------------------------------------------------------ */
 export const SOLAR = {
+  /** THE PARKED DAY (constitution rule 1: Warmth is always night).
+   *  false = the product: time of day modulates the dark canvas via
+   *  nightDay/nightEmber below, and `paper` is clamped to 0 so every
+   *  pigment path sleeps. true (or `?daylight=1`) = the 2026-07-02
+   *  paper-day look, kept compiling so it can return (docs/later.md). */
+  dayMode: false,
+  /** Always-night tonal modulation: what "daytime" does to the dark canvas
+   *  when dayMode is off — a slightly lifted, warmed charcoal. Midnight is
+   *  the frozen INK itself; the sun's `light` blends toward these. */
+  nightDay: { bg: "#17161A", water: "#0A0A0E", park: "#1C1B20", building: "#1E1D24", road: "#D2D3DA" },
+  /** …and dawn/dusk: a gentle warm tint riding the ember ramp — a breath
+   *  of amber in the charcoal, never the paper-transition brown. */
+  nightEmber: { bg: "#191412", water: "#0B0808", park: "#1E1813", building: "#211A14", road: "#D8CCBC" },
   /** Master dial: 0 kills the effect entirely, 1 = full. */
   strength: 1,
   /** Sun elevation (deg) across which night becomes day. Starts at civil
@@ -405,28 +443,28 @@ export const WEATHER = {
    *  Ben toggles to SEE, not to wait (his field report, 2026-07-06). */
   previewTauMs: 1_800,
 
-  /* -- overcast: the sky's gray weight ------------------------------ */
-  cloudFieldDim: 0.26, // field brightness loss under full overcast
-  cloudSoften: 1.0, // extra kernel softness (more diffuse feeling)
-  cloudDesat: 0.32, // base-ink desaturation at full overcast
-  cloudDayDim: 0.1, // paper darkens a touch under clouds
+  /* CONSTITUTION RULE 2 (2026-07-06): weather modulates the BASE MAP ONLY.
+   * The old field couplings (cloudFieldDim, cloudSoften, wetStreak, wetWarp,
+   * snowDriftSlow, snowSparkle, and the field-pass fog dim) are GONE — the
+   * emotion layer renders identically in every sky. Wind still drives the
+   * field's living flow: it is the field's own breath, not a sky state. */
 
-  /* -- fog: the milk-glass veil -------------------------------------- */
+  /* -- overcast: the sky's gray weight (base ink only) ---------------- */
+  cloudDesat: 0.32, // base-ink desaturation at full overcast
+  cloudDayDim: 0.1, // parked-day paper darkens a touch under clouds
+
+  /* -- fog: the milk-glass veil (base ink; streetlight catch only) ----- */
   fogLift: 0.42, // base ink lifts toward the mist color
-  fogFieldDim: 0.22, // feeling recedes into the veil
+  fogStreetDim: 0.22, // the veil dims what the STREETS catch — never the field
   fogMist: { night: "#20242C", day: "#DFE3E9" },
 
-  /* -- rain: wet paper, glistening streets --------------------------- */
+  /* -- rain: glistening streets (base response) ------------------------ */
   wetWaterDarken: 0.16, // rivers deepen in the rain
   glistenGain: 0.8, // streetlight boost on wet nights (×1+this×wet)
-  wetStreak: 0.15, // field brightness streaking along the wind
-  wetWarp: 0.015, // edges seep a little further when wet
 
-  /* -- snow: the hush ------------------------------------------------ */
-  snowDayCool: 0.35, // paper toward cold bright white
+  /* -- snow: the hush (base ink only) ---------------------------------- */
+  snowDayCool: 0.35, // parked-day paper toward cold bright white
   snowNightLift: 0.06, // ink lifts a breath (snow-lit sky)
-  snowDriftSlow: 0.6, // flow slows: ×(1 − this×snow)
-  snowSparkle: 0.007, // extra dither shimmer in the field
 
   /* -- wind: the flow follows the real air --------------------------- */
   windWarp: 0.05, // + warp amplitude at full wind

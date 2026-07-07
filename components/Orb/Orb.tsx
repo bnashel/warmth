@@ -38,24 +38,29 @@ export function Orb({
   const coreWhite = 1 - 0.35 * paper;
 
   // Gradient strings derived from the live color — recomputed off-render.
+  // THE INSTRUMENT (phase 5): closest-side gradients so every layer ENDS
+  // inside its own box — a crisp lamp with a tight halo, never a wash that
+  // reads as glow on the map beneath.
   const haloBg = useTransform(() => {
     const c = rgb.get();
     const a = haloAlpha.get() * glare;
-    return `radial-gradient(circle, rgba(${c},${a.toFixed(3)}) 0%, rgba(${c},${(
-      a * 0.45
-    ).toFixed(3)}) 38%, rgba(${c},0) 68%)`;
+    return `radial-gradient(closest-side, rgba(${c},${a.toFixed(3)}) 0%, rgba(${c},${(
+      a * 0.4
+    ).toFixed(3)}) 48%, rgba(${c},0) 82%)`;
   });
   const midBg = useTransform(() => {
     const c = rgb.get();
-    return `radial-gradient(circle, rgba(${c},${GLOW.midAlpha}) 0%, rgba(${c},${
-      GLOW.midAlpha * 0.75
-    }) 42%, rgba(${c},0.05) 68%, rgba(${c},0) 74%)`;
+    // The ball itself: full-bodied to 82% of the radius, then a short
+    // 3–4px feather — a defined edge, an object you could pick up.
+    return `radial-gradient(closest-side, rgba(${c},${GLOW.midAlpha}) 0%, rgba(${c},${(
+      GLOW.midAlpha * 0.94
+    ).toFixed(3)}) 66%, rgba(${c},${(GLOW.midAlpha * 0.82).toFixed(3)}) 84%, rgba(${c},0) 99%)`;
   });
   const coreBg = useTransform(() => {
     const c = rgb.get();
-    return `radial-gradient(circle, rgba(255,255,255,${(0.95 * coreWhite).toFixed(3)}) 0%, rgba(255,255,255,${(
+    return `radial-gradient(closest-side, rgba(255,255,255,${(0.95 * coreWhite).toFixed(3)}) 0%, rgba(255,255,255,${(
       0.55 * coreWhite
-    ).toFixed(3)}) ${GLOW.coreFrac * 100}%, rgba(${c},0.28) 46%, rgba(${c},0) 62%)`;
+    ).toFixed(3)}) ${GLOW.coreFrac * 100}%, rgba(${c},0.3) 52%, rgba(${c},0) 72%)`;
   });
 
   return (
@@ -69,27 +74,27 @@ export function Orb({
         position: "relative",
       }}
     >
-      {/* Contact shadow — only on paper (opacity 0 at night, composited,
-          costs nothing). Grounds the glow as a thing you can touch. */}
-      {paper > 0.01 && (
-        <div
-          aria-hidden
-          style={{
-            position: "absolute",
-            left: "50%",
-            top: "50%",
-            width: size * 1.15,
-            height: size * 0.5,
-            transform: "translate(-50%, 24%)",
-            borderRadius: "50%",
-            background:
-              "radial-gradient(closest-side, rgba(38,42,54,0.30) 0%, rgba(38,42,54,0.10) 55%, rgba(38,42,54,0) 100%)",
-            opacity: paper,
-            filter: "blur(6px)",
-          }}
-        />
-      )}
-      {/* Outer halo — the light that spills into the void. */}
+      {/* Floating shadow — ALWAYS on (phase 5: the orb clearly floats above
+          the map). Deeper on paper; at night it reads where streets and
+          parks pass beneath. Composited once, costs nothing. */}
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          left: "50%",
+          top: "50%",
+          width: size * 1.1,
+          height: size * 0.46,
+          transform: "translate(-50%, 34%)",
+          borderRadius: "50%",
+          background:
+            "radial-gradient(closest-side, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.35) 55%, rgba(0,0,0,0) 100%)",
+          opacity:
+            GLOW.shadowAlpha.night + (GLOW.shadowAlpha.paper - GLOW.shadowAlpha.night) * paper,
+          filter: "blur(6px)",
+        }}
+      />
+      {/* Tight halo — hugs the glass; never a wash on the city. */}
       <motion.div
         style={{
           position: "absolute",
@@ -103,16 +108,18 @@ export function Orb({
           willChange: "transform, opacity",
         }}
       />
-      {/* Mid body — this IS the visible ball. */}
+      {/* Mid body — this IS the visible ball: defined edge, thin glass rim. */}
       <motion.div
         style={{
           position: "absolute",
           left: "50%",
           top: "50%",
-          width: size * 1.5,
-          height: size * 1.5,
+          width: size * 1.06,
+          height: size * 1.06,
           x: "-50%",
           y: "-50%",
+          borderRadius: "50%",
+          boxShadow: `inset 0 0 0 1px rgba(255,255,255,${GLOW.rimAlpha})`,
           background: midBg,
           willChange: "transform, opacity",
         }}

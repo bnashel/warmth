@@ -34,6 +34,7 @@ const PAINT: [layerId: string, prop: PaintProp, key: InkKey][] = [
   ["water", "fill-color", "water"],
   ["parks", "fill-color", "park"],
   ["buildings", "fill-color", "building"],
+  ["buildings-outline", "line-color", "road"], // footprints ride the road ink
   ["roads-highway", "line-color", "road"],
   ["roads-avenue", "line-color", "road"],
   ["roads-local", "line-color", "road"],
@@ -56,6 +57,19 @@ const lerpRgb = (a: Rgb, b: Rgb, t: number): Rgb => [
 const scaleRgb = (c: Rgb, s: number): Rgb => [c[0] * s, c[1] * s, c[2] * s];
 
 const fmt = (c: Rgb) => `rgb(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])})`;
+
+/**
+ * The parked day (constitution rule 1): the product is always night.
+ * SOLAR.dayMode restores the 2026-07-02 paper-day look at build time;
+ * `?daylight=1` previews it without an edit. Everything else reads this.
+ */
+export function dayModeEnabled(): boolean {
+  if (SOLAR.dayMode) return true;
+  if (typeof window !== "undefined") {
+    return new URLSearchParams(window.location.search).get("daylight") === "1";
+  }
+  return false;
+}
 
 /**
  * Now — unless the lab set a preview hour. `?solarHour=17.5` seeds it;
@@ -85,41 +99,49 @@ export function solarDate(): Date {
 function gradeInk(a: AtmosphereState): Record<InkKey, Rgb> {
   const snow = a.wetKind === "snow" ? a.wet : 0;
   const rain = a.wetKind === "rain" ? a.wet : 0;
-  const night = 1 - a.light;
+  // Always-night (constitution rule 1): the sun blends toward the lifted
+  // warm charcoal, never the paper — and the canvas READS as night at any
+  // hour, so night-only graces (sky-glow, moonlight, snow-lit lift) stay.
+  const dayMode = dayModeEnabled();
+  const dayInk = dayMode ? SOLAR.day : SOLAR.nightDay;
+  const emberInk = dayMode ? SOLAR.ember : SOLAR.nightEmber;
+  const lightGround = dayMode ? a.light : 0; // terms that assume a LIGHT ground
+  const nightW = dayMode ? 1 - a.light : 1; // how "night" the canvas reads
   const mist = hexToRgb(a.paper > 0.5 ? WEATHER.fogMist.day : WEATHER.fogMist.night);
   const glow = hexToRgb(WEATHER.skyGlow.color);
   const moonInk = hexToRgb(WEATHER.moonLift.color);
   const out = {} as Record<InkKey, Rgb>;
 
   for (const k of INK_KEYS) {
-    // The sun's blend: night → day, warmed toward the ember.
+    // The sun's blend: midnight ink → the day tone, warmed toward the ember.
     let c = hexToRgb(NIGHT[k]);
-    if (a.light > 0) c = lerpRgb(c, hexToRgb(SOLAR.day[k]), a.light);
-    if (a.ember > 0) c = lerpRgb(c, hexToRgb(SOLAR.ember[k]), a.ember);
+    if (a.light > 0) c = lerpRgb(c, hexToRgb(dayInk[k]), a.light);
+    if (a.ember > 0) c = lerpRgb(c, hexToRgb(emberInk[k]), a.ember);
 
-    // Overcast: the gray weight — desaturate, and dim the day a touch
-    // (scaled by light so the night ink is never crushed further).
+    // Overcast: the gray weight — desaturate, and dim a light ground a touch
+    // (scaled by lightGround so the night ink is never crushed further).
     if (a.cloud > 0.001) {
       const l = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
       c = lerpRgb(c, [l, l, l], a.cloud * WEATHER.cloudDesat);
-      c = scaleRgb(c, 1 - WEATHER.cloudDayDim * a.cloud * a.light);
+      c = scaleRgb(c, 1 - WEATHER.cloudDayDim * a.cloud * lightGround);
       // …and at NIGHT the city glows the way real cities do under clouds:
       // the void lifts toward a warm sky-glow, never staying pure black —
       // this is how overcast READS after dark (Ben's field report).
       if (k !== "road") {
-        c = lerpRgb(c, glow, a.cloud * WEATHER.skyGlow.lift * night * (1 - a.ember));
+        c = lerpRgb(c, glow, a.cloud * WEATHER.skyGlow.lift * nightW * (1 - a.ember));
       }
     }
 
     // Moonlight: a faint cool wash on clear nights, scaled by the moon's
     // illuminated fraction — a full moon genuinely reads brighter.
-    const moonW = a.moon * (1 - a.cloud) * night * WEATHER.moonLift.weight;
+    const moonW = a.moon * (1 - a.cloud) * nightW * WEATHER.moonLift.weight;
     if (moonW > 0.001 && k !== "road") c = lerpRgb(c, moonInk, moonW);
 
-    // Snow: paper goes cold-bright; the night lifts a breath (snow-lit sky).
+    // Snow: a light ground goes cold-bright; the night lifts a breath
+    // (snow-lit sky) — at always-night, only the lift.
     if (snow > 0.001) {
-      c = lerpRgb(c, [238, 241, 246], snow * WEATHER.snowDayCool * a.light);
-      c = lerpRgb(c, [36, 40, 50], snow * WEATHER.snowNightLift * (1 - a.light));
+      if (lightGround > 0) c = lerpRgb(c, [238, 241, 246], snow * WEATHER.snowDayCool * lightGround);
+      c = lerpRgb(c, [36, 40, 50], snow * WEATHER.snowNightLift * nightW);
     }
 
     // Fog: everything lifts toward the mist — the milk-glass veil.
@@ -174,11 +196,12 @@ const ROADS: [
   fade: { from: number; to: number },
   alpha: number,
   width: number,
+  lift: number,
 ][] = [
-  ["roads-highway", JOURNEY.highwayFade, INK.roadAlpha.highway, INK.roadWidth.highway],
-  ["roads-avenue", JOURNEY.avenueFade, INK.roadAlpha.avenue, INK.roadWidth.avenue],
-  ["roads-local", JOURNEY.localFade, INK.roadAlpha.local, INK.roadWidth.local],
-  ["roads-service", JOURNEY.serviceFade, INK.roadAlpha.service, INK.roadWidth.service],
+  ["roads-highway", JOURNEY.highwayFade, INK.roadAlpha.highway, INK.roadWidth.highway, JOURNEY.streetPresence.boost.highway],
+  ["roads-avenue", JOURNEY.avenueFade, INK.roadAlpha.avenue, INK.roadWidth.avenue, JOURNEY.streetPresence.boost.avenue],
+  ["roads-local", JOURNEY.localFade, INK.roadAlpha.local, INK.roadWidth.local, JOURNEY.streetPresence.boost.local],
+  ["roads-service", JOURNEY.serviceFade, INK.roadAlpha.service, INK.roadWidth.service, JOURNEY.streetPresence.boost.service],
 ];
 
 /** Maps whose paint transitions are already set to the slow solar ease. */
@@ -217,7 +240,7 @@ export function applyAtmosphereInk(map: MapboxMap, a: AtmosphereState): void {
   // style itself — only the landing alpha breathes.
   const boost = 1 + (SOLAR.dayRoadBoost - 1) * a.paper;
   const widen = 1 + (SOLAR.dayRoadWiden - 1) * a.paper;
-  for (const [id, fade, alpha, width] of ROADS) {
+  for (const [id, fade, alpha, width, lift] of ROADS) {
     if (!map.getLayer(id)) continue;
     if (firstTouch) {
       for (const prop of ["line-opacity-transition", "line-width-transition"] as const) {
@@ -227,7 +250,7 @@ export function applyAtmosphereInk(map: MapboxMap, a: AtmosphereState): void {
     map.setPaintProperty(
       id,
       "line-opacity",
-      roadOpacityExpr(fade, Math.min(0.95, alpha * boost)) as unknown as ExpressionSpecification,
+      roadOpacityExpr(fade, Math.min(0.95, alpha * boost), lift) as unknown as ExpressionSpecification,
     );
     map.setPaintProperty(id, "line-width", roadWidthExpr(fade.from, width, widen));
   }

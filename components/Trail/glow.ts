@@ -14,7 +14,7 @@ import {
   type GlowDatum,
 } from "./GlowLayer";
 import type { LivePoint } from "@/lib/momentsStore";
-import { GLOW, TRAIL } from "@/components/Map/tune";
+import { GLOW, LAMP, TRAIL } from "@/components/Map/tune";
 
 /** Radius growth as the camera approaches — light gets room to breathe. */
 const zoomScale = (zoom: number) => Math.pow(GLOW.zoomGrowth, zoom - 12);
@@ -221,7 +221,8 @@ export function buildTrailLayers(
         timeSec,
         radiusScale: 1,
         radiusMaxPixels: TRAIL.spark.cluster.maxRadiusPx,
-        light: { ...TRAIL.spark.light, gain: TRAIL.gain * fade },
+        // Constellations wear the same lamp as everything else.
+        light: { gain: TRAIL.gain * fade },
         parameters: ADDITIVE_LIGHT,
       }),
       new TextLayer<SparkCluster>({
@@ -254,7 +255,10 @@ export function buildTrailLayers(
     antialiasing: false,
     pickable: false,
     timeSec,
-    radiusScale: Math.pow(TRAIL.zoomGrowth, zoom - 12),
+    // THE ONE GLOW RECIPE's radius curve: zoom-aware, capped both ways —
+    // candles stay crisp jewels at every zoom, never mid-zoom fuzz.
+    radiusScale: Math.pow(LAMP.zoomGrowth, zoom - 12),
+    radiusMinPixels: LAMP.minRadiusPx,
     radiusMaxPixels: TRAIL.maxRadiusPx,
   };
   const night = 1 - paper;
@@ -271,7 +275,6 @@ export function buildTrailLayers(
         // a smaller quad — a diary mark, not an out-of-focus glow.
         radiusScale: shared.radiusScale * TRAIL.stain.radiusScale,
         light: {
-          ...TRAIL.light,
           gain: TRAIL.gain * TRAIL.stain.gainBoost * fade,
           pigment: paper,
           stainEdge: TRAIL.stain.edge,
@@ -294,7 +297,9 @@ export function buildTrailLayers(
           if (info.object && onTapEntry) onTapEntry(info.object.id);
           return true;
         },
-        light: { ...TRAIL.spark.light, gain: TRAIL.gain * fade * night },
+        // Pure LAMP: the shared recipe IS the candle; only the gain is ours
+        // (Ben's unification — supersedes the journal's own spark shading).
+        light: { gain: TRAIL.gain * fade * night },
         parameters: ADDITIVE_LIGHT,
       }),
     );

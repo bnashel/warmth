@@ -53,6 +53,10 @@ function polar(deg: number, r: number = R): { x: number; y: number } {
 const DOT_POS = EMOTIONS.map((_, i) =>
   polar(START_DEG + (SWEEP_DEG / (EMOTIONS.length - 1)) * i),
 );
+/* Learning-label anchors: each name sits just beyond its dot, radially. */
+const NAME_POS = EMOTIONS.map((_, i) =>
+  polar(START_DEG + (SWEEP_DEG / (EMOTIONS.length - 1)) * i, R + TEXT.wheelNames.gapPx),
+);
 
 /** Finger position → param u∈[0,1] along the arc, by ANGLE around the orb
  *  center (true radial tracking — a half-circle finger path maps 1:1).
@@ -109,6 +113,7 @@ export function OrbFlow({
   hintWord,
   hintColor = "#FFFFFF",
   paper = 0,
+  namesOn = false,
   gestureDepth,
   onCommit,
 }: {
@@ -118,6 +123,9 @@ export function OrbFlow({
   /** Solar day-weight 0..1 — the glass, label, and knob take graphite ink
    *  as the map turns to paper (white on white is unreadable at noon). */
   paper?: number;
+  /** Learning mode (a user's first 3 commits): every wheel dot carries its
+   *  emotion name. After that, the active label alone — which is right. */
+  namesOn?: boolean;
   gestureDepth: MotionValue<number>;
   /**
    * Fires the instant a feeling is committed (start of the burst, not the
@@ -639,6 +647,52 @@ export function OrbFlow({
               />
             );
           })}
+      </AnimatePresence>
+
+      {/* Learning names — the first 3 commits only: every dot says who it
+          is, just beyond its dot along the radius. Then they retire. */}
+      <AnimatePresence>
+        {showDots &&
+          namesOn &&
+          NAME_POS.map((pos, i) => (
+            <motion.span
+              key={`name-${EMOTIONS[i]}`}
+              style={{
+                position: "absolute",
+                left: "50%",
+                top: "50%",
+                pointerEvents: "none",
+                willChange: "transform, opacity",
+              }}
+              initial={{ x: pos.x * 0.85, y: pos.y * 0.85, opacity: 0 }}
+              animate={{
+                x: pos.x,
+                y: pos.y,
+                opacity: i === activeIdx ? 1 : TEXT.wheelNames.opacity,
+              }}
+              exit={{ opacity: 0, transition: { duration: 0.18 } }}
+              transition={{
+                x: { ...spring(SPRINGS.snappy), delay: i * WHEEL.dotStaggerS },
+                y: { ...spring(SPRINGS.snappy), delay: i * WHEEL.dotStaggerS },
+                opacity: { duration: 0.2, delay: i * WHEEL.dotStaggerS },
+              }}
+            >
+              {/* Inner span centers the word on the anchor — framer owns the
+                  outer transform, so the -50% centering must live here. */}
+              <span
+                style={{
+                  display: "inline-block",
+                  transform: "translate(-50%, -50%)",
+                  fontSize: TEXT.wheelNames.sizePx,
+                  letterSpacing: "0.08em",
+                  color: chromeInk(1),
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {EMOTIONS[i]}
+              </span>
+            </motion.span>
+          ))}
       </AnimatePresence>
 
       {/* One lowercase word — the only reading on screen. */}

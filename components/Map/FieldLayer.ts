@@ -19,7 +19,7 @@
 import mapboxgl, { type CustomLayerInterface, type Map as MapboxMap } from "mapbox-gl";
 import { EMOTION_HUES, EMOTIONS } from "@/lib/theme";
 import type { LivePoint } from "@/lib/momentsStore";
-import { FIELD, SHAPES, WEATHER } from "./tune";
+import { CAMERA, FIELD, SHAPES, WEATHER } from "./tune";
 
 /* ---------------- OKLab (Björn Ottosson, via components/Orb/oklch.ts) --- */
 
@@ -169,11 +169,25 @@ uniform vec4 uShape;
 uniform float uBand;   // aurora curtains: brightness modulation (0 = off)
 uniform float uAspect; // target width / height, so the flow isn't squashed
 // THE LIVING ATMOSPHERE (lib/atmosphere.ts, eased): the flow axis follows
-// the real wind; the sky's weight grades the light. All subtle.
+// the real wind — the field's own living motion. CONSTITUTION RULE 2: the
+// sky may not grade the emotion's light; cloud/wet/snow no longer reach
+// this shader at all.
 uniform vec2 uAxis;    // direction the air flows toward (unit-ish)
-uniform float uCloud;  // 0 clear → 1 overcast
-uniform float uWet;    // rain intensity (0 when snowing)
-uniform float uSnow;   // snow intensity
+// LAND MASK: the field inherits the coastline (rivers/harbor stay void).
+// Screen → mercator is a plain affine at pitch 0, built on the CPU from
+// three unprojections (the camera matrix itself is PERSPECTIVE even flat,
+// so inverting it at one clip plane samples the wrong plane — review
+// finding: that collapsed the whole field when the center sat on water).
+uniform sampler2D uMask;
+uniform float uMaskOn;
+uniform vec4 uMaskRect;   // mercX0, mercY0, 1/width, 1/height
+uniform vec2 uMercOrigin; // mercator at vUv (0,0) — screen bottom-left
+uniform vec2 uMercDx;     // mercator delta across vUv.x (bottom-left → bottom-right)
+uniform vec2 uMercDy;     // mercator delta across vUv.y (bottom-left → top-left)
+uniform float uWaterAtten;
+// THE LUMINOUS HEART: density peaks lift toward light (OKLab L), capped
+// far below white — aurora, never fog.
+uniform vec3 uHeart;      // from, to, lift
 out vec4 fragColor;
 
 // Value-noise fbm, 3 octaves — cheap enough for a half-res target.
@@ -277,6 +291,22 @@ void main() {
   // asymptotically — never white. The low end is linear: the long fade.
   float b = 1.0 - exp(-uExposure * total);
 
+  // THE LAND MASK — geography shapes the feeling: the field dies over
+  // water so rivers and harbor stay pure void and every silhouette
+  // inherits the coastline. Sampled at the TRUE pixel (vUv, unwarped):
+  // the shore is a fact, not weather.
+  if (uMaskOn > 0.5) {
+    vec2 merc = uMercOrigin + uMercDx * vUv.x + uMercDy * vUv.y;
+    vec2 muv = vec2((merc.x - uMaskRect.x) * uMaskRect.z,
+                    (merc.y - uMaskRect.y) * uMaskRect.w);
+    float land = smoothstep(0.12, 0.82, texture(uMask, muv).r);
+    b *= mix(uWaterAtten, 1.0, land);
+  }
+
+  // THE LUMINOUS HEART: where pooled feeling peaks, the hue itself lifts
+  // toward light — bright AND saturated, capped well below white.
+  lab.x += uHeart.z * smoothstep(uHeart.x, uHeart.y, b);
+
   // The living tide: a slow, subtle breath, phase-varied across hues.
   float phase = fract(lab.y * 3.7 + lab.z * 5.3);
   b *= 1.0 + uBreathAmp * sin(6.2831853 * (uTimeSec / uBreathPeriod + phase));
@@ -290,24 +320,13 @@ void main() {
     b *= 1.0 + uBand * (curtain - 0.5) * 1.6;
   }
 
-  // THE SKY'S WEIGHT — all modulation, never to zero, always subtle.
-  // Overcast flattens the light.
-  b *= 1.0 - ${WEATHER.cloudFieldDim.toFixed(3)} * uCloud;
-  // Rain streaks the feeling faintly along the wind — alive, not drawn.
-  if (uWet > 0.001) {
-    vec2 ax = normalize(uAxis);
-    vec2 qw = vec2(uv.x * uAspect, uv.y);
-    float streak = vnoise(vec2(dot(qw, ax) * 3.0 - uTimeSec * 0.55,
-                               dot(qw, vec2(-ax.y, ax.x)) * 42.0));
-    b *= 1.0 + uWet * ${WEATHER.wetStreak.toFixed(3)} * (streak - 0.5);
-  }
-  // Snow hush: the floor lifts a breath, the peaks soften.
-  if (uSnow > 0.001) b = mix(b, b * 0.9 + 0.02, uSnow * 0.6);
+  // CONSTITUTION RULE 2: the sky's weight no longer touches the field —
+  // the emotion layer renders identically in every weather. (The old
+  // overcast dim, rain streak, snow hush, and snow sparkle lived here.)
 
-  // Dither so the long tail never bands on 8-bit output — snow adds a
-  // whisper of sparkle to it.
+  // Dither so the long tail never bands on 8-bit output.
   float n = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
-  b += (n - 0.5) * (0.004 + ${WEATHER.snowSparkle.toFixed(3)} * uSnow);
+  b += (n - 0.5) * 0.004;
 
   // uMode 2 — WATERCOLOR PIGMENT (the light "paper" day): instead of adding
   // light, stain the paper. Caller blends ZERO/SRC_COLOR (true multiply);
@@ -337,6 +356,7 @@ const CHANNEL: Record<string, number> = Object.fromEntries(
   EMOTIONS.map((e, i) => [e, i]),
 );
 const FLOATS_PER_INSTANCE = 5; // mercX, mercY, radiusMerc, weight, channel
+
 
 function compile(gl: WebGL2RenderingContext, vsSrc: string, fsSrc: string): WebGLProgram {
   const sh = (type: number, src: string) => {
@@ -380,7 +400,10 @@ export class FieldLayer implements CustomLayerInterface {
 
   /** THE LIVING ATMOSPHERE — plain fields mutated in place from MapStage
    *  every push (no allocation): the sky's weight on the light. */
-  weather = { cloud: 0, wet: 0, snow: 0, fog: 0, axisX: 0.94, axisY: 0.33 };
+  /** What the sky may still hand the field: the wind axis (its living
+   *  flow), fog (dims the STREETLIGHT catch only), wet (the glisten).
+   *  Cloud/snow no longer cross this boundary — constitution rule 2. */
+  weather = { wet: 0, fog: 0, axisX: 0.94, axisY: 0.33 };
 
   private map: MapboxMap | null = null;
   private gl: WebGL2RenderingContext | null = null;
@@ -408,6 +431,12 @@ export class FieldLayer implements CustomLayerInterface {
   private uploaded = false;
   private epoch = 0;
   private hueLab = new Float32Array(NE * 3);
+  private maskTex: WebGLTexture | null = null;
+  private maskReady = false;
+  private maskRect: [number, number, number, number] = [0, 0, 1, 1];
+  /** Screen→mercator affine (pitch 0): origin at screen bottom-left plus
+   *  the two screen-edge deltas, rebuilt each frame from unproject. */
+  private mercFrame = { ox: 0, oy: 0, dxx: 0, dxy: 0, dyx: 0, dyy: 0, ok: false };
 
   constructor() {
     EMOTIONS.forEach((e, i) => {
@@ -489,6 +518,30 @@ export class FieldLayer implements CustomLayerInterface {
     gl.bindVertexArray(null);
     this.fbo = gl.createFramebuffer();
     this.fbo2 = gl.createFramebuffer();
+
+    // THE LAND MASK — the coastline as a mercator-space texture (built by
+    // scripts/build-landmask.mjs). Loads async; until then (or on failure)
+    // the field simply doesn't clip — never a blocker.
+    const [[west, south], [east, north]] = CAMERA.maxBounds;
+    const tl = mapboxgl.MercatorCoordinate.fromLngLat({ lng: west, lat: north });
+    const br = mapboxgl.MercatorCoordinate.fromLngLat({ lng: east, lat: south });
+    this.maskRect = [tl.x, tl.y, 1 / (br.x - tl.x), 1 / (br.y - tl.y)];
+    const img = new Image();
+    img.onload = () => {
+      if (!this.gl) return;
+      const g = this.gl;
+      this.maskTex = g.createTexture();
+      g.bindTexture(g.TEXTURE_2D, this.maskTex);
+      g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MIN_FILTER, g.LINEAR);
+      g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MAG_FILTER, g.LINEAR);
+      g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_S, g.CLAMP_TO_EDGE);
+      g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_T, g.CLAMP_TO_EDGE);
+      g.texImage2D(g.TEXTURE_2D, 0, g.R8, g.RED, g.UNSIGNED_BYTE, img);
+      this.maskReady = true;
+      this.map?.triggerRepaint();
+    };
+    img.onerror = () => console.error("warmth: land mask failed to load");
+    img.src = FIELD.landMask.url;
   }
 
   /** Make (or remake on resize) a plain RGBA8 linear-clamped texture. */
@@ -556,6 +609,28 @@ export class FieldLayer implements CustomLayerInterface {
     // warp in perfect sync with the sharp field beneath it.
     if (this.epoch === 0) this.epoch = performance.now();
     this.timeSec = (performance.now() - this.epoch) / 1000;
+    // Land mask sampling needs screen → mercator. With pitch locked at 0
+    // that map is an exact affine; three unprojections define it. (Never
+    // invert the camera matrix here — it is perspective even when flat,
+    // and a one-plane inversion collapses the field: review finding.)
+    try {
+      const w = this.map.getContainer().clientWidth;
+      const h = this.map.getContainer().clientHeight;
+      const bl = mapboxgl.MercatorCoordinate.fromLngLat(this.map.unproject([0, h]));
+      const br = mapboxgl.MercatorCoordinate.fromLngLat(this.map.unproject([w, h]));
+      const tl = mapboxgl.MercatorCoordinate.fromLngLat(this.map.unproject([0, 0]));
+      this.mercFrame = {
+        ox: bl.x,
+        oy: bl.y,
+        dxx: br.x - bl.x,
+        dxy: br.y - bl.y,
+        dyx: tl.x - bl.x,
+        dyy: tl.y - bl.y,
+        ok: true,
+      };
+    } catch {
+      this.mercFrame.ok = false;
+    }
     this.ensureTargets(gl);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
@@ -610,8 +685,8 @@ export class FieldLayer implements CustomLayerInterface {
     );
     gl.uniform1f(
       gl.getUniformLocation(this.accumProgram, "uSoftness"),
-      // Overcast diffuses the feeling: softer kernels under a gray sky.
-      FIELD.kernelSoftness + WEATHER.cloudSoften * this.weather.cloud,
+      // One softness in every sky (constitution rule 2).
+      FIELD.kernelSoftness,
     );
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE);
@@ -706,9 +781,21 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform1f(u("uAspect"), this.texW / Math.max(1, this.texH));
     const w = this.weather;
     gl.uniform2f(u("uAxis"), w.axisX, w.axisY);
-    gl.uniform1f(u("uCloud"), w.cloud);
-    gl.uniform1f(u("uWet"), w.wet);
-    gl.uniform1f(u("uSnow"), w.snow);
+    // The coastline (off until the mask texture lands — never a blocker).
+    const mf = this.mercFrame;
+    const maskOn = this.maskReady && mf.ok;
+    gl.uniform1f(u("uMaskOn"), maskOn ? 1 : 0);
+    if (maskOn) {
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
+      gl.uniform1i(u("uMask"), 2);
+      gl.uniform4f(u("uMaskRect"), ...this.maskRect);
+      gl.uniform2f(u("uMercOrigin"), mf.ox, mf.oy);
+      gl.uniform2f(u("uMercDx"), mf.dxx, mf.dxy);
+      gl.uniform2f(u("uMercDy"), mf.dyx, mf.dyy);
+      gl.uniform1f(u("uWaterAtten"), FIELD.landMask.waterAtten);
+    }
+    gl.uniform3f(u("uHeart"), FIELD.heart.from, FIELD.heart.to, FIELD.heart.lift);
   }
 
   render(gl: WebGL2RenderingContext) {
@@ -718,17 +805,27 @@ export class FieldLayer implements CustomLayerInterface {
     gl.enable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
 
+    // THE ZOOM NARRATIVE: close up, the field thins into breathing ambient
+    // light (never zero) so the city shows through. The streetlight pass is
+    // deliberately NOT thinned — it is the city glowing through.
+    const zt = FIELD.zoomThin;
+    const zoom = this.map?.getZoom() ?? 0;
+    const zx = Math.min(1, Math.max(0, (zoom - zt.from) / (zt.to - zt.from)));
+    const thin = 1 - (1 - zt.floor) * zx * zx * (3 - 2 * zx);
+
     // By day (paper → 1) the glow passes hand off to the pigment pass:
     // light added to a light map is invisible, so feeling stains instead.
     const night = 1 - this.paper;
     const w = this.weather;
-    // Fog: the feeling recedes into the veil, whichever way it's painted.
-    const fogDim = 1 - WEATHER.fogFieldDim * w.fog;
+    // CONSTITUTION RULE 2: fog may dim what the STREETS catch (the base
+    // map's response) but never the emotion passes themselves.
+    const fogStreet = 1 - WEATHER.fogStreetDim * w.fog;
 
-    // Pass 0 — watercolor pigment onto the paper (true multiply).
+    // Pass 0 — watercolor pigment onto the paper (true multiply; the
+    // parked day — inert while paper is clamped to 0).
     if (this.paper > 0.01) {
       gl.uniform1i(u("uMode"), 2);
-      gl.uniform1f(u("uGain"), this.paper * this.fade * fogDim);
+      gl.uniform1f(u("uGain"), this.paper * this.fade);
       gl.blendFunc(gl.ZERO, gl.SRC_COLOR);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
@@ -741,22 +838,26 @@ export class FieldLayer implements CustomLayerInterface {
       gl.uniform1i(u("uMode"), 1);
       gl.uniform1f(
         u("uGain"),
-        FIELD.streetlightGain * this.fade * night * fogDim * (1 + WEATHER.glistenGain * w.wet),
+        FIELD.streetlightGain * this.fade * night * fogStreet * (1 + WEATHER.glistenGain * w.wet),
       );
       gl.blendFunc(gl.DST_COLOR, gl.ONE);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
 
-    // Pass 2 — the field itself, additive (alpha 0 under premultiplied).
+    // Pass 2 — the field itself. SCREEN blend, not raw addition: light
+    // saturates asymptotically toward its own hue and the pass stack can
+    // never sum to pure white on the map (constitution rule 3 — review
+    // blocker: five pooled commits used to clip to rgb(253,253,253)).
+    // Over the near-black base, screen ≈ additive; only the top end bends.
     if (night > 0.01) {
       gl.uniform1i(u("uMode"), 0);
-      gl.uniform1f(u("uGain"), FIELD.gain * this.fade * night * fogDim);
-      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.uniform1f(u("uGain"), FIELD.gain * this.fade * night * thin);
+      gl.blendFunc(gl.ONE_MINUS_DST_COLOR, gl.ONE);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
 
     // Pass 3 — BLOOM: the halo of feeling, added over the night city.
-    // (Prepared in prerender; clouds diffuse it a touch further.)
+    // (Prepared in prerender; the sky never grades it — rule 2.)
     if (this.bloomReady && this.compositeProgram) {
       gl.useProgram(this.compositeProgram);
       gl.activeTexture(gl.TEXTURE0);
@@ -764,9 +865,11 @@ export class FieldLayer implements CustomLayerInterface {
       gl.uniform1i(this.loc(gl, this.compositeProgram, "comp", "uSrc"), 0);
       gl.uniform1f(
         this.loc(gl, this.compositeProgram, "comp", "uGain"),
-        WEATHER.bloom.gain * this.fade * night * fogDim * (1 - 0.3 * w.cloud),
+        WEATHER.bloom.gain * this.fade * night * thin,
       );
-      gl.blendFunc(gl.ONE, gl.ONE);
+      // Screen, like the field pass: the halo brightens what is dim and
+      // asymptotes over what is already lit — never white (rule 3).
+      gl.blendFunc(gl.ONE_MINUS_DST_COLOR, gl.ONE);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
 
@@ -774,6 +877,7 @@ export class FieldLayer implements CustomLayerInterface {
   }
 
   onRemove(_map: MapboxMap, gl: WebGL2RenderingContext) {
+    if (this.maskTex) gl.deleteTexture(this.maskTex);
     for (const t of this.tex) if (t) gl.deleteTexture(t);
     for (const t of this.bloomTex) if (t) gl.deleteTexture(t);
     if (this.fieldColorTex) gl.deleteTexture(this.fieldColorTex);

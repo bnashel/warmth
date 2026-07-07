@@ -116,7 +116,7 @@ function labelColor(alpha: number, paper: number): [number, number, number, numb
   return [mix(233, 52), mix(236, 58), mix(244, 70), mix(alpha, Math.min(255, alpha * 1.5))];
 }
 
-function buildBoroughLayer(zoom: number, paper: number) {
+function buildBoroughLayer(zoom: number, paper: number, dims?: number[]) {
   const { from, to } = LABELS.boroughFadeOut;
   const t = Math.min(1, Math.max(0, (zoom - from) / (to - from)));
   const opacity = 1 - t * t * (3 - 2 * t);
@@ -128,7 +128,11 @@ function buildBoroughLayer(zoom: number, paper: number) {
     getPosition: (d) => d.anchor,
     getText: (d) => track(d.name),
     getSize: LABELS.boroughSizePx,
-    getColor: labelColor(LABELS.boroughAlpha, paper),
+    // A cap dims further when bright feeling pools beneath it — no label
+    // ever fights a feeling (dims come from MapStage, 1 = undimmed).
+    getColor: (_, { index }) =>
+      labelColor(Math.round(LABELS.boroughAlpha * (dims?.[index] ?? 1)), paper),
+    updateTriggers: { getColor: [paper, ...(dims ?? [])] },
     fontFamily: "Inter, system-ui, sans-serif",
     fontWeight: 500,
     fontSettings: { sdf: true, smoothing: 0.32 },
@@ -161,7 +165,12 @@ function tiersOf(data: LabelDatum[]) {
 /** Borough layer + three neighborhood TextLayers (one per tier), opacity
  *  recomputed per zoom — the caller feeds these into overlay.setProps on map
  *  move (no React churn). */
-export function buildLabelLayers(data: LabelDatum[], zoom: number, paper = 0) {
+export function buildLabelLayers(
+  data: LabelDatum[],
+  zoom: number,
+  paper = 0,
+  boroughDims?: number[],
+) {
   const g = globalOpacity(zoom);
   const tierData = tiersOf(data);
   const tiers = [0, 1, 2].map((tier) => {
@@ -184,5 +193,5 @@ export function buildLabelLayers(data: LabelDatum[], zoom: number, paper = 0) {
       parameters: { depthWriteEnabled: false },
     });
   });
-  return [buildBoroughLayer(zoom, paper), ...tiers];
+  return [buildBoroughLayer(zoom, paper, boroughDims), ...tiers];
 }
