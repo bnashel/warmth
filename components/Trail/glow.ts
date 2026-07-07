@@ -221,8 +221,8 @@ export function buildTrailLayers(
         timeSec,
         radiusScale: 1,
         radiusMaxPixels: TRAIL.spark.cluster.maxRadiusPx,
-        // Constellations wear the same lamp as everything else.
-        light: { gain: TRAIL.gain * fade },
+        // Constellations wear the same lamp — and the same free silhouette.
+        light: { gain: TRAIL.gain * fade, wobble: TRAIL.spark.wobble },
         parameters: ADDITIVE_LIGHT,
       }),
       new TextLayer<SparkCluster>({
@@ -297,9 +297,9 @@ export function buildTrailLayers(
           if (info.object && onTapEntry) onTapEntry(info.object.id);
           return true;
         },
-        // Pure LAMP: the shared recipe IS the candle; only the gain is ours
-        // (Ben's unification — supersedes the journal's own spark shading).
-        light: { gain: TRAIL.gain * fade * night },
+        // The LAMP's core and falloff, with the journal's free-form
+        // silhouette (Eli: "less circular") — a living blot, not a disc.
+        light: { gain: TRAIL.gain * fade * night, wobble: TRAIL.spark.wobble },
         parameters: ADDITIVE_LIGHT,
       }),
     );

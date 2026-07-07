@@ -34,6 +34,7 @@ layout(std140) uniform glowUniforms {
   float stainEdge;
   float stainRing;
   float stainHeart;
+  float wobble;
 } glow;
 `,
   uniformTypes: {
@@ -52,6 +53,7 @@ layout(std140) uniform glowUniforms {
     stainEdge: "f32" as const,
     stainRing: "f32" as const,
     stainHeart: "f32" as const,
+    wobble: "f32" as const,
   },
 };
 
@@ -81,6 +83,21 @@ void main(void) {
   // Radius breathes but never leaves the quad: full size only at s = 1.
   float breathe = (1.0 + glow.radiusAmp * s) / (1.0 + glow.radiusAmp);
   float rr = r / breathe;
+
+  // FREE-FORM (wobble > 0 — the journal): the silhouette stops being a
+  // circle. Three angular harmonics, phase-hashed per point and drifting
+  // very slowly, dent the radius INWARD only — every mark a unique, living
+  // blot that still fits its quad and keeps the lamp's core/falloff law.
+  if (glow.wobble > 0.0) {
+    float theta = atan(unitPosition.y, unitPosition.x);
+    float ph = vPhase * 6.2831853;
+    float lobes =
+        0.50 * sin(3.0 * theta + ph + glow.timeSec * 0.11)
+      + 0.35 * sin(5.0 * theta - ph * 1.7 + glow.timeSec * 0.07)
+      + 0.15 * sin(8.0 * theta + ph * 2.3 - glow.timeSec * 0.05);
+    float shrink = 1.0 - glow.wobble * (0.5 + 0.5 * lobes);
+    rr = rr / max(shrink, 0.35);
+  }
   if (rr >= 1.0) discard;
 
   // Bright hot core + long soft tail.
@@ -170,6 +187,9 @@ type LightParams = {
   stainRing: number;
   /** How much lighter the center dries (pigment pushed toward the rim). */
   stainHeart: number;
+  /** 0 = perfect circle; >0 = free-form living blot (the journal). The
+   *  value is the max inward dent as a fraction of the radius. */
+  wobble: number;
 };
 
 type EmotionGlowLayerProps = ScatterplotLayerProps<GlowDatum> & {
@@ -218,6 +238,7 @@ export class EmotionGlowLayer extends ScatterplotLayer<
       stainEdge: 0.8,
       stainRing: 0,
       stainHeart: 0,
+      wobble: 0,
       ...light,
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -239,6 +260,7 @@ export class EmotionGlowLayer extends ScatterplotLayer<
         stainEdge: p.stainEdge,
         stainRing: p.stainRing,
         stainHeart: p.stainHeart,
+        wobble: p.wobble,
       },
     });
     super.draw(params as never);

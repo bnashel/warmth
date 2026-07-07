@@ -280,10 +280,14 @@ export const TRAIL = {
    *  `ring` deeper at the rim, and a `heart` faintly lighter at the center
    *  (water pushes pigment outward as it dries) so it never reads as a disc. */
   stain: { edge: 0.88, ring: 0.28, radiusScale: 0.85, gainBoost: 1.25, heart: 0.12 },
-  /** THE JOURNAL EXTRAS (2026-07-07): the candle itself is pure LAMP —
-   *  the one glow recipe, no overrides. These are only what a journal
-   *  adds around it: memory rings and world-scale constellations. */
+  /** THE JOURNAL EXTRAS (2026-07-07): the candle keeps the LAMP's core and
+   *  falloff — but its SILHOUETTE is free-form (Eli: "less circular").
+   *  These are only what a journal adds: the living-blot wobble, memory
+   *  rings, and world-scale constellations. */
   spark: {
+    /** Max inward dent of the silhouette (fraction of radius). 0 = circle;
+     *  ~0.4 = a clearly organic, slowly-shifting blot, unique per entry. */
+    wobble: 0.42,
     /** A named star: entries carrying a memory wear a delicate ring. */
     ring: { radiusFactor: 1.55, widthPx: 1.2, alpha: 130 },
     /** Constellations: below this zoom, nearby sparks gather into one
