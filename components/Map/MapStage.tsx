@@ -43,11 +43,14 @@ function DeckOverlay({ onReady }: { onReady: (o: MapboxOverlay) => void }) {
 export default function MapStage({
   view = "public",
   onMapReady,
+  onEntryTap,
 }: {
-  /** public = the field (everyone); private = your trail (dots, only you). */
+  /** public = the field (everyone); private = your journal (sparks, only you). */
   view?: "public" | "private";
   /** The composed screen needs the camera (glide-to-bloom). */
   onMapReady?: (map: MapboxMap) => void;
+  /** Private view: a spark was tapped — the screen opens its memory. */
+  onEntryTap?: (id: string) => void;
 }) {
   const mapRef = useRef<MapRef | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
@@ -72,7 +75,45 @@ export default function MapStage({
   const viewMix = useRef(initialMix);
   useEffect(() => {
     viewTarget.current = view === "private" ? 1 : 0;
+    // The journal is global — "everywhere in the world you've felt
+    // something" — so the private view unlocks the NYC stage clamps;
+    // returning to public restores them (and the camera drifts home if
+    // it's out of bounds, handled by mapbox's own bounds enforcement).
+    const map = mapRef.current?.getMap();
+    if (map && loaded.current) {
+      if (view === "private") {
+        // Runtime-documented: null clears the bounds. The Map overload's
+        // types are stricter than the API (the Camera overload allows null).
+        (map.setMaxBounds as unknown as (b: null) => void)(null);
+        map.setMinZoom(1.5);
+      } else {
+        // Re-clamping while the camera is out in the world would TELEPORT
+        // it home (rule: nothing pops) — glide back first, clamp on arrival.
+        const c = map.getCenter();
+        const [[w, s], [e, n]] = CAMERA.maxBounds;
+        const outside =
+          c.lng < w || c.lng > e || c.lat < s || c.lat > n || map.getZoom() < CAMERA.minZoom;
+        const clamp = () => {
+          map.setMaxBounds(CAMERA.maxBounds);
+          map.setMinZoom(CAMERA.minZoom);
+        };
+        if (outside) {
+          map.once("moveend", clamp);
+          map.flyTo({
+            center: [CAMERA.initial.longitude, CAMERA.initial.latitude],
+            zoom: CAMERA.initial.zoom,
+            duration: 1600,
+          });
+        } else {
+          clamp();
+        }
+      }
+    }
   }, [view]);
+  const onEntryTapRef = useRef(onEntryTap);
+  useEffect(() => {
+    onEntryTapRef.current = onEntryTap;
+  }, [onEntryTap]);
 
   const style = useMemo(() => buildStyle(INK, "ink-and-glow"), []);
   // DPR cap: 3× phones render near-identically at 2× on a dark map, for
@@ -218,6 +259,10 @@ export default function MapStage({
               zoom,
               viewMix.current,
               paperRef.current,
+              (id) => onEntryTapRef.current?.(id),
+              // Tap a constellation: descend toward its sparks.
+              (lngLat) =>
+                map.easeTo({ center: lngLat, zoom: Math.min(zoom + 2.4, 14), duration: 900 }),
             )
           : [];
         // Trail first: labels stay readable above your dots.

@@ -18,6 +18,23 @@
  */
 import { CHOREO, FIELD, GLOW, RECENCY, TRAIL } from "@/components/Map/tune";
 import { EMOTION_HUES, type Emotion } from "@/lib/theme";
+import { pushMemoryToCloud, pushMomentToCloud } from "@/lib/sync";
+
+/** A memory counts once it carries any real content. */
+function hasMemoryContent(memory: Memory | undefined): boolean {
+  return Boolean(
+    memory && (memory.description?.trim() || memory.songTitle?.trim() || memory.photoPath),
+  );
+}
+
+/** The memory a journal entry can carry — all optional, editable forever. */
+export type Memory = {
+  description?: string; // freeform, ≤2000 chars (enforced at the editor)
+  songTitle?: string;
+  songArtist?: string;
+  /** Supabase Storage path once photos sync; unused until the cloud lands. */
+  photoPath?: string;
+};
 
 export type Moment = {
   id: string;
@@ -26,12 +43,14 @@ export type Moment = {
   lng: number;
   lat: number;
   createdAt: number; // epoch ms
-  /** Committed on this device — joins the private trail (precise location). */
+  /** Committed on this device — joins the private journal (precise location). */
   own?: boolean;
   /** Ambient seed — the placeholder city until realtime lands. Public only. */
   seed?: boolean;
   /** Lab seed data — swept before the real screen renders. */
   test?: boolean;
+  /** The journal memory attached to this entry (private view only). */
+  memory?: Memory;
 };
 
 export type LivePoint = {
@@ -46,6 +65,8 @@ export type LivePoint = {
   own?: boolean;
   seed?: boolean;
   test?: boolean;
+  /** A named star: this entry carries a memory (ring in the spark shader). */
+  hasMemory?: boolean;
 };
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -70,7 +91,11 @@ function arrivalEnvelope(t: number): number {
 /* ---- private-trail persistence (device-local; never sent anywhere) ---- */
 
 const OWN_KEY = "warmth-own-moments-v1";
-const OWN_CAP = 300;
+/** The journal keeps EVERYTHING (2026-07-07, Eli: "every entry ever") — the
+ *  cap is quota protection only, evicting oldest at ~2k entries (~5 years of
+ *  daily use). The old 7-day purge is gone: entries live until the user
+ *  deletes them or the cloud journal takes over persistence. */
+const OWN_CAP = 2000;
 
 /**
  * Emotion-set migration (2026-07-02, Eli's call): the final five are
@@ -183,19 +208,28 @@ class MomentsStore {
       own: m.own,
       seed: m.seed,
       test: m.test,
+      hasMemory: hasMemoryContent(m.memory),
     };
   }
 
-  private persistOwn() {
-    if (typeof window === "undefined") return;
-    // Expired diary entries leave the device too — precise locations must
-    // never outlive the trail window in storage (review finding).
-    const cutoff = Date.now() - TRAIL.windowDays * 86400_000;
-    this.ownRaw = this.ownRaw.filter((m) => m.createdAt > cutoff).slice(-OWN_CAP);
+  private persistOwn(): boolean {
+    if (typeof window === "undefined") return false;
+    // The journal is forever (Eli, 2026-07-07): no age purge. The cap only
+    // protects the localStorage quota, evicting oldest-first at the extreme.
+    this.ownRaw = this.ownRaw.slice(-OWN_CAP);
     try {
       window.localStorage.setItem(OWN_KEY, JSON.stringify(this.ownRaw));
+      return true;
     } catch {
-      // Storage full or blocked — the map still works, the trail just won't survive reload.
+      // Quota: shed the oldest tenth once and retry — losing the distant
+      // past beats silently losing what the user just wrote (code review).
+      try {
+        this.ownRaw = this.ownRaw.slice(Math.ceil(this.ownRaw.length / 10));
+        window.localStorage.setItem(OWN_KEY, JSON.stringify(this.ownRaw));
+        return true;
+      } catch {
+        return false; // blocked entirely — callers must not claim "kept"
+      }
     }
   }
 
@@ -223,16 +257,61 @@ class MomentsStore {
       this.version++;
     }
 
-    // Your trail: separate LivePoint (its freshness runs on the 7-day clock).
-    if (m.own && !m.test && Date.now() - m.createdAt < TRAIL.windowDays * 86400_000) {
+    // Your journal: every own entry, forever — no age gate (Eli, 2026-07-07).
+    if (m.own && !m.test) {
       this.ownPoints = [...this.ownPoints, this.makePoint(m, quiet)];
       this.ownIds.add(m.id);
       this.ownVersion++;
       this.ownRaw.push(m); // rehydration re-fills the in-memory mirror too
-      if (opts?.persist !== false) this.persistOwn();
+      if (opts?.persist !== false) {
+        this.persistOwn();
+        // Fresh commit (not rehydration/seed): the dual write. One action,
+        // two destinations — anonymous public row + owned journal row.
+        void pushMomentToCloud(m);
+      }
     }
     this.dirty = true;
     return true;
+  }
+
+  /**
+   * Attach or edit the memory on a journal entry — optimistic: local state
+   * and storage update immediately; the cloud write follows when wired.
+   */
+  setMemory(id: string, memory: Memory): boolean {
+    const raw = this.ownRaw.find((m) => m.id === id);
+    if (!raw) return false;
+    raw.memory = { ...raw.memory, ...memory };
+    const point = this.ownPoints.find((p) => p.id === id);
+    if (point) point.hasMemory = hasMemoryContent(raw.memory);
+    this.ownVersion++;
+    this.dirty = true;
+    // "kept" must be TRUE: only claim success if the words actually landed
+    // in storage (quota failures were silently eaten before — code review).
+    const kept = this.persistOwn();
+    void pushMemoryToCloud(id, raw.memory);
+    return kept;
+  }
+
+  /** The full journal record for one entry (memory editor reads this). */
+  journalEntry(id: string): Moment | undefined {
+    return this.ownRaw.find((m) => m.id === id);
+  }
+
+  /**
+   * "On this day" — journal entries from this calendar date in a previous
+   * month or year (at least 3 weeks old, so last Tuesday doesn't count as
+   * a memory). Newest first.
+   */
+  onThisDay(now = new Date()): Moment[] {
+    const cutoff = now.getTime() - 21 * 86400_000;
+    return this.ownRaw
+      .filter((m) => {
+        if (m.createdAt > cutoff) return false;
+        const d = new Date(m.createdAt);
+        return d.getDate() === now.getDate() && d.getMonth() === now.getMonth();
+      })
+      .sort((a, b) => b.createdAt - a.createdAt);
   }
 
   /** The ambient placeholder city (until realtime): quiet, idempotent. */
@@ -305,26 +384,22 @@ class MomentsStore {
     }
     if (changed || dead > 0) this.version++;
 
-    // The trail (7-day clock) — same envelope, longer memory, higher floor.
+    // The journal (forever): the last week burns brightest, then a spark
+    // settles to a steady ember — old feelings dim, but NEVER die. A journal
+    // that deletes your past isn't a journal (Eli, 2026-07-07).
     const trailMs = TRAIL.windowDays * 86400_000;
     let ownChanged = false;
-    let ownDead = 0;
     for (const p of this.ownPoints) {
       const base = TRAIL.weightFloor + (1 - TRAIL.weightFloor) * ((p.intensity - 1) / 9);
-      const freshness = Math.min(1, Math.max(0, 1 - (epochNow - p.createdAt) / trailMs));
+      const freshness = Math.max(TRAIL.emberFloor, 1 - (epochNow - p.createdAt) / trailMs);
       const arrival = arrivalEnvelope((nowPerf - p.born) / arrivalMs);
       const w = base * freshness * arrival;
       if (w !== p.weight) {
         p.weight = w;
         ownChanged = true;
       }
-      if (freshness <= 0) ownDead++;
     }
-    if (ownDead > 0) {
-      this.ownPoints = this.ownPoints.filter((p) => epochNow - p.createdAt < trailMs);
-      this.ownIds = new Set(this.ownPoints.map((p) => p.id));
-    }
-    if (ownChanged || ownDead > 0) this.ownVersion++;
+    if (ownChanged) this.ownVersion++;
 
     return animating;
   }

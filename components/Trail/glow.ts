@@ -5,6 +5,7 @@
  * place). `version` keys deck.gl's updateTriggers so weight changes actually
  * reach the GPU — without it, in-place mutation is invisible.
  */
+import { ScatterplotLayer, TextLayer } from "deck.gl";
 import {
   ADDITIVE_LIGHT,
   PIGMENT_STAIN,
@@ -102,6 +103,88 @@ const getTrailRadius = (d: GlowDatum) =>
  * invisible — they hand off to watercolor pigment stains, the same trade
  * the field makes (its uMode 2). Both ride uniforms: switching is free.
  */
+/* ---- constellations: the journal at world scale --------------------- */
+
+type SparkCluster = {
+  position: [number, number];
+  hue: [number, number, number];
+  weight: number;
+  count: number;
+};
+
+/** Grid-cluster sparks into constellations (~cellPx cells at this zoom).
+ *  Position is the weight-averaged center; hue is the dominant emotion's. */
+function clusterSparks(data: LivePoint[], zoom: number): SparkCluster[] {
+  const degPerPx = 360 / (512 * Math.pow(2, zoom));
+  const cell = TRAIL.spark.cluster.cellPx * degPerPx;
+  const cells = new Map<
+    string,
+    { lng: number; lat: number; w: number; count: number; byEmotion: Map<string, { w: number; hue: [number, number, number] }> }
+  >();
+  for (const p of data) {
+    const key = `${Math.round(p.position[0] / cell)}:${Math.round(p.position[1] / cell)}`;
+    let c = cells.get(key);
+    if (!c) {
+      c = { lng: 0, lat: 0, w: 0, count: 0, byEmotion: new Map() };
+      cells.set(key, c);
+    }
+    const w = Math.max(0.05, p.weight);
+    c.lng += p.position[0] * w;
+    c.lat += p.position[1] * w;
+    c.w += w;
+    c.count++;
+    const e = c.byEmotion.get(p.emotion) ?? { w: 0, hue: p.hue };
+    e.w += w;
+    c.byEmotion.set(p.emotion, e);
+  }
+  const out: SparkCluster[] = [];
+  for (const c of cells.values()) {
+    let hue: [number, number, number] = [233, 236, 244];
+    let top = -1;
+    for (const e of c.byEmotion.values()) {
+      if (e.w > top) {
+        top = e.w;
+        hue = e.hue;
+      }
+    }
+    out.push({
+      position: [c.lng / c.w, c.lat / c.w],
+      hue,
+      weight: Math.min(1, c.w / c.count + 0.15), // pooled presence, capped
+      count: c.count,
+    });
+  }
+  return out;
+}
+
+const getClusterRadius = (d: SparkCluster) =>
+  Math.min(
+    TRAIL.spark.cluster.maxRadiusPx,
+    TRAIL.spark.cluster.baseRadiusPx + TRAIL.spark.cluster.radiusPerLog2 * Math.log2(d.count),
+  );
+
+/* Per-frame identity caches: the trail rebuilds layers every push while
+ * visible (the breath rides a time uniform), but deck re-uploads attributes
+ * whenever DATA identity changes — so clusters and ring subsets are cached
+ * on (version, quantized zoom) and reused across frames (code review). */
+let clusterCache: { key: string; clusters: SparkCluster[] } | null = null;
+let ringCache: { version: number; data: LivePoint[]; remembered: LivePoint[] } | null = null;
+
+function cachedClusters(data: LivePoint[], version: number, zoom: number): SparkCluster[] {
+  const key = `${version}:${Math.round(zoom * 4) / 4}`;
+  if (!clusterCache || clusterCache.key !== key) {
+    clusterCache = { key, clusters: clusterSparks(data, zoom) };
+  }
+  return clusterCache.clusters;
+}
+
+function cachedRemembered(data: LivePoint[], version: number): LivePoint[] {
+  if (!ringCache || ringCache.version !== version || ringCache.data !== data) {
+    ringCache = { version, data, remembered: data.filter((p) => p.hasMemory) };
+  }
+  return ringCache.remembered;
+}
+
 export function buildTrailLayers(
   data: LivePoint[],
   version: number,
@@ -109,8 +192,56 @@ export function buildTrailLayers(
   zoom: number,
   fade: number,
   paper = 0,
+  onTapEntry?: (id: string) => void,
+  onTapCluster?: (lngLat: [number, number]) => void,
 ) {
   if (fade < 0.01 || data.length === 0) return [];
+
+  // THE CONSTELLATION VIEW: zoomed out, the journal gathers. One breathing
+  // point per cell, sized by how many moments it holds; tap to descend.
+  if (zoom < TRAIL.spark.cluster.belowZoom && data.length > 1) {
+    const clusters = cachedClusters(data, version, zoom);
+    return [
+      new EmotionGlowLayer({
+        id: "journal-constellations",
+        data: clusters,
+        getPosition: (d: GlowDatum) => d.position,
+        getRadius: getClusterRadius as unknown as (d: GlowDatum) => number,
+        getFillColor,
+        updateTriggers: { getRadius: version, getFillColor: version },
+        radiusUnits: "pixels" as const,
+        stroked: false,
+        filled: true,
+        antialiasing: false,
+        pickable: true,
+        onClick: (info: { object?: SparkCluster }) => {
+          if (info.object && onTapCluster) onTapCluster(info.object.position);
+          return true;
+        },
+        timeSec,
+        radiusScale: 1,
+        radiusMaxPixels: TRAIL.spark.cluster.maxRadiusPx,
+        light: { ...TRAIL.spark.light, gain: TRAIL.gain * fade },
+        parameters: ADDITIVE_LIGHT,
+      }),
+      new TextLayer<SparkCluster>({
+        id: "journal-constellation-counts",
+        data: clusters.filter((c) => c.count > 1),
+        getPosition: (d) => d.position,
+        getText: (d) => String(d.count),
+        getSize: TRAIL.spark.countLabel.sizePx,
+        getColor: [233, 236, 244, Math.round(TRAIL.spark.countLabel.alpha * fade)],
+        getPixelOffset: [0, -18],
+        fontFamily: "Inter, system-ui, sans-serif",
+        fontWeight: 500,
+        fontSettings: { sdf: true, smoothing: 0.32 },
+        sizeUnits: "pixels" as const,
+        characterSet: "auto",
+        billboard: true,
+        parameters: { depthWriteEnabled: false },
+      }),
+    ];
+  }
   const shared = {
     data,
     getPosition,
@@ -152,14 +283,51 @@ export function buildTrailLayers(
     );
   }
   if (night > 0.01) {
+    // THE SPARKS: each moment a star — pinpoint filament core, fast-dying
+    // skirt, the per-point breath reading as a slow twinkle. Tappable.
     layers.push(
       new EmotionGlowLayer({
-        id: "trail-dots",
+        id: "journal-sparks",
         ...shared,
-        light: { ...TRAIL.light, gain: TRAIL.gain * fade * night },
+        pickable: true,
+        onClick: (info: { object?: LivePoint }) => {
+          if (info.object && onTapEntry) onTapEntry(info.object.id);
+          return true;
+        },
+        light: { ...TRAIL.spark.light, gain: TRAIL.gain * fade * night },
         parameters: ADDITIVE_LIGHT,
       }),
     );
+    // Named stars: a delicate ring around entries that carry a memory.
+    const remembered = cachedRemembered(data, version);
+    if (remembered.length > 0) {
+      layers.push(
+        new ScatterplotLayer<LivePoint>({
+          id: "journal-memory-rings",
+          data: remembered,
+          getPosition: (d) => d.position,
+          getRadius: (d) => getTrailRadius(d) * TRAIL.spark.ring.radiusFactor,
+          getLineColor: (d) =>
+            [d.hue[0], d.hue[1], d.hue[2], Math.round(TRAIL.spark.ring.alpha * fade)] as [
+              number,
+              number,
+              number,
+              number,
+            ],
+          updateTriggers: { getRadius: version, getLineColor: version },
+          radiusUnits: "pixels" as const,
+          radiusScale: shared.radiusScale,
+          radiusMaxPixels: TRAIL.maxRadiusPx * TRAIL.spark.ring.radiusFactor,
+          stroked: true,
+          filled: false,
+          lineWidthUnits: "pixels" as const,
+          getLineWidth: TRAIL.spark.ring.widthPx,
+          antialiasing: true,
+          pickable: false,
+          parameters: { depthWriteEnabled: false },
+        }),
+      );
+    }
   }
   return layers;
 }

@@ -172,27 +172,30 @@ export const FIELD = {
    *  hard enough to out-vote a real commit's hue (and cost ~26× overdraw). */
   seedMinRadiusPx: 56,
   /** Kernel falloff exponent on (1 − t²): higher = tighter heart,
-   *  longer relative skirt. The edge ALWAYS reaches zero — no rims. */
-  kernelSoftness: 2.0,
+   *  longer relative skirt. The edge ALWAYS reaches zero — no rims.
+   *  2.5 (glow-perfection pass): a hotter luminous heart with a longer,
+   *  more delicate skirt — structure you can see, never a flat blob. */
+  kernelSoftness: 2.5,
   /** Filmic knee: brightness = 1 − exp(−exposure · pooledWeight).
    *  Raises how fast pooled feeling brightens; never clips to white. */
-  exposure: 0.78,
+  exposure: 1.0,
   /** Dominance power (the mud rule knob): hues mix by Iᵖ share in OKLab.
-   *  Higher p = dominant emotion snaps harder, narrower weather fronts. */
-  dominance: 5.0,
+   *  Higher p = dominant emotion snaps harder, narrower weather fronts.
+   *  Lowered in the wow pass: wider, lusher blend bands between feelings. */
+  dominance: 4.0,
   /** Minimum front chroma as a fraction of the anchors' own chroma —
-   *  fronts rotate hue but can never wash to gray. Raised with the softened
-   *  palette so the quiet hues (lilac, seafoam) never read as gray fog. */
-  chromaFloor: 0.72,
+   *  fronts rotate hue but can never wash to gray. High on purpose: where
+   *  two feelings meet, the in-between color must be BEAUTIFUL, never mud. */
+  chromaFloor: 0.8,
   /** Shared OKLab lightness for all six anchors: equal feeling = equal
    *  light (raw brand hues span L .62–.87). */
-  anchorL: 0.76,
+  anchorL: 0.78,
   /** Overall field gain on the additive composite. */
-  gain: 0.88,
+  gain: 0.95,
   /** Ambient-seed weight dimmer: the placeholder city is a thin translucent
    *  water layer — REAL feelings (your commit, realtime) burn through it at
    *  full strength. Applies to `seed: true` moments only. */
-  seedGain: 0.38,
+  seedGain: 0.45,
   /** The wash is a CITY-SCALE impression: as you zoom into a neighborhood
    *  it dissolves (real commits stay). Kills the giant murky blobs a single
    *  dim seed became at street zoom (Ben's field report) — and drops ~290
@@ -218,12 +221,15 @@ export const TRAIL = {
   windowDays: 7,
   /** Dot radius in px at zoom 12: base + perWeight × weight (0..1).
    *  Deliberately small — these are POINTS, the opposite of the field. */
-  baseRadiusPx: 12,
-  radiusPerIntensityPx: 30,
+  baseRadiusPx: 14,
+  radiusPerIntensityPx: 36,
   maxRadiusPx: 96,
   zoomGrowth: 1.18,
   /** A week-old whisper still shows as a dim ember (0..1 weight floor). */
   weightFloor: 0.4,
+  /** Freshness floor for entries OLDER than the window: the journal is
+   *  forever — an old spark settles to this steady ember, never to zero. */
+  emberFloor: 0.35,
   gain: 1.15,
   /** Dot shading: tighter core, harder falloff than the old area glow —
    *  reads as a mark on the map, not a weather cell. */
@@ -241,6 +247,28 @@ export const TRAIL = {
    *  `ring` deeper at the rim, and a `heart` faintly lighter at the center
    *  (water pushes pigment outward as it dries) so it never reads as a disc. */
   stain: { edge: 0.88, ring: 0.28, radiusScale: 0.85, gainBoost: 1.25, heart: 0.12 },
+  /** THE NIGHT SKY (journal, revised 2026-07-07 — Eli: "like the public,
+   *  a little different"): entries wear the ONE GLOW RECIPE (constitution
+   *  rule 5 — same core, same falloff as the public light), just smaller
+   *  and more personal — a slightly brighter heart, the per-point breath
+   *  reading as a slow twinkle, rings on remembered moments. */
+  spark: {
+    light: {
+      coreRadius: GLOW.coreRadius, // the shared recipe…
+      corePeak: GLOW.corePeak * 1.15, // …with a touch more heart (mine, not weather)
+      coreWhiteness: GLOW.coreWhiteness,
+      tailFalloff: GLOW.tailFalloff,
+      peakBase: 0.5,
+      peakPerIntensity: 0.5,
+    },
+    /** A named star: entries carrying a memory wear a delicate ring. */
+    ring: { radiusFactor: 1.55, widthPx: 1.2, alpha: 130 },
+    /** Constellations: below this zoom, nearby sparks gather into one
+     *  breathing point sized by how many it holds (grid ≈ cellPx). */
+    cluster: { belowZoom: 10.5, cellPx: 72, baseRadiusPx: 10, radiusPerLog2: 7, maxRadiusPx: 44 },
+    /** Count whisper beside a constellation. */
+    countLabel: { sizePx: 10.5, alpha: 120 },
+  },
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -415,8 +443,11 @@ export const WEATHER = {
 
   /* -- bloom (v2): feeling blooms real light into the night ---------- */
   bloom: {
-    gain: 0.55, // strength of the halo pass (night only; 0 kills it)
-    threshold: 0.25, // only the brighter field blooms, never the wash
+    gain: 0.7, // strength of the halo pass (night only; 0 kills it)
+    /** Above the ambient wash (~0.22 pooled), below pockets (~0.46) and
+     *  commits (~0.66): concentrated feeling blooms, the wash never does —
+     *  the darkness between the lights is what makes the lights read. */
+    threshold: 0.26,
     scale: 0.25, // blur-target scale vs field target (quarter = soft+cheap)
   },
 

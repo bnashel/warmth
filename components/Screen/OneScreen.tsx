@@ -9,7 +9,7 @@ import { momentsStore, type Moment } from "@/lib/momentsStore";
 import { armLocation, currentFix } from "@/lib/location";
 import { panic, unlockAudio } from "@/lib/sound";
 import { ORB } from "@/components/Orb/feel";
-import { SPRING, type Emotion } from "@/lib/theme";
+import { EMOTION_HUES as EMOTION_HUES_SAFE, SPRING, type Emotion } from "@/lib/theme";
 import { Atmosphere, MissingToken } from "@/components/Map/Atmosphere";
 import { Lightning } from "@/components/Map/Lightning";
 import MapStage from "@/components/Map/MapStage";
@@ -18,6 +18,7 @@ import { CAMERA, CHOREO, MOTION } from "@/components/Map/tune";
 import { OrbFlow } from "@/components/Orb/OrbFlow";
 import { atmosphere } from "@/lib/atmosphere";
 import { WeatherPreview } from "@/components/Lab/WeatherPreview";
+import { MemoryCard } from "@/components/Trail/MemoryCard";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
 
@@ -28,10 +29,28 @@ const VIEWS = [
 type ViewKey = (typeof VIEWS)[number]["key"];
 
 /** crypto.randomUUID needs a secure context — a phone on the LAN dev URL
- *  (http://10.x.x.x) doesn't have one, and a commit must never throw. */
+ *  (http://10.x.x.x) doesn't have one, and a commit must never throw. The
+ *  fallback still emits VALID uuid shape: journal ids are uuid columns in
+ *  Postgres, and a non-uuid id would fail every cloud insert (code review). */
 function makeId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
-  return `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  const hex = (n: number) =>
+    Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+  return `${hex(8)}-${hex(4)}-4${hex(3)}-${((Math.random() * 4) | 8).toString(16)}${hex(3)}-${hex(12)}`;
+}
+
+/** "a year ago today" / "3 months ago today" — the on-this-day whisper.
+ *  Whole months, not calendar-year diff: Dec→Jan is one month, not a year. */
+function agoLabel(createdAt: number): string {
+  const now = new Date();
+  const then = new Date(createdAt);
+  const months =
+    (now.getFullYear() - then.getFullYear()) * 12 + (now.getMonth() - then.getMonth());
+  if (months >= 12) {
+    const years = Math.floor(months / 12);
+    return years === 1 ? "a year ago today" : `${years} years ago today`;
+  }
+  return months <= 1 ? "a month ago today" : `${months} months ago today`;
 }
 
 /** Session flags live in sessionStorage, which Safari can block entirely —
@@ -64,6 +83,25 @@ export default function OneScreen() {
   // The trail rehydrates from localStorage when the store module loads —
   // by first render the diary already knows if it has entries.
   const [hasOwn, setHasOwn] = useState(() => momentsStore.ownPoints.length > 0);
+  // The journal: which spark's memory is open, and today's resurfaced moment.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [onThisDay, setOnThisDay] = useState<Moment | null>(null);
+  useEffect(() => {
+    if (view !== "private") return;
+    // Greet once per session, only when the journal actually has a memory
+    // from this date in an earlier month/year.
+    if (sessionFlag("warmth-on-this-day")) return;
+    const matches = momentsStore.onThisDay();
+    if (matches.length === 0) return;
+    sessionFlag("warmth-on-this-day", true);
+    // A beat after the crossfade settles — the greeting arrives, never pops.
+    const show = window.setTimeout(() => setOnThisDay(matches[0]), 700);
+    const hide = window.setTimeout(() => setOnThisDay(null), 10_700);
+    return () => {
+      window.clearTimeout(show);
+      window.clearTimeout(hide);
+    };
+  }, [view]);
   // Paperness of the map (0 ink night → 1 light day): every loose whisper of
   // text follows it, whisper-white on ink, graphite on paper — otherwise the
   // captions vanish at noon (design-review blocker). Starts 0 (SSR-stable),
@@ -219,6 +257,7 @@ export default function OneScreen() {
           onMapReady={(m) => {
             mapRef.current = m;
           }}
+          onEntryTap={(id) => setEditingId(id)}
         />
       ) : (
         <MissingToken />
@@ -379,6 +418,69 @@ export default function OneScreen() {
           onCommit={handleCommit}
         />
       </div>
+
+      {/* The journal: tap a spark, hold the moment. */}
+      <AnimatePresence>
+        {view === "private" && editingId && (
+          // key: a fresh card per entry — state from one spark must never
+          // bleed into (or save onto) another (code-review blocker).
+          <MemoryCard key={editingId} entryId={editingId} onClose={() => setEditingId(null)} />
+        )}
+      </AnimatePresence>
+
+      {/* On this day — the journal greets you with an old feeling. */}
+      <AnimatePresence>
+        {view === "private" && onThisDay && (
+          <motion.button
+            type="button"
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={SPRING.settle}
+            onClick={() => {
+              mapRef.current?.easeTo({
+                center: [onThisDay.lng, onThisDay.lat],
+                zoom: 13,
+                duration: 1200,
+              });
+              setEditingId(onThisDay.id);
+              setOnThisDay(null);
+            }}
+            style={{
+              position: "absolute",
+              top: "calc(max(env(safe-area-inset-top, 0px), 18px) + 64px)",
+              left: "50%",
+              transform: "translateX(-50%)",
+              zIndex: 10,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "9px 16px",
+              borderRadius: 999,
+              background: "rgba(10,11,15,0.62)",
+              border: "1px solid rgba(233,236,244,0.14)",
+              backdropFilter: "blur(14px)",
+              WebkitBackdropFilter: "blur(14px)",
+              color: "rgba(233,236,244,0.85)",
+              fontSize: 12.5,
+              cursor: "pointer",
+              touchAction: "manipulation",
+            }}
+          >
+            <span
+              aria-hidden
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: "50%",
+                background: EMOTION_HUES_SAFE[onThisDay.emotion],
+                boxShadow: `0 0 8px ${EMOTION_HUES_SAFE[onThisDay.emotion]}99`,
+              }}
+            />
+            {agoLabel(onThisDay.createdAt)} — {onThisDay.emotion}
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       {/* One-time whisper: where a feeling lands without location. */}
       <AnimatePresence>
