@@ -49,15 +49,22 @@ export function MemoryCard({ entryId, onClose }: { entryId: string; onClose: () 
   const saveTimer = useRef<number | undefined>(undefined);
 
   // Optimistic save: debounce keystrokes, flush on blur/close/unmount.
+  // Dirty-gated: a card that was only OPENED never writes or claims "kept"
+  // (StrictMode's double-mount ran the unmount flush and flashed a phantom
+  // confirmation — design review).
+  const dirty = useRef(false);
   const save = (next: Memory) => {
+    dirty.current = true;
     setMemory(next);
     window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => flush(next), 600);
   };
   const flush = (next: Memory) => {
     window.clearTimeout(saveTimer.current);
+    if (!dirty.current) return;
     // Honest confirmation: "kept" only when storage really took the words.
     const ok = momentsStore.setMemory(entryId, next);
+    if (ok) dirty.current = false;
     setKept(ok ? "kept" : "full");
     window.clearTimeout(keptTimer.current);
     if (ok) keptTimer.current = window.setTimeout(() => setKept(null), 1600);
@@ -94,7 +101,9 @@ export function MemoryCard({ entryId, onClose }: { entryId: string; onClose: () 
           position: "absolute",
           left: "50%",
           bottom: "max(env(safe-area-inset-bottom, 0px), 18px)",
-          transform: "translateX(-50%)",
+          // Framer owns the transform (it animates y/scale) — a static
+          // translateX would be discarded mid-animation (design review).
+          x: "-50%",
           width: "min(400px, calc(100vw - 28px))",
           zIndex: 15,
           padding: "18px 18px 16px",

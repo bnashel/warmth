@@ -119,7 +119,13 @@ function labelColor(alpha: number, paper: number): [number, number, number, numb
 function buildBoroughLayer(zoom: number, paper: number, dims?: number[]) {
   const { from, to } = LABELS.boroughFadeOut;
   const t = Math.min(1, Math.max(0, (zoom - from) / (to - from)));
-  const opacity = 1 - t * t * (3 - 2 * t);
+  // Fade out BOTH ways: up into neighborhoods, and down into the world —
+  // at world zoom all five caps otherwise collapse onto one constellation
+  // as garbled text (design review; reachable since the journal unlocked
+  // the camera below the old minZoom).
+  const fi = LABELS.boroughFadeIn;
+  const ti = Math.min(1, Math.max(0, (zoom - fi.from) / (fi.to - fi.from)));
+  const opacity = (1 - t * t * (3 - 2 * t)) * (ti * ti * (3 - 2 * ti));
   return new TextLayer<(typeof LABELS.boroughs)[number]>({
     id: "borough-labels",
     data: LABELS.boroughs,

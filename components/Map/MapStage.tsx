@@ -74,6 +74,9 @@ export default function MapStage({
   const initialMix = view === "private" ? 1 : 0;
   const viewTarget = useRef(initialMix);
   const viewMix = useRef(initialMix);
+  // The clamp-on-arrival waiting for the flight home (public return) —
+  // held so a view flip mid-flight can cancel it (design review).
+  const pendingClamp = useRef<(() => void) | null>(null);
   useEffect(() => {
     viewTarget.current = view === "private" ? 1 : 0;
     // The journal is global — "everywhere in the world you've felt
@@ -82,6 +85,12 @@ export default function MapStage({
     // it's out of bounds, handled by mapbox's own bounds enforcement).
     const map = mapRef.current?.getMap();
     if (map && loaded.current) {
+      // Any pending clamp-on-arrival is void the moment the view changes —
+      // a stale listener would re-clamp the unlocked world (design review).
+      if (pendingClamp.current) {
+        map.off("moveend", pendingClamp.current);
+        pendingClamp.current = null;
+      }
       if (view === "private") {
         // Runtime-documented: null clears the bounds. The Map overload's
         // types are stricter than the API (the Camera overload allows null).
@@ -90,21 +99,35 @@ export default function MapStage({
       } else {
         // Re-clamping while the camera is out in the world would TELEPORT
         // it home (rule: nothing pops) — glide back first, clamp on arrival.
-        const c = map.getCenter();
-        const [[w, s], [e, n]] = CAMERA.maxBounds;
-        const outside =
-          c.lng < w || c.lng > e || c.lat < s || c.lat > n || map.getZoom() < CAMERA.minZoom;
-        const clamp = () => {
-          map.setMaxBounds(CAMERA.maxBounds);
-          map.setMinZoom(CAMERA.minZoom);
+        const isOutside = () => {
+          const c = map.getCenter();
+          const [[w, s], [e, n]] = CAMERA.maxBounds;
+          return c.lng < w || c.lng > e || c.lat < s || c.lat > n || map.getZoom() < CAMERA.minZoom;
         };
-        if (outside) {
-          map.once("moveend", clamp);
+        const flyHome = () =>
           map.flyTo({
             center: [CAMERA.initial.longitude, CAMERA.initial.latitude],
             zoom: CAMERA.initial.zoom,
             duration: 1600,
           });
+        const clamp = () => {
+          // A drag can interrupt the flight — moveend then fires with the
+          // camera still over the ocean, and clamping would teleport it.
+          // Re-fly instead; clamp only lands once we're truly home.
+          if (isOutside()) {
+            pendingClamp.current = clamp;
+            map.once("moveend", clamp);
+            flyHome();
+            return;
+          }
+          pendingClamp.current = null;
+          map.setMaxBounds(CAMERA.maxBounds);
+          map.setMinZoom(CAMERA.minZoom);
+        };
+        if (isOutside()) {
+          pendingClamp.current = clamp;
+          map.once("moveend", clamp);
+          flyHome();
         } else {
           clamp();
         }

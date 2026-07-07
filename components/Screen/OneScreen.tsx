@@ -520,7 +520,9 @@ export default function OneScreen() {
               position: "absolute",
               top: "calc(max(env(safe-area-inset-top, 0px), 18px) + 64px)",
               left: "50%",
-              transform: "translateX(-50%)",
+              // Framer owns the transform (it animates y) — a static
+              // translateX would be discarded mid-animation (design review).
+              x: "-50%",
               zIndex: 10,
               display: "flex",
               alignItems: "center",

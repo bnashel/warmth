@@ -119,6 +119,10 @@ export const LABELS = {
   boroughAlpha: 76,
   boroughSizePx: 11.5,
   boroughFadeOut: { from: 10.9, to: 11.6 },
+  /** Below the city (the journal unlocked the world): borough caps fade
+   *  OUT going down too, or all five collapse onto one constellation as
+   *  garbled text at world zoom (design review). */
+  boroughFadeIn: { from: 8.6, to: 9.4 },
   /** Borough caps dim further when bright feeling pools beneath them —
    *  no label ever fights a feeling. Pooled weight within radiusDeg of the
    *  anchor dims alpha by up to dimMax (half-effect at halfWeight). */

@@ -232,7 +232,8 @@ export function buildTrailLayers(
         getText: (d) => String(d.count),
         getSize: TRAIL.spark.countLabel.sizePx,
         getColor: [233, 236, 244, Math.round(TRAIL.spark.countLabel.alpha * fade)],
-        getPixelOffset: [0, -18],
+        // Ride above the glow whatever its size (big clusters cap at 44px).
+        getPixelOffset: (d: SparkCluster) => [0, -(getClusterRadius(d) + 8)] as [number, number],
         fontFamily: "Inter, system-ui, sans-serif",
         fontWeight: 500,
         fontSettings: { sdf: true, smoothing: 0.32 },
@@ -312,13 +313,15 @@ export function buildTrailLayers(
           data: remembered,
           getPosition: (d) => d.position,
           getRadius: (d) => getTrailRadius(d) * TRAIL.spark.ring.radiusFactor,
+          // Ring brightness follows the entry's own weight — an ember's
+          // ring must never outshine its spark (design review).
           getLineColor: (d) =>
-            [d.hue[0], d.hue[1], d.hue[2], Math.round(TRAIL.spark.ring.alpha * fade)] as [
-              number,
-              number,
-              number,
-              number,
-            ],
+            [
+              d.hue[0],
+              d.hue[1],
+              d.hue[2],
+              Math.round(TRAIL.spark.ring.alpha * fade * (0.45 + 0.55 * d.weight)),
+            ] as [number, number, number, number],
           updateTriggers: { getRadius: version, getLineColor: version },
           radiusUnits: "pixels" as const,
           radiusScale: shared.radiusScale,
