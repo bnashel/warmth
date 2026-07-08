@@ -44,6 +44,7 @@ export default function MapStage({
   view = "public",
   onMapReady,
   onEntryTap,
+  onGapTap,
 }: {
   /** public = the field (everyone); private = your journal (sparks, only you). */
   view?: "public" | "private";
@@ -51,6 +52,9 @@ export default function MapStage({
   onMapReady?: (map: MapboxMap) => void;
   /** Private view: a spark was tapped — the screen opens its memory. */
   onEntryTap?: (id: string) => void;
+  /** Private view: an aurora connection was tapped — the screen whispers
+   *  the time between its two memories (gapMs, screen x/y). */
+  onGapTap?: (gapMs: number, x: number, y: number) => void;
 }) {
   const mapRef = useRef<MapRef | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
@@ -138,6 +142,10 @@ export default function MapStage({
   useEffect(() => {
     onEntryTapRef.current = onEntryTap;
   }, [onEntryTap]);
+  const onGapTapRef = useRef(onGapTap);
+  useEffect(() => {
+    onGapTapRef.current = onGapTap;
+  }, [onGapTap]);
 
   const style = useMemo(() => buildStyle(INK, "ink-and-glow"), []);
   // DPR cap: 3× phones render near-identically at 2× on a dark map, for
@@ -221,10 +229,11 @@ export default function MapStage({
       if (field) {
         field.fade = 1 - viewMix.current;
         field.paper = atmo.paper;
+        // The wind rides ON TOP of the woven wash's base shape.
         const look = field.look;
-        look.warpAmp = SHAPES.watercolor.warpAmp + atmo.wind * WEATHER.windWarp;
-        look.drift = SHAPES.watercolor.drift + atmo.wind * WEATHER.windDrift;
-        look.streak = atmo.wind * WEATHER.windStreak;
+        look.warpAmp = SHAPES.woven.warpAmp + atmo.wind * WEATHER.windWarp;
+        look.drift = SHAPES.woven.drift + atmo.wind * WEATHER.windDrift;
+        look.streak = Math.min(1, SHAPES.woven.streak + atmo.wind * WEATHER.windStreak);
         const w = field.weather;
         w.fog = atmo.fog;
         w.wet = rain;
@@ -306,6 +315,7 @@ export default function MapStage({
               // Tap a constellation: descend toward its sparks.
               (lngLat) =>
                 map.easeTo({ center: lngLat, zoom: Math.min(zoom + 2.4, 14), duration: 900 }),
+              (gapMs, x, y) => onGapTapRef.current?.(gapMs, x, y),
             )
           : [];
         // Trail first: labels stay readable above your dots.
@@ -346,7 +356,6 @@ export default function MapStage({
           // never take the whole screen down (design-review finding).
           try {
             const field = new FieldLayer();
-            field.look = { ...SHAPES.watercolor };
             map.addLayer(field);
             fieldRef.current = field;
           } catch (err) {
@@ -377,7 +386,6 @@ export default function MapStage({
             try {
               const fresh = new FieldLayer();
               fresh.fade = fieldRef.current?.fade ?? 1;
-              fresh.look = { ...SHAPES.watercolor };
               fresh.paper = paperRef.current; // day must survive the restore too
               map.addLayer(fresh, beforeId);
               fieldRef.current = fresh;

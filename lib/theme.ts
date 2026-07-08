@@ -21,7 +21,9 @@ export const EMOTION_HUES: Record<Emotion, string> = {
   // presence as LIGHT — rich enough to stop you, never enough to shout.
   // "FIRST LIGHT" (Eli's pick, 2026-07-07 bake-off): airier and more
   // luminous — the gentlest, most dreamlike of the candidates.
-  joy: "#FACB66", // dawn gold
+  // Joy re-picked 2026-07-08: Eli's reference swatch, sampled exactly
+  // (#FFEE75, uniform across the image) — soft lemon sun, not mustard.
+  joy: "#FFEE75", // lemon sun
   energy: "#F79A6E", // peach coral
   love: "#F695BC", // petal rose
   gratitude: "#BCA8F5", // lilac veil

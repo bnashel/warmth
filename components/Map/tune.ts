@@ -139,9 +139,11 @@ export const LAMP = {
   /** Hot core: fraction of radius that burns near-peak before falloff. */
   coreRadius: 0.26,
   /** Extra brightness of the core above the tail's own peak. */
-  corePeak: 1.35,
-  /** How far the core whitens toward "hot filament" (0 = pure hue). */
-  coreWhiteness: 0.35,
+  corePeak: 1.25,
+  /** How far the core whitens toward "hot filament" (0 = pure hue).
+   *  Dropped for the woven wash (2026-07-08): the finish is MATTE — the
+   *  core burns in the hue's own light, never toward glassy white. */
+  coreWhiteness: 0.12,
   /** Falloff exponent — higher = tighter, more jewel-like skirt. */
   tailFalloff: 4.2,
   /** Brightness floor + intensity gain: dim moments glow, big ones blaze. */
@@ -193,29 +195,42 @@ export const GLOW = {
 /* emotion, brightness = amount of feeling. No individual points.      */
 /* ------------------------------------------------------------------ */
 export const FIELD = {
-  /** Kernel footprint in METERS (geographic; a feeling warms its area). */
-  radiusM: 900,
-  /** + meters per unit intensity (1..10 → up to ~60% wider). */
-  radiusPerIntensityM: 55,
-  /** Pixel clamps: min keeps one lonely commit a NEIGHBORHOOD bloom at
-   *  every zoom (never a pin); max protects DPR-3 fill-rate. CSS px. */
-  minRadiusPx: 92,
+  /** Kernel footprint in METERS — ELI'S DIAL (has ranged 1/16 → 1/8 mile,
+   *  may yet go toward 1/2; retune HERE, one line). Currently 1/8 mile:
+   *  entries read as present local glows that genuinely overlap where
+   *  people cluster — the density-to-intensity read is the product's
+   *  coolest moment and needs real overlap to exist. The WASH layer
+   *  below carries the between-space so the city never fragments. */
+  radiusM: 200,
+  /** + meters per unit intensity (1..10 → up to ~2.4× wider). */
+  radiusPerIntensityM: 30,
+  /** Pixel clamps: min keeps one lonely commit visibly present at every
+   *  zoom (a tight ember, no longer a whole-neighborhood bloom); max
+   *  protects DPR-3 fill-rate. CSS px. */
+  minRadiusPx: 38,
   maxRadiusPx: 300,
-  /** The ambient seed's own floor: the wash is a continuous SHEET, so its
-   *  kernels don't need the lonely-commit clamp — a small floor keeps the
-   *  lattice overlapping at rest zoom without the 92px blobs that pooled
-   *  hard enough to out-vote a real commit's hue (and cost ~26× overdraw). */
-  seedMinRadiusPx: 56,
+  /** THE UNDER-WASH (the no-dead-space layer): the ambient lattice keeps
+   *  its wide soft skirt — much dimmer and quieter than any entry — so
+   *  zoomed out the city still reads as one continuous glowing field
+   *  while entries stay tight and defined up close. */
+  wash: { radiusM: 900, minRadiusPx: 56, gain: 0.42 },
   /** Kernel falloff exponent on (1 − t²): higher = tighter heart,
    *  longer relative skirt. The edge ALWAYS reaches zero — no rims. */
   kernelSoftness: 2.5,
   /** Filmic knee: brightness = 1 − exp(−exposure · pooledWeight).
-   *  Raises how fast pooled feeling brightens; never clips to white. */
-  exposure: 1.05,
+   *  Raises how fast pooled feeling brightens; never clips to white.
+   *  Raised 2026-07-08 (Eli: brighter, still warm/matte) — with the knee
+   *  and the never-white cap, extra exposure deepens the DENSITY read:
+   *  stacked feeling climbs visibly faster than a lone entry. */
+  exposure: 1.2,
   /** THE LUMINOUS HEART: where density peaks, the hue itself lifts toward
    *  light (OKLab L, capped well below white) — aurora over a dark planet,
-   *  never fog banks. Rides the knee output b across [from, to]. */
-  heart: { from: 0.55, to: 0.95, lift: 0.1 },
+   *  never fog banks. Rides the knee output b across [from, to]. Lift
+   *  halved for the woven wash: matte depth, not a glassy hot spot. */
+  /** Lift raised 2026-07-08: where entries STACK, the pooled heart must
+   *  read obviously warmer and more alive — the density payoff. Still
+   *  hard-capped by the never-white ceiling. */
+  heart: { from: 0.5, to: 0.92, lift: 0.09 },
   /** LAND MASK: the field clips to the coastline (rivers and harbor stay
    *  pure void; fields inherit the city's silhouette). Built by
    *  scripts/build-landmask.mjs from the neighborhood polygons; sampled in
@@ -225,11 +240,23 @@ export const FIELD = {
    *  close = the field THINS into breathing ambient light so the city
    *  shows through (never to zero). Applies to the field + bloom passes;
    *  the streetlight stays — it IS the city glowing through. */
-  zoomThin: { from: 13.0, to: 16.3, floor: 0.35 },
+  /** Floor raised 2026-07-08 (was 0.35): approaching a cluster must make
+   *  it MORE intense, never thinner — the zoom narrative now only takes
+   *  the field down to a strong ambient, and density does the talking. */
+  zoomThin: { from: 13.0, to: 16.3, floor: 0.55 },
+  /** CLOSE-ZOOM GRAIN (2026-07-08): fine geographic texture inside the
+   *  glow — anchored in mercator space (meters, not pixels), so zooming
+   *  in reveals real structure instead of a scaled-up blur. Fades in
+   *  across zoomIn; amp is brightness modulation (matte, never sparkle);
+   *  cellM is the coarsest cell (fbm adds 2 finer octaves below it). */
+  grain: { amp: 0.16, cellM: 260, zoomIn: { from: 12.0, to: 14.0 } },
   /** Dominance power (the mud rule knob): hues mix by Iᵖ share in OKLab.
    *  Higher p = dominant emotion snaps harder, narrower weather fronts.
-   *  Lowered in the wow pass: wider, lusher blend bands between feelings. */
-  dominance: 4.0,
+   *  Lowered for the woven wash (2026-07-08): wide melding fronts — the
+   *  weave threads give them fabric, the chroma floor keeps them COLOR, so
+   *  neighbors flow into each other with no seam and no mud. (2.2 washed
+   *  whole boroughs toward one mauve average — regions lost their names.) */
+  dominance: 2.8,
   /** Minimum front chroma as a fraction of the anchors' own chroma —
    *  fronts rotate hue but can never wash to gray. High on purpose: where
    *  two feelings meet, the in-between color must be BEAUTIFUL, never mud. */
@@ -237,18 +264,29 @@ export const FIELD = {
   /** Shared OKLab lightness for all six anchors: equal feeling = equal
    *  light (raw brand hues span L .62–.87). */
   anchorL: 0.78,
-  /** Overall field gain on the additive composite. */
-  gain: 1.0,
-  /** Ambient-seed weight dimmer: the placeholder city is a thin translucent
-   *  water layer — REAL feelings (your commit, realtime) burn through it at
-   *  full strength. Applies to `seed: true` moments only. */
+  /** Anchor chroma push (2026-07-08, Eli: "pop more, never neon"): the
+   *  five hues carry a touch more pigment. Rides every path — the field,
+   *  the fronts (chromaFloor is relative to the boosted anchors), the
+   *  streetlight catch. 1 = the raw First Light palette. */
+  anchorChroma: 1.15,
+  /** Overall field gain on the additive composite. 1.15 (2026-07-08):
+   *  a touch more luminosity across the board — warm pop, hue untouched. */
+  gain: 1.15,
+  /** Pocket-seed weight dimmer: the placeholder neighborhood moods sit
+   *  below any real feeling — a commit burns through at full strength.
+   *  (The lattice wash has its own, quieter gain: FIELD.wash.gain.) */
   seedGain: 0.45,
   /** The wash is a CITY-SCALE impression: as you zoom into a neighborhood
-   *  it dissolves (real commits stay). Kills the giant murky blobs a single
-   *  dim seed became at street zoom (Ben's field report) — and drops ~290
-   *  max-size kernels of GPU overdraw right when tiles are loading, which
-   *  is most of the zoom-in stutter. */
-  seedZoomFade: { from: 12.6, to: 14.0 },
+   *  it thins (real commits stay). Kills the giant murky blobs a single
+   *  dim seed became at street zoom (Ben's field report) — and drops most
+   *  of the wash's GPU overdraw right when tiles are loading. `floor` keeps
+   *  a quiet ambient base at street zoom: no place ever reads as a void
+   *  (Eli, 2026-07-08 — was 0, which re-opened dead space up close). */
+  /** Pushed later + shallower 2026-07-08 (medium-zoom valley): the wash
+   *  was dropping exactly where entries were still small, opening dead
+   *  gaps at z12.5–13.5. It now holds full through the middle distance
+   *  and settles higher, so the ground never falls out of the picture. */
+  seedZoomFade: { from: 13.2, to: 14.8, floor: 0.38 },
   /** Living tide: subtle brightness breath. */
   breath: { periodMs: 2500, amp: 0.045 },
   /** Streetlight signature: the field multiplied onto the base map so
@@ -277,13 +315,46 @@ export const TRAIL = {
   /** Freshness floor for entries OLDER than the window: the journal is
    *  forever — an old spark settles to this steady ember, never to zero. */
   emberFloor: 0.35,
-  gain: 1.15,
+  /** Quieted 2026-07-08 (Eli: the private view rendered too LOUD for an
+   *  intimate space) — same matte, non-neon bar as the public field. */
+  gain: 0.8,
   /** The paper-day stain is a MARK, not a glow (Ben: the glow tail read as
    *  180p blur). Real watercolor: flat wash to `edge` of the radius with a
    *  short hand-soft feather (0.74 read as blur — Eli), pigment pooling
    *  `ring` deeper at the rim, and a `heart` faintly lighter at the center
    *  (water pushes pigment outward as it dries) so it never reads as a disc. */
   stain: { edge: 0.88, ring: 0.28, radiusScale: 0.85, gainBoost: 1.25, heart: 0.12 },
+  /** THE MEMORY NODE (2026-07-08 full redesign, Eli): a matte pigment
+   *  gem, not a point of light — solid hue at pigment depth with a
+   *  darker rim (sealing-wax edge), a small pure-hue glint at the heart,
+   *  and the living-blot silhouette. ZERO white anywhere in the node. */
+  node: {
+    /** Solid to this fraction of the radius, then a short soft edge. */
+    edge: 0.86,
+    /** How much darker the pigment pools at the rim (0..1). */
+    rim: 0.34,
+    /** Pure-hue glint at the heart (additive within the matte pass). */
+    glint: 0.5,
+  },
+  /** THE AURORA (2026-07-08, Eli): connections between memories as
+   *  flowing curtains — soft feathered ribbons whose light drifts and
+   *  shimmers along real geography, dimming into the past. Tap one to
+   *  learn how far apart the two moments were. Geometry: Catmull-Rom
+   *  with adaptive tautness + a gentle meander; shading: AuroraLayer. */
+  aurora: {
+    widthPx: 13,
+    /** Peak curtain opacity (feather/flow reduce from here). */
+    alpha: 0.5,
+    subdiv: 18,
+    tautness: 0.72,
+    /** Perpendicular meander amplitude as a fraction of span length. */
+    meander: 0.12,
+    /** Noise cells per degree (curtain texture scale). */
+    noiseScale: 620,
+    flowSpeed: 0.055,
+    /** The far past dims to this fraction (newest span = 1). */
+    oldDim: 0.4,
+  },
   /** THE JOURNAL EXTRAS (2026-07-07): the candle keeps the LAMP's core and
    *  falloff — but its SILHOUETTE is free-form (Eli: "less circular").
    *  These are only what a journal adds: the living-blot wobble, memory
@@ -292,6 +363,10 @@ export const TRAIL = {
     /** Max inward dent of the silhouette (fraction of radius). 0 = circle;
      *  ~0.4 = a clearly organic, slowly-shifting blot, unique per entry. */
     wobble: 0.42,
+    /** THE WOVEN WASH in the journal (2026-07-08): the spark's skirt
+     *  settles into this many translucent tiers — the same layered matte
+     *  depth as the public field, at diary scale. 0 = smooth skirt. */
+    tiers: 3,
     /** A named star: entries carrying a memory wear a delicate ring. */
     ring: { radiusFactor: 1.55, widthPx: 1.2, alpha: 130 },
     /** Constellations: below this zoom, nearby sparks gather into one
@@ -352,25 +427,53 @@ export const ATMOSPHERE = {
 } as const;
 
 /* ------------------------------------------------------------------ */
-/* THE SHAPE OF FEELING — how the field draws emotion (Look panel).    */
-/* All four are the same shader; a mode is just uniform values, so     */
-/* switching is instant and free. Units: warpAmp is a fraction of the  */
-/* screen the edges may wander; scale is noise cells across the width; */
-/* drift is how fast the flow crawls; streak stretches the flow along  */
-/* one axis (0 = round, 1 = fully ribboned); band modulates brightness */
-/* into aurora curtains (0 = off).                                     */
+/* THE SHAPE OF FEELING — how the field's edges move. One shape now:   */
+/* the woven wash (Eli's silk+pigment merge, 2026-07-08). Units:       */
+/* warpAmp is a fraction of the screen the edges may wander; scale is  */
+/* noise cells across the width; drift is how fast the flow crawls;    */
+/* streak stretches the flow along the wind (0 round, 1 ribboned);     */
+/* band modulates brightness into slow luminous curtains (0 = off).    */
 /* ------------------------------------------------------------------ */
 export const SHAPES = {
-  /** The original: soft circular blooms, edges untouched. */
-  bloom: { warpAmp: 0, scale: 8, drift: 0, streak: 0, band: 0 },
-  /** Ink on wet paper: blotted, seeping edges; barely-moving weather.
-   *  warpAmp raised 2026-07-06: silhouettes come from data + geography,
-   *  never perfect circles (constitution / phase 3). */
-  watercolor: { warpAmp: 0.085, scale: 10, drift: 0.01, streak: 0, band: 0 },
-  /** Drops dispersing in water: streakier, curling, visibly alive. */
-  ink: { warpAmp: 0.095, scale: 14, drift: 0.05, streak: 0.5, band: 0 },
-  /** Northern lights: feeling stretched into flowing ribbons. */
-  aurora: { warpAmp: 0.09, scale: 6.5, drift: 0.02, streak: 0.9, band: 0.5 },
+  /** THE WOVEN WASH: edges brushed out along the wind, alive but quiet.
+   *  warpAmp/drift cut 2026-07-08 (Eli: an emotion's LOCATION is a fact):
+   *  the old 0.105 warp visibly sloshed small pools to new positions —
+   *  now edges undulate in place and centers stay pinned to the data.
+   *  (The bloom/watercolor/ink/aurora exploration presets and the 07-08
+   *  ember/silk/pigment directions are retired — docs/later.md.) */
+  woven: { warpAmp: 0.045, scale: 11, drift: 0.01, streak: 0.35, band: 0.25 },
+} as const;
+
+/* ------------------------------------------------------------------ */
+/* THE WOVEN WASH — the field's one identity (Eli's pick, 2026-07-08:  */
+/* silk's living color motion through pigment's layered matte depth).  */
+/* From SILK: the hue itself flows with the field's motion (shimmer),  */
+/* and neighboring feelings INTERLEAVE in threads where they meet      */
+/* (weave) instead of averaging. From PIGMENT: pooled feeling settles  */
+/* into translucent tiers with a breath of edge-darkening at every     */
+/* contour (tiers) — depth from stacked layers, matte, never glassy.   */
+/* ------------------------------------------------------------------ */
+export const WOVEN = {
+  /** Thread interleave at emotion fronts: amp = how far a thread can
+   *  tilt the local vote; scale = threads across the screen width. */
+  weave: { amp: 0.6, scale: 11 },
+  /** Hue flow along the wind axis (max OKLab rotation, radians): the
+   *  color genuinely moves — motion is never just alpha. */
+  shimmer: 0.35,
+  /** DATA-DRIVEN MOTION (Eli, 2026-07-08): the colors-interacting effects
+   *  (shimmer + weave) only run where two feelings GENUINELY overlap in
+   *  the pooled data. Gate = runner-up emotion's local intensity as a
+   *  share of the leader's, smoothstepped across [from, to]: below from,
+   *  a blob is alone and its hue holds perfectly still; above to, a true
+   *  meeting of feelings flows at full strength. */
+  overlap: { from: 0.12, to: 0.45 },
+  /** Layered matte depth: count = translucent tiers; rim = pigment
+   *  pooling darker along each contour; richen = deep pools carry more
+   *  pigment (more chroma, slightly deeper — matte); crawl = how far
+   *  the contours wander, like paint still deciding where to dry;
+   *  keep = how much of the tiering shows over the live wash beneath
+   *  (1 = full posterization, 0 = none). */
+  tiers: { count: 5, rim: 0.16, richen: 0.55, crawl: 0.05, keep: 0.85 },
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -475,7 +578,8 @@ export const WEATHER = {
   snowNightLift: 0.06, // ink lifts a breath (snow-lit sky)
 
   /* -- wind: the flow follows the real air --------------------------- */
-  windWarp: 0.05, // + warp amplitude at full wind
+  windWarp: 0.02, // + warp amplitude at full wind (trimmed 2026-07-08:
+  // even at full storm, no feeling may visibly leave its place)
   windDrift: 0.06, // + drift speed at full wind
   windStreak: 0.35, // anisotropy along the real wind axis
 
@@ -489,7 +593,8 @@ export const WEATHER = {
 
   /* -- bloom (v2): feeling blooms real light into the night ---------- */
   bloom: {
-    gain: 0.7, // strength of the halo pass (night only; 0 kills it)
+    gain: 0.35, // halo strength — halved for the woven wash (2026-07-08):
+    // the finish is MATTE; the halo is a whisper of night air, never gloss
     /** Above the ambient wash (~0.22 pooled), below pockets (~0.46) and
      *  commits (~0.66): concentrated feeling blooms, the wash never does —
      *  the darkness between the lights is what makes the lights read. */
@@ -499,7 +604,10 @@ export const WEATHER = {
      *  interior exceeds the threshold everywhere, and halo-over-field
      *  converged the whole screen toward white (Eli: "I do not want it in
      *  white"). It bows out on approach. */
-    closeFade: { from: 12.0, to: 13.2 },
+    /** Extended 2026-07-08: the halo was bowing out at 13.2 — the exact
+     *  middle distance — taking the field's cohesion with it. It now
+     *  holds through the valley and is gone by the close view. */
+    closeFade: { from: 12.8, to: 14.2 },
   },
 
   /* -- precipitation (v2): visible weather between you and the city --- */
@@ -575,8 +683,11 @@ export const INK = {
   boundary: "rgba(233,236,244,0.075)", // hand-drawn seams between places
   boundaryWidth: 1.0,
   road: "#C7CBD6", // hairlines in cool gray — structure, not light
-  roadAlpha: { highway: 0.26, avenue: 0.16, local: 0.09, service: 0.05 },
-  roadWidth: { highway: 2.2, avenue: 1.35, local: 0.7, service: 0.45 }, // px at fade-in end
+  // ramp/tunnel (2026-07-08): interchange links as a quiet late tier
+  // (portal rotaries read as scribbles at arterial weight — Eli), and a
+  // whisper of tunnel continuation so no street dead-ends at a portal.
+  roadAlpha: { highway: 0.26, avenue: 0.16, local: 0.09, service: 0.05, ramp: 0.07, tunnel: 0.055 },
+  roadWidth: { highway: 2.2, avenue: 1.35, local: 0.7, service: 0.45, ramp: 0.6, tunnel: 1.0 }, // px at fade-in end
 } as const;
 
 export type CandidatePalette = typeof INK;

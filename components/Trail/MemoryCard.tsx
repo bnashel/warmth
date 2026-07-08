@@ -4,10 +4,12 @@
  * The memory card — tap a spark, hold the moment.
  *
  * A quiet glass card for one journal entry: when and what you felt, plus
- * the memory you attach to it — words, a song, (soon) a photo. Saves are
+ * the memory you attach — one journaling prompt ("how did you feel?") and
+ * a photo. That is the complete set (Eli, 2026-07-08). The photo is
+ * local-first like the words: picked, downscaled on-device, stored with
+ * the entry; it uploads to Storage when the cloud lands. Saves are
  * optimistic: every edit lands in the store (and localStorage) on blur or
- * after a short pause, with a whispered "kept" as confirmation. The cloud
- * write rides the same call once Supabase is linked.
+ * after a short pause, with a whispered "kept" as confirmation.
  */
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -18,6 +20,31 @@ import { isSignedIn } from "@/lib/auth";
 import { isSupabaseConfigured } from "@/lib/supabase";
 
 const MAX_DESCRIPTION = 2000;
+
+/** Longest edge of the stored photo (px). Local-first storage rides
+ *  localStorage for now, so the photo is shrunk hard on-device: a 640px
+ *  JPEG (~60–120 KB) keeps years of entries inside the quota; the honest
+ *  "couldn't keep" path already covers the day it fills anyway. */
+const PHOTO_MAX_PX = 640;
+
+async function shrinkPhoto(file: File): Promise<string | null> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, PHOTO_MAX_PX / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close();
+    return canvas.toDataURL("image/jpeg", 0.72);
+  } catch {
+    return null; // unreadable file — the card simply stays photo-less
+  }
+}
 
 function whenLabel(createdAt: number): string {
   const d = new Date(createdAt);
@@ -77,20 +104,21 @@ export function MemoryCard({ entryId, onClose }: { entryId: string; onClose: () 
     memoryRef.current = memory;
   }, [memory]);
 
-  // Photo: optimistic local preview while it uploads, then the signed URL.
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  // Photo: LOCAL-FIRST (instant, offline — a downscaled data URL kept with
+  // the entry) AND synced to Storage when signed in (so it appears on your
+  // other devices). The device that took it shows its own copy; another
+  // device fetches the Storage original via a signed URL.
+  const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
-  const [photoError, setPhotoError] = useState(false);
-  const fileRef = useRef<HTMLInputElement | null>(null);
-  const canPhoto = isSupabaseConfigured; // the bucket is real only with a project
+  const canSyncPhoto = isSupabaseConfigured && isSignedIn();
 
-  // Load an existing photo's viewable URL when the card opens.
+  // No local copy but a synced path (another device) → fetch a viewable URL.
   useEffect(() => {
     let live = true;
-    const path = entry?.memory?.photoPath;
-    if (path && canPhoto) {
-      void signedPhotoUrl(path).then((u) => {
-        if (live) setPhotoUrl(u);
+    const mem = entry?.memory;
+    if (mem?.photoPath && !mem.photo && isSupabaseConfigured) {
+      void signedPhotoUrl(mem.photoPath).then((u) => {
+        if (live) setRemoteUrl(u);
       });
     }
     return () => {
@@ -101,27 +129,23 @@ export function MemoryCard({ entryId, onClose }: { entryId: string; onClose: () 
 
   const onPickPhoto = async (file: File | undefined) => {
     if (!file) return;
-    if (!isSignedIn() || !canPhoto) {
-      setPhotoError(true);
-      return;
+    // Instant + offline: shrink on-device and keep it with the entry.
+    const dataUrl = await shrinkPhoto(file);
+    if (!dataUrl) return;
+    save({ ...memoryRef.current, photo: dataUrl });
+    // Cross-device: upload the original to Storage when signed in. A failed
+    // upload is harmless — the local copy is already kept.
+    if (canSyncPhoto) {
+      setPhotoBusy(true);
+      const { path } = await uploadMemoryPhoto(entryId, file);
+      setPhotoBusy(false);
+      if (path) flush({ ...memoryRef.current, photo: dataUrl, photoPath: path });
     }
-    setPhotoError(false);
-    setPhotoBusy(true);
-    const preview = URL.createObjectURL(file); // instant optimistic thumbnail
-    setPhotoUrl(preview);
-    const { path, error } = await uploadMemoryPhoto(entryId, file);
-    setPhotoBusy(false);
-    if (error || !path) {
-      setPhotoError(true);
-      URL.revokeObjectURL(preview);
-      setPhotoUrl(entry?.memory?.photoPath ? photoUrl : null);
-      return;
-    }
-    // Persist the path through the same optimistic save (→ pushMemoryToCloud).
-    flush({ ...memoryRef.current, photoPath: path });
-    const signed = await signedPhotoUrl(path);
-    URL.revokeObjectURL(preview);
-    if (signed) setPhotoUrl(signed);
+  };
+
+  const removePhoto = () => {
+    setRemoteUrl(null);
+    save({ ...memoryRef.current, photo: undefined, photoPath: undefined });
   };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -188,8 +212,8 @@ export function MemoryCard({ entryId, onClose }: { entryId: string; onClose: () 
         </div>
 
         <textarea
-          aria-label="What do you want to remember?"
-          placeholder="what do you want to remember about this?"
+          aria-label="How did you feel?"
+          placeholder="how did you feel?"
           value={memory.description ?? ""}
           maxLength={MAX_DESCRIPTION}
           rows={3}
@@ -198,85 +222,82 @@ export function MemoryCard({ entryId, onClose }: { entryId: string; onClose: () 
           style={inputStyle}
         />
 
-        <div style={{ display: "flex", gap: 8 }}>
-          <input
-            aria-label="Song title"
-            placeholder="a song…"
-            value={memory.songTitle ?? ""}
-            maxLength={200}
-            onChange={(e) => save({ ...memory, songTitle: e.target.value })}
-            onBlur={() => flush(memoryRef.current)}
-            style={{ ...inputStyle, flex: 1.4 }}
-          />
-          <input
-            aria-label="Artist"
-            placeholder="by…"
-            value={memory.songArtist ?? ""}
-            maxLength={200}
-            onChange={(e) => save({ ...memory, songArtist: e.target.value })}
-            onBlur={() => flush(memoryRef.current)}
-            style={{ ...inputStyle, flex: 1 }}
-          />
-        </div>
-
-        {/* Photo thumbnail, once one is attached. */}
-        <AnimatePresence>
-          {photoUrl && (
-            <motion.img
-              key="photo"
-              src={photoUrl}
-              alt="A photo you kept with this moment"
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: photoBusy ? 0.6 : 1, scale: 1 }}
-              exit={{ opacity: 0 }}
-              transition={SPRING.settle}
+        {/* The photo — a memory you can see again. Local-first; a small
+            "syncing…" whisper while it also uploads to your account. */}
+        {memory.photo || remoteUrl ? (
+          <div style={{ position: "relative" }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={memory.photo ?? remoteUrl ?? ""}
+              alt="Photo attached to this memory"
               style={{
                 width: "100%",
-                maxHeight: 200,
+                maxHeight: 180,
                 objectFit: "cover",
                 borderRadius: 12,
-                border: "1px solid rgba(233,236,244,0.12)",
+                display: "block",
               }}
             />
-          )}
-        </AnimatePresence>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {/* Photo picker (native input, no deps). Honest about needing sign-in. */}
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            hidden
-            onChange={(e) => void onPickPhoto(e.target.files?.[0])}
-          />
-          {canPhoto ? (
             <button
               type="button"
-              onClick={() => fileRef.current?.click()}
-              disabled={photoBusy}
+              onClick={removePhoto}
               style={{
-                background: "rgba(233,236,244,0.06)",
-                border: "1px solid rgba(233,236,244,0.14)",
-                borderRadius: 10,
-                padding: "7px 12px",
-                color: "rgba(233,236,244,0.8)",
-                fontSize: 12,
+                position: "absolute",
+                top: 8,
+                right: 8,
+                border: "1px solid rgba(233,236,244,0.18)",
+                borderRadius: 999,
+                background: "rgba(10,11,15,0.66)",
+                color: "rgba(233,236,244,0.75)",
+                fontSize: 11,
+                padding: "3px 9px",
                 cursor: "pointer",
               }}
             >
-              {photoBusy ? "adding…" : photoUrl ? "change photo" : "add a photo"}
+              remove
             </button>
-          ) : (
-            <span style={{ fontSize: 11.5, color: "rgba(233,236,244,0.35)" }}>
-              photos arrive with cloud sync
-            </span>
-          )}
-          {photoError && (
-            <span style={{ fontSize: 11.5, color: "rgba(244,188,140,0.95)" }}>
-              couldn&apos;t add that photo
-            </span>
-          )}
+            {photoBusy && (
+              <span
+                style={{
+                  position: "absolute",
+                  bottom: 8,
+                  left: 8,
+                  fontSize: 10.5,
+                  color: "rgba(233,236,244,0.7)",
+                  background: "rgba(10,11,15,0.6)",
+                  borderRadius: 999,
+                  padding: "2px 8px",
+                }}
+              >
+                syncing…
+              </span>
+            )}
+          </div>
+        ) : (
+          <label
+            style={{
+              ...inputStyle,
+              cursor: "pointer",
+              textAlign: "center",
+              color: "rgba(233,236,244,0.55)",
+              userSelect: "none",
+            }}
+          >
+            add a photo
+            <input
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                void onPickPhoto(file);
+                e.target.value = ""; // same file re-pickable after remove
+              }}
+            />
+          </label>
+        )}
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <AnimatePresence>
             {kept && (
               <motion.span

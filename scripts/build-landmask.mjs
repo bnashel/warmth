@@ -29,7 +29,11 @@ const x1 = mercX(BOUNDS.east);
 const yTop = mercY(BOUNDS.north); // smaller mercator y = north
 const yBot = mercY(BOUNDS.south);
 
-const geo = JSON.parse(readFileSync("public/data/nyc-neighborhoods.json", "utf8"));
+// The LAND file (build-neighborhoods.mjs): every NTA polygon including
+// parks, airports, and cemeteries. The neighborhoods file alone left
+// Central Park, Prospect Park, JFK… as holes — the field died over every
+// big park as if it were water (Eli's park bug, 2026-07-08).
+const geo = JSON.parse(readFileSync("public/data/nyc-landareas.json", "utf8"));
 const mask = new Uint8Array(SIZE * SIZE);
 
 /** Scanline even-odd fill of one polygon (outer ring + holes) in texel space. */
@@ -68,13 +72,9 @@ function fillPolygon(rings) {
 }
 
 let polys = 0;
-for (const f of geo.features) {
-  const g = f.geometry;
-  const shapes = g.type === "Polygon" ? [g.coordinates] : g.coordinates;
-  for (const rings of shapes) {
-    fillPolygon(rings);
-    polys++;
-  }
+for (const rings of geo.polygons) {
+  fillPolygon(rings);
+  polys++;
 }
 
 // Soft shoreline: a small separable box blur so the field laps the coast

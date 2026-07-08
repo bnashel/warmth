@@ -55,8 +55,8 @@ export async function claimLocalJournal(): Promise<void> {
     location: `SRID=4326;POINT(${m.lng} ${m.lat})`,
     created_at: new Date(m.createdAt).toISOString(),
     description: m.memory?.description ?? null,
-    song_title: m.memory?.songTitle ?? null,
-    song_artist: m.memory?.songArtist ?? null,
+    // Song columns still exist in the schema but are no longer written
+    // (Eli, 2026-07-08: the prompt + a photo is the complete set).
     photo_path: m.memory?.photoPath ?? null,
   }));
   // Idempotent: entries already claimed (e.g. committed while signed in) are
@@ -77,7 +77,7 @@ export async function hydrateJournalFromCloud(): Promise<void> {
   // hands back lng/lat (not WKB) so there's nothing to parse.
   const { data, error } = await supabase
     .from("journal_mine")
-    .select("id, emotion, intensity, lng, lat, created_at, description, song_title, song_artist, photo_path")
+    .select("id, emotion, intensity, lng, lat, created_at, description, photo_path")
     .order("created_at", { ascending: false });
   if (error) {
     if (process.env.NODE_ENV !== "production") {
@@ -96,8 +96,8 @@ export async function hydrateJournalFromCloud(): Promise<void> {
       own: true,
       memory: {
         description: (row.description as string) ?? undefined,
-        songTitle: (row.song_title as string) ?? undefined,
-        songArtist: (row.song_artist as string) ?? undefined,
+        // `photo` (the local data URL) never lives server-side; another
+        // device fetches the Storage original from photoPath (signed URL).
         photoPath: (row.photo_path as string) ?? undefined,
       },
     };

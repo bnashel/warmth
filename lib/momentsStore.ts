@@ -23,16 +23,18 @@ import type { PublicCell } from "@/lib/publicField";
 
 /** A memory counts once it carries any real content. */
 function hasMemoryContent(memory: Memory | undefined): boolean {
-  return Boolean(
-    memory && (memory.description?.trim() || memory.songTitle?.trim() || memory.photoPath),
-  );
+  return Boolean(memory && (memory.description?.trim() || memory.photo || memory.photoPath));
 }
 
-/** The memory a journal entry can carry — all optional, editable forever. */
+/** The memory a journal entry can carry — all optional, editable forever.
+ *  The complete set (Eli, 2026-07-08): the journaling prompt + a photo.
+ *  (Song fields removed from the type; old localStorage/DB rows keeping
+ *  them are harmless — unknown keys ride the spread untouched.) */
 export type Memory = {
-  description?: string; // freeform, ≤2000 chars (enforced at the editor)
-  songTitle?: string;
-  songArtist?: string;
+  description?: string; // "how did you feel?" ≤2000
+  /** The photo, local-first: a downscaled data URL living with the entry
+   *  (same story as the words). Uploads to Storage when the cloud lands. */
+  photo?: string;
   /** Supabase Storage path once photos sync; unused until the cloud lands. */
   photoPath?: string;
 };
@@ -48,6 +50,9 @@ export type Moment = {
   own?: boolean;
   /** Ambient seed — the placeholder city until realtime lands. Public only. */
   seed?: boolean;
+  /** The under-wash lattice (subset of seed): wide dim skirt, never an
+   *  entry — the no-dead-space layer (2026-07-08). */
+  wash?: boolean;
   /** Lab seed data — swept before the real screen renders. */
   test?: boolean;
   /** The journal memory attached to this entry (private view only). */
@@ -65,6 +70,7 @@ export type LivePoint = {
   born: number; // performance.now() at entry — drives the arrival bloom
   own?: boolean;
   seed?: boolean;
+  wash?: boolean;
   test?: boolean;
   /** A named star: this entry carries a memory (ring in the spark shader). */
   hasMemory?: boolean;
@@ -208,6 +214,7 @@ class MomentsStore {
       born: quiet ? performance.now() - CHOREO.arrival.durationMs * 2 : performance.now(),
       own: m.own,
       seed: m.seed,
+      wash: m.wash,
       test: m.test,
       hasMemory: hasMemoryContent(m.memory),
     };
@@ -447,8 +454,11 @@ class MomentsStore {
       const base = GLOW.weightFloor + (1 - GLOW.weightFloor) * ((p.intensity - 1) / 9);
       const freshness = Math.min(1, Math.max(0, 1 - (epochNow - p.createdAt) / windowMs));
       const arrival = arrivalEnvelope((nowPerf - p.born) / arrivalMs);
-      // The ambient seed is a thin glaze; real feelings burn at full weight.
-      const w = base * freshness * arrival * (p.seed ? FIELD.seedGain : 1);
+      // The ambient seed is a thin glaze; real feelings burn at full
+      // weight — and the under-wash lattice is quieter still (the
+      // no-dead-space layer, never mistakable for an entry).
+      const w =
+        base * freshness * arrival * (p.wash ? FIELD.wash.gain : p.seed ? FIELD.seedGain : 1);
       if (w !== p.weight) {
         p.weight = w;
         changed = true;

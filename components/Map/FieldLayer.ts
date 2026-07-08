@@ -19,7 +19,7 @@
 import mapboxgl, { type CustomLayerInterface, type Map as MapboxMap } from "mapbox-gl";
 import { EMOTION_HUES, EMOTIONS } from "@/lib/theme";
 import type { LivePoint } from "@/lib/momentsStore";
-import { CAMERA, FIELD, SHAPES, WEATHER } from "./tune";
+import { CAMERA, FIELD, SHAPES, WEATHER, WOVEN } from "./tune";
 
 /* ---------------- OKLab (Björn Ottosson, via components/Orb/oklch.ts) --- */
 
@@ -188,6 +188,16 @@ uniform float uWaterAtten;
 // THE LUMINOUS HEART: density peaks lift toward light (OKLab L), capped
 // far below white — aurora, never fog.
 uniform vec3 uHeart;      // from, to, lift
+// THE WOVEN WASH (Eli's silk+pigment merge, 2026-07-08 — tune.ts WOVEN):
+uniform vec2 uWeave;      // thread interleave at fronts: amp, scale
+uniform float uShimmer;   // hue flow along the wind (max OKLab rotation)
+uniform vec4 uTiers;      // matte layers: count, rim, richen, crawl
+uniform float uTierKeep;  // tiering over the live wash beneath (0..1)
+uniform vec2 uOverlap;    // genuine-overlap gate: smoothstep from, to
+// CLOSE-ZOOM GRAIN: geographic texture (mercator-anchored — meters, not
+// pixels) that resolves as you approach. amp arrives pre-gated by zoom.
+uniform vec2 uGrain;      // amp (zoom-gated), 1/cell in mercator units
+uniform vec2 uMercAnchor; // fixed NYC anchor — keeps fbm args small/stable
 out vec4 fragColor;
 
 // Value-noise fbm, 3 octaves — cheap enough for a half-res target.
@@ -272,8 +282,36 @@ void main() {
   float anchorChroma = 0.0;
   int top = 0;
   float topW = -1.0;
+  // Screen-space noise domain shared by the woven-wash passes below.
+  vec2 nq = vec2(vUv.x * uAspect, vUv.y);
+
+  // THE GENUINE-OVERLAP GATE (Eli, 2026-07-08: colors interact ONLY where
+  // feelings truly share ground in the data). Measured, not decorative:
+  // the runner-up emotion's pooled intensity as a share of the leader's,
+  // AT THIS PIXEL. A blob alone gates to 0 — its hue holds perfectly
+  // still; a real meeting of feelings opens the gate to 1.
+  float top1 = 0.0;
+  float top2 = 0.0;
+  for (int i = 0; i < ${NE}; i++) {
+    if (I[i] > top1) { top2 = top1; top1 = I[i]; }
+    else if (I[i] > top2) { top2 = I[i]; }
+  }
+  float overlap = smoothstep(uOverlap.x, uOverlap.y, top2 / max(top1, 1e-5));
+
   for (int i = 0; i < ${NE}; i++) {
     float w = pow(I[i], uDominance);
+    // THE WEAVE (from silk): where feelings GENUINELY meet, threads of
+    // each interleave through the front — per-emotion bands of slow noise
+    // tilt the local vote, so neighbors meld as woven strands, never a
+    // hard seam and never one averaged smear. Gated by the overlap above
+    // (belt to its by-construction suspenders: with one emotion present,
+    // tilting its own vote is a no-op anyway).
+    // The flow clock is brisk ON PURPOSE: the overlap gate holds every
+    // lone feeling perfectly still, so speed here only animates genuine
+    // meetings (measured 2026-07-08: at 0.025 the interaction was lost
+    // under the breath's noise floor).
+    float band = vnoise(nq * uWeave.y + float(i) * 17.31 + uTimeSec * 0.08);
+    w *= 1.0 + uWeave.x * (band - 0.5) * 2.0 * overlap;
     lab += w * uHueLab[i];
     anchorChroma += w * length(uHueLab[i].yz);
     wsum += w;
@@ -291,16 +329,60 @@ void main() {
   // asymptotically — never white. The low end is linear: the long fade.
   float b = 1.0 - exp(-uExposure * total);
 
+  // The TRUE pixel's world position (vUv, unwarped) — shared by the land
+  // mask and the close-zoom grain: the shore and the grain are facts of
+  // geography, never weather.
+  vec2 merc = uMercOrigin + uMercDx * vUv.x + uMercDy * vUv.y;
+
   // THE LAND MASK — geography shapes the feeling: the field dies over
   // water so rivers and harbor stay pure void and every silhouette
-  // inherits the coastline. Sampled at the TRUE pixel (vUv, unwarped):
-  // the shore is a fact, not weather.
+  // inherits the coastline.
   if (uMaskOn > 0.5) {
-    vec2 merc = uMercOrigin + uMercDx * vUv.x + uMercDy * vUv.y;
     vec2 muv = vec2((merc.x - uMaskRect.x) * uMaskRect.z,
                     (merc.y - uMaskRect.y) * uMaskRect.w);
     float land = smoothstep(0.12, 0.82, texture(uMask, muv).r);
     b *= mix(uWaterAtten, 1.0, land);
+  }
+
+  // ---- THE WOVEN WASH (Eli's silk+pigment merge, 2026-07-08) ----------
+  // From SILK — the hue flows: a slow OKLab rotation riding the wind.
+  // GATED BY GENUINE OVERLAP (Eli's correctness rule): a lone feeling's
+  // hue is a fact and holds still; only where two feelings truly share
+  // ground does the color visibly flow between them.
+  {
+    vec2 axis2 = normalize(uAxis);
+    float along = dot(nq, axis2);
+    float rot = (fbm(vec2(along * 5.0 - uTimeSec * 0.12, 4.7)) - 0.5) * 2.0 * uShimmer * overlap;
+    float cr = cos(rot);
+    float sr = sin(rot);
+    lab.yz = mat2(cr, -sr, sr, cr) * lab.yz;
+  }
+  // From PIGMENT — layered matte depth: pooled feeling settles into
+  // translucent tiers, pigment pools a breath darker along each contour
+  // (watercolor edge), deep pools carry more pigment (richer and a touch
+  // deeper — matte, never glassy). The contours crawl slowly, like paint
+  // still deciding where to dry — and the live wash beneath keeps the
+  // tiers reading as stacked layers, not posterization.
+  {
+    float crawl = (fbm(nq * 3.0 + uTimeSec * 0.01) - 0.5) * uTiers.w;
+    float lv = clamp(b + crawl, 0.0, 1.0) * uTiers.x;
+    float f = fract(lv);
+    float soft = smoothstep(0.35, 0.65, f);
+    float b2 = (floor(lv) + soft) / uTiers.x;
+    float rim = exp(-pow((f - 0.5) / 0.11, 2.0));
+    b = mix(b, b2 * (1.0 - uTiers.y * rim), uTierKeep);
+    lab.yz *= 1.0 + uTiers.z * b2;
+    lab.x -= 0.04 * uTiers.z * b2;
+  }
+
+  // CLOSE-ZOOM GRAIN (2026-07-08): fine pigment mottle anchored in the
+  // WORLD, not the screen — zooming in resolves finer structure the way
+  // paper grain emerges as you lean into a painting. Zoom-gated on the
+  // CPU (amp 0 at the wide view keeps the quilt smooth); scaled by b so
+  // the skirt stays clean; matte modulation only, never sparkle.
+  if (uGrain.x > 0.0) {
+    float g = fbm((merc - uMercAnchor) * uGrain.y);
+    b *= 1.0 + uGrain.x * (g - 0.5) * 2.0 * smoothstep(0.04, 0.28, b);
   }
 
   // THE LUMINOUS HEART: where pooled feeling peaks, the hue itself lifts
@@ -393,16 +475,17 @@ export class FieldLayer implements CustomLayerInterface {
    *  whole field (accumulation included) costs nothing. Set from MapStage. */
   fade = 1;
 
-  /** THE SHAPE OF FEELING — plain uniform values (watercolor is the one
-   *  identity; the atmosphere drives these live). Set from MapStage. */
+  /** THE SHAPE OF FEELING — plain uniform values (the woven wash is the
+   *  one identity; the atmosphere drives these live). Set from MapStage. */
   look: { warpAmp: number; scale: number; drift: number; streak: number; band: number } = {
-    ...SHAPES.watercolor,
+    ...SHAPES.woven,
   };
 
   /** 0 = dark ink night (glow), 1 = light paper day (pigment). Set from
    *  MapStage every frame from the atmosphere; crossfades the two ways of
    *  painting. */
   paper = 0;
+
 
   /** THE LIVING ATMOSPHERE — plain fields mutated in place from MapStage
    *  every push (no allocation): the sky's weight on the light. */
@@ -443,16 +526,21 @@ export class FieldLayer implements CustomLayerInterface {
   /** Screen→mercator affine (pitch 0): origin at screen bottom-left plus
    *  the two screen-edge deltas, rebuilt each frame from unproject. */
   private mercFrame = { ox: 0, oy: 0, dxx: 0, dxy: 0, dyx: 0, dyy: 0, ok: false };
+  /** Grain geometry: fixed NYC anchor (keeps shader fbm args small and
+   *  stable) + 1/cell in mercator units. Set once in onAdd. */
+  private mercAnchor: [number, number] = [0, 0];
+  private grainScale = 0;
 
   constructor() {
     EMOTIONS.forEach((e, i) => {
       const [, a, b] = hexToOklab(EMOTION_HUES[e]);
       // Equal feeling = equal light: anchors share one OKLab lightness
       // (raw hues span a wide L range, which made cooler hues glow dimmer
-      // than Joy for the same intensity). Hue/chroma stay the brand's.
+      // than Joy for the same intensity). Hue stays the brand's; chroma
+      // carries the anchorChroma push (pop, never neon — Eli, 2026-07-08).
       this.hueLab[i * 3] = FIELD.anchorL;
-      this.hueLab[i * 3 + 1] = a;
-      this.hueLab[i * 3 + 2] = b;
+      this.hueLab[i * 3 + 1] = a * FIELD.anchorChroma;
+      this.hueLab[i * 3 + 2] = b * FIELD.anchorChroma;
     });
   }
 
@@ -469,16 +557,27 @@ export class FieldLayer implements CustomLayerInterface {
     const d = this.instanceData;
     for (let i = 0; i < n; i++) {
       const p = points[i];
-      // The lonely-commit floor is for real feelings; the seed sheet keeps
-      // its geographic scale (small floor) so it can't pool into blobs.
-      this.floorPx[i] = p.seed ? FIELD.seedMinRadiusPx : FIELD.minRadiusPx;
-      this.isSeed[i] = p.seed ? 1 : 0;
+      // TWO LAYERS, ONE FIELD (2026-07-08): entries (commits + pocket
+      // seeds) are TIGHT, defined, pinned to their place. The wash
+      // lattice keeps the wide dim skirt that carries the between-space,
+      // so zoomed out the city is one continuous glow. The entry floor
+      // scales with intensity: at middle distance everything sits on its
+      // pixel floor, and one flat floor turned the city into uniform
+      // polka dots (the medium-zoom valley, Eli 2026-07-08).
+      this.floorPx[i] = p.wash
+        ? FIELD.wash.minRadiusPx
+        : FIELD.minRadiusPx * (0.78 + 0.055 * (p.intensity - 1));
+      // Only the WASH thins with zoom (it's a city-scale impression);
+      // pocket seeds are stand-ins for real entries and must intensify on
+      // approach exactly as commits do — the density payoff (2026-07-08).
+      this.isSeed[i] = p.wash ? 1 : 0;
       const mc = mapboxgl.MercatorCoordinate.fromLngLat({
         lng: p.position[0],
         lat: p.position[1],
       });
-      const radiusM =
-        FIELD.radiusM + FIELD.radiusPerIntensityM * (p.intensity - 1);
+      const radiusM = p.wash
+        ? FIELD.wash.radiusM
+        : FIELD.radiusM + FIELD.radiusPerIntensityM * (p.intensity - 1);
       const o = i * FLOATS_PER_INSTANCE;
       d[o] = mc.x;
       d[o + 1] = mc.y;
@@ -532,6 +631,13 @@ export class FieldLayer implements CustomLayerInterface {
     const tl = mapboxgl.MercatorCoordinate.fromLngLat({ lng: west, lat: north });
     const br = mapboxgl.MercatorCoordinate.fromLngLat({ lng: east, lat: south });
     this.maskRect = [tl.x, tl.y, 1 / (br.x - tl.x), 1 / (br.y - tl.y)];
+    // Grain anchor + scale (mercator units per meter is ~constant citywide).
+    const anchor = mapboxgl.MercatorCoordinate.fromLngLat({
+      lng: CAMERA.initial.longitude,
+      lat: CAMERA.initial.latitude,
+    });
+    this.mercAnchor = [anchor.x, anchor.y];
+    this.grainScale = 1 / (FIELD.grain.cellM * anchor.meterInMercatorCoordinateUnits());
     const img = new Image();
     img.onload = () => {
       if (!this.gl) return;
@@ -666,12 +772,13 @@ export class FieldLayer implements CustomLayerInterface {
         this.clamped = new Float32Array(src.length);
       }
       this.clamped.set(src.subarray(0, n * FLOATS_PER_INSTANCE));
-      // The ambient wash is a city-scale impression: it dissolves as you
-      // zoom into a neighborhood (real commits stay). Smoothstep, so the
-      // fade is continuous with the camera.
+      // The ambient wash is a city-scale impression: it thins to a quiet
+      // floor as you zoom into a neighborhood (real commits stay). Smooth-
+      // step, so the fade is continuous with the camera — and never zero:
+      // no place reads as a void at street level (Eli, 2026-07-08).
       const sf = FIELD.seedZoomFade;
       const zt = Math.min(1, Math.max(0, (zoom - sf.from) / (sf.to - sf.from)));
-      const seedFade = 1 - zt * zt * (3 - 2 * zt);
+      const seedFade = 1 - (1 - sf.floor) * zt * zt * (3 - 2 * zt);
       for (let i = 0; i < n; i++) {
         const o = i * FLOATS_PER_INSTANCE + 2;
         const minMerc = this.floorPx[i] * mercPerCssPx;
@@ -782,13 +889,25 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform1f(u("uTimeSec"), this.timeSec);
     gl.uniform1f(u("uBreathPeriod"), FIELD.breath.periodMs / 1000);
     gl.uniform1f(u("uBreathAmp"), FIELD.breath.amp);
+    gl.uniform2f(u("uWeave"), WOVEN.weave.amp, WOVEN.weave.scale);
+    gl.uniform1f(u("uShimmer"), WOVEN.shimmer);
+    gl.uniform4f(u("uTiers"), WOVEN.tiers.count, WOVEN.tiers.rim, WOVEN.tiers.richen, WOVEN.tiers.crawl);
+    gl.uniform1f(u("uTierKeep"), WOVEN.tiers.keep);
+    gl.uniform2f(u("uOverlap"), WOVEN.overlap.from, WOVEN.overlap.to);
     gl.uniform4f(u("uShape"), this.look.warpAmp, this.look.scale, this.look.drift, this.look.streak);
     gl.uniform1f(u("uBand"), this.look.band);
     gl.uniform1f(u("uAspect"), this.texW / Math.max(1, this.texH));
     const w = this.weather;
     gl.uniform2f(u("uAxis"), w.axisX, w.axisY);
-    // The coastline (off until the mask texture lands — never a blocker).
+    // Screen → world (shared by the land mask and the close-zoom grain);
+    // both features gate off when the frame isn't derivable.
     const mf = this.mercFrame;
+    if (mf.ok) {
+      gl.uniform2f(u("uMercOrigin"), mf.ox, mf.oy);
+      gl.uniform2f(u("uMercDx"), mf.dxx, mf.dxy);
+      gl.uniform2f(u("uMercDy"), mf.dyx, mf.dyy);
+    }
+    // The coastline (off until the mask texture lands — never a blocker).
     const maskOn = this.maskReady && mf.ok;
     gl.uniform1f(u("uMaskOn"), maskOn ? 1 : 0);
     if (maskOn) {
@@ -796,11 +915,15 @@ export class FieldLayer implements CustomLayerInterface {
       gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
       gl.uniform1i(u("uMask"), 2);
       gl.uniform4f(u("uMaskRect"), ...this.maskRect);
-      gl.uniform2f(u("uMercOrigin"), mf.ox, mf.oy);
-      gl.uniform2f(u("uMercDx"), mf.dxx, mf.dxy);
-      gl.uniform2f(u("uMercDy"), mf.dyx, mf.dyy);
       gl.uniform1f(u("uWaterAtten"), FIELD.landMask.waterAtten);
     }
+    // Close-zoom grain: amp fades in as the camera commits to a place.
+    const gz = FIELD.grain.zoomIn;
+    const zNow = this.map?.getZoom() ?? 0;
+    const gt = Math.min(1, Math.max(0, (zNow - gz.from) / (gz.to - gz.from)));
+    const grainAmp = mf.ok ? FIELD.grain.amp * gt * gt * (3 - 2 * gt) : 0;
+    gl.uniform2f(u("uGrain"), grainAmp, this.grainScale);
+    gl.uniform2f(u("uMercAnchor"), this.mercAnchor[0], this.mercAnchor[1]);
     gl.uniform3f(u("uHeart"), FIELD.heart.from, FIELD.heart.to, FIELD.heart.lift);
   }
 

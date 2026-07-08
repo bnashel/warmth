@@ -25,7 +25,9 @@ const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
 
 const VIEWS = [
   { key: "public", label: "public", caption: "the whole city, feeling together" },
-  { key: "private", label: "private", caption: "only you can see this" },
+  // The journal must read cold: whose it is, what the marks are, and that
+  // they're one story through time (Eli, 2026-07-08 clarity pass).
+  { key: "private", label: "private", caption: "your journal — every feeling, one thread through time" },
 ] as const;
 type ViewKey = (typeof VIEWS)[number]["key"];
 
@@ -66,6 +68,26 @@ function agoLabel(createdAt: number): string {
   return months <= 1 ? "a month ago today" : `${months} months ago today`;
 }
 
+/** "3 months apart" — the aurora's time-gap whisper (tap a connection). */
+function gapLabel(ms: number): string {
+  const minutes = ms / 60_000;
+  const hours = minutes / 60;
+  const days = hours / 24;
+  const weeks = days / 7;
+  const months = days / 30.44;
+  const years = days / 365.25;
+  const n = (v: number, unit: string) => {
+    const r = Math.round(v);
+    return r === 1 ? `${unit === "an hour" ? "an hour" : `a ${unit}`} apart` : `${r} ${unit}s apart`;
+  };
+  if (minutes < 45) return "moments apart";
+  if (hours < 36) return n(hours, "hour").replace("a hour", "an hour");
+  if (days < 10) return n(days, "day");
+  if (weeks < 8) return n(weeks, "week");
+  if (months < 18) return n(months, "month");
+  return n(years, "year");
+}
+
 /**
  * THE screen: the city breathing full-bleed, the orb floating above it,
  * and two ways of seeing — PUBLIC (everyone's feeling as standing weather)
@@ -87,6 +109,10 @@ export default function OneScreen() {
   // Post-commit whisper: a small confirmation near where the light landed.
   const [whisper, setWhisper] = useState<{ text: string; x: number; y: number } | null>(null);
   const whisperTimer = useRef<number | null>(null);
+  // Aurora time-gap whisper: tap a connection between two memories and the
+  // time between them surfaces right there, then breathes away.
+  const [gapChip, setGapChip] = useState<{ text: string; x: number; y: number } | null>(null);
+  const gapTimer = useRef<number | null>(null);
   // Learning mode: the first 3 commits name every picker dot (persisted —
   // storage can be blocked; never worth throwing over).
   const [commitCount, setCommitCount] = useState(() => {
@@ -152,27 +178,35 @@ export default function OneScreen() {
     let stopLive: (() => void) | undefined;
 
     momentsStore.clearTest();
+    let fallback = false;
+    // Ben's seed is async (it waits for the real land polygons); idempotent
+    // adds, so racing calls are harmless — dedupe is by id.
+    const seed = () =>
+      void ambientSeedMoments().then((m) => {
+        if (!cancelled) momentsStore.seedAmbient(m);
+      });
+
     void fetchPublicField().then((cells) => {
       if (cancelled) return;
       if (cells.length > 0) {
         momentsStore.ingestPublicField(cells);
       } else {
         // Fallback: the ambient placeholder city, replenished on the window.
-        momentsStore.seedAmbient(ambientSeedMoments());
-        replenish = window.setInterval(
-          () => momentsStore.seedAmbient(ambientSeedMoments()),
-          30 * 60_000,
-        );
+        fallback = true;
+        seed();
+        replenish = window.setInterval(seed, 30 * 60_000);
       }
       // Live: others' feelings arrive as coarsened blooms (no-op without a
-      // client). Runs in both modes — a fallback map still goes live when
-      // the first real feeling lands.
+      // client). Both modes — a fallback map still goes live the moment a
+      // real feeling lands.
       stopLive = subscribePublicField((cell) => momentsStore.ingestLivePublic(cell));
     });
 
-    // Sounds must never survive the tab losing focus mid-gesture.
+    // Sounds must never survive the tab losing focus; a returning fallback
+    // map re-seeds so the water never evaporates.
     const onVisibility = () => {
       if (document.hidden) panic();
+      else if (fallback) seed();
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
@@ -313,6 +347,11 @@ export default function OneScreen() {
             mapRef.current = m;
           }}
           onEntryTap={(id) => setEditingId(id)}
+          onGapTap={(gapMs, x, y) => {
+            setGapChip({ text: gapLabel(gapMs), x, y });
+            if (gapTimer.current) window.clearTimeout(gapTimer.current);
+            gapTimer.current = window.setTimeout(() => setGapChip(null), 2600);
+          }}
         />
       ) : (
         <MissingToken />
@@ -572,6 +611,41 @@ export default function OneScreen() {
             />
             {agoLabel(onThisDay.createdAt)} — {onThisDay.emotion}
           </motion.button>
+        )}
+      </AnimatePresence>
+
+      {/* The aurora's answer: tap a connection, learn the distance in time
+          between its two memories. A quiet glass chip at the tap, gone soon. */}
+      <AnimatePresence>
+        {view === "private" && gapChip && (
+          <motion.p
+            key={`${gapChip.x}:${gapChip.y}:${gapChip.text}`}
+            initial={{ opacity: 0, y: 6, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={SPRING.settle}
+            style={{
+              position: "absolute",
+              left: gapChip.x,
+              top: gapChip.y - 44,
+              x: "-50%",
+              zIndex: 12,
+              margin: 0,
+              padding: "7px 13px",
+              borderRadius: 999,
+              background: "rgba(16,13,20,0.72)",
+              border: "1px solid rgba(244,220,180,0.16)",
+              backdropFilter: "blur(12px)",
+              WebkitBackdropFilter: "blur(12px)",
+              color: "rgba(240,224,196,0.88)",
+              fontSize: 12,
+              letterSpacing: "0.04em",
+              pointerEvents: "none",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {gapChip.text}
+          </motion.p>
         )}
       </AnimatePresence>
 
