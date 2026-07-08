@@ -13,6 +13,9 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { momentsStore, type Memory } from "@/lib/momentsStore";
 import { EMOTION_HUES, SPRING, type Emotion } from "@/lib/theme";
+import { uploadMemoryPhoto, signedPhotoUrl } from "@/lib/photos";
+import { isSignedIn } from "@/lib/auth";
+import { isSupabaseConfigured } from "@/lib/supabase";
 
 const MAX_DESCRIPTION = 2000;
 
@@ -73,6 +76,53 @@ export function MemoryCard({ entryId, onClose }: { entryId: string; onClose: () 
   useEffect(() => {
     memoryRef.current = memory;
   }, [memory]);
+
+  // Photo: optimistic local preview while it uploads, then the signed URL.
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoError, setPhotoError] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const canPhoto = isSupabaseConfigured; // the bucket is real only with a project
+
+  // Load an existing photo's viewable URL when the card opens.
+  useEffect(() => {
+    let live = true;
+    const path = entry?.memory?.photoPath;
+    if (path && canPhoto) {
+      void signedPhotoUrl(path).then((u) => {
+        if (live) setPhotoUrl(u);
+      });
+    }
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const onPickPhoto = async (file: File | undefined) => {
+    if (!file) return;
+    if (!isSignedIn() || !canPhoto) {
+      setPhotoError(true);
+      return;
+    }
+    setPhotoError(false);
+    setPhotoBusy(true);
+    const preview = URL.createObjectURL(file); // instant optimistic thumbnail
+    setPhotoUrl(preview);
+    const { path, error } = await uploadMemoryPhoto(entryId, file);
+    setPhotoBusy(false);
+    if (error || !path) {
+      setPhotoError(true);
+      URL.revokeObjectURL(preview);
+      setPhotoUrl(entry?.memory?.photoPath ? photoUrl : null);
+      return;
+    }
+    // Persist the path through the same optimistic save (→ pushMemoryToCloud).
+    flush({ ...memoryRef.current, photoPath: path });
+    const signed = await signedPhotoUrl(path);
+    URL.revokeObjectURL(preview);
+    if (signed) setPhotoUrl(signed);
+  };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -169,11 +219,64 @@ export function MemoryCard({ entryId, onClose }: { entryId: string; onClose: () 
           />
         </div>
 
+        {/* Photo thumbnail, once one is attached. */}
+        <AnimatePresence>
+          {photoUrl && (
+            <motion.img
+              key="photo"
+              src={photoUrl}
+              alt="A photo you kept with this moment"
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: photoBusy ? 0.6 : 1, scale: 1 }}
+              exit={{ opacity: 0 }}
+              transition={SPRING.settle}
+              style={{
+                width: "100%",
+                maxHeight: 200,
+                objectFit: "cover",
+                borderRadius: 12,
+                border: "1px solid rgba(233,236,244,0.12)",
+              }}
+            />
+          )}
+        </AnimatePresence>
+
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {/* Photo: arrives with cloud sync — honest whisper, not a dead button. */}
-          <span style={{ fontSize: 11.5, color: "rgba(233,236,244,0.35)" }}>
-            photos arrive with cloud sync
-          </span>
+          {/* Photo picker (native input, no deps). Honest about needing sign-in. */}
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => void onPickPhoto(e.target.files?.[0])}
+          />
+          {canPhoto ? (
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={photoBusy}
+              style={{
+                background: "rgba(233,236,244,0.06)",
+                border: "1px solid rgba(233,236,244,0.14)",
+                borderRadius: 10,
+                padding: "7px 12px",
+                color: "rgba(233,236,244,0.8)",
+                fontSize: 12,
+                cursor: "pointer",
+              }}
+            >
+              {photoBusy ? "adding…" : photoUrl ? "change photo" : "add a photo"}
+            </button>
+          ) : (
+            <span style={{ fontSize: 11.5, color: "rgba(233,236,244,0.35)" }}>
+              photos arrive with cloud sync
+            </span>
+          )}
+          {photoError && (
+            <span style={{ fontSize: 11.5, color: "rgba(244,188,140,0.95)" }}>
+              couldn&apos;t add that photo
+            </span>
+          )}
           <AnimatePresence>
             {kept && (
               <motion.span
