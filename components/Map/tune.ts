@@ -604,8 +604,11 @@ export const INK = {
   boundary: "rgba(233,236,244,0.075)", // hand-drawn seams between places
   boundaryWidth: 1.0,
   road: "#C7CBD6", // hairlines in cool gray — structure, not light
-  roadAlpha: { highway: 0.26, avenue: 0.16, local: 0.09, service: 0.05 },
-  roadWidth: { highway: 2.2, avenue: 1.35, local: 0.7, service: 0.45 }, // px at fade-in end
+  // ramp/tunnel (2026-07-08): interchange links as a quiet late tier
+  // (portal rotaries read as scribbles at arterial weight — Eli), and a
+  // whisper of tunnel continuation so no street dead-ends at a portal.
+  roadAlpha: { highway: 0.26, avenue: 0.16, local: 0.09, service: 0.05, ramp: 0.07, tunnel: 0.055 },
+  roadWidth: { highway: 2.2, avenue: 1.35, local: 0.7, service: 0.45, ramp: 0.6, tunnel: 1.0 }, // px at fade-in end
 } as const;
 
 export type CandidatePalette = typeof INK;

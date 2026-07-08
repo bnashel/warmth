@@ -39,6 +39,11 @@ const PAINT: [layerId: string, prop: PaintProp, key: InkKey][] = [
   ["roads-avenue", "line-color", "road"],
   ["roads-local", "line-color", "road"],
   ["roads-service", "line-color", "road"],
+  // Ramps + tunnels (2026-07-08): color rides the graded ink like every
+  // road; their opacity/width stay the style's own zoom ramps (quiet by
+  // design — the day-boost machinery is for the surface network).
+  ["roads-ramps", "line-color", "road"],
+  ["roads-tunnels", "line-color", "road"],
 ];
 
 type Rgb = [number, number, number];

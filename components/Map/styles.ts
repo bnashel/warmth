@@ -15,9 +15,13 @@ import { JOURNEY, type CandidatePalette } from "./tune";
 
 // NYC tagging note: avenues alternate primary/secondary/tertiary block to
 // block (Bedford Ave does all three) — tertiary belongs with avenues here,
-// or avenues flicker between tiers. Links ride with their parent class.
-const HIGHWAY = ["motorway", "motorway_link", "trunk", "trunk_link"];
-const AVENUE = ["primary", "secondary", "tertiary", "primary_link", "secondary_link", "tertiary_link"];
+// or avenues flicker between tiers. Links are their OWN quiet tier
+// (2026-07-08): riding with their parents, every interchange helix and
+// tunnel-portal rotary arrived early at arterial brightness and read as
+// overlapping scribbles (Eli: Holland/Lincoln "duplication artifacts").
+const HIGHWAY = ["motorway", "trunk"];
+const AVENUE = ["primary", "secondary", "tertiary"];
+const RAMP = ["motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link"];
 const LOCAL = ["street", "street_limited"];
 const SERVICE = ["service", "track"];
 
@@ -116,7 +120,16 @@ function roadLayer(
     filter: [
       "all",
       ["match", ["get", "class"], classes, true, false],
-      ["!=", ["get", "structure"], "tunnel"], // tunnels are not visible city
+      ["!=", ["get", "structure"], "tunnel"], // tunnels get their own whisper
+      // ONE DECK PER BRIDGE (2026-07-08): double-deck spans (Queensboro,
+      // GW) ship as one tile feature PER DECK at layer 1/2/3 — stacked
+      // translucent strokes read as a doubled bridge (Eli). Only the
+      // lowest deck draws; ramps (their own layer) fly over freely.
+      [
+        "any",
+        ["!=", ["get", "structure"], "bridge"],
+        ["<=", ["coalesce", ["get", "layer"], 0], 1],
+      ],
     ],
     layout: { "line-cap": "round", "line-join": "round" },
     paint: {
@@ -207,6 +220,48 @@ export function buildStyle(p: CandidatePalette, name: string): StyleSpecificatio
   }
 
   layers.push(
+    // TUNNELS — a whisper of continuation (2026-07-08): with tunnels fully
+    // absent, every portal read as a dead-ended or broken street (Eli).
+    // The thread is faint, arrives late, and never competes with surface
+    // structure — you sense the road continues; you never mistake it for
+    // one. Plain fade (no bridge/street-presence machinery).
+    {
+      id: "roads-tunnels",
+      type: "line",
+      source: "streets",
+      "source-layer": "road",
+      filter: [
+        "all",
+        ["match", ["get", "class"], [...HIGHWAY, ...AVENUE], true, false],
+        ["==", ["get", "structure"], "tunnel"],
+      ],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": p.road,
+        "line-opacity": fadeIn(12.8, 14.0, p.roadAlpha.tunnel),
+        "line-width": roadWidthExpr(12.8, p.roadWidth.tunnel),
+      },
+    } as LayerSpecification,
+    // RAMPS — interchange links as their own quiet tier (2026-07-08):
+    // late arrival, hairline weight, no early-bridge boost — the Lincoln
+    // helix and Holland rotary become quiet knots, not scribbles.
+    {
+      id: "roads-ramps",
+      type: "line",
+      source: "streets",
+      "source-layer": "road",
+      filter: [
+        "all",
+        ["match", ["get", "class"], RAMP, true, false],
+        ["!=", ["get", "structure"], "tunnel"],
+      ],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": p.road,
+        "line-opacity": fadeIn(JOURNEY.localFade.from, JOURNEY.localFade.to, p.roadAlpha.ramp),
+        "line-width": roadWidthExpr(JOURNEY.localFade.from, p.roadWidth.ramp),
+      },
+    } as LayerSpecification,
     // The street journey, four waves: highways → avenues → side streets →
     // alleys. Weight and opacity step down per wave so the grid has rhythm;
     // the quiet tiers lift again at street zoom (streetPresence).
