@@ -35,6 +35,7 @@ layout(std140) uniform glowUniforms {
   float stainRing;
   float stainHeart;
   float wobble;
+  float tiers;
 } glow;
 `,
   uniformTypes: {
@@ -54,6 +55,7 @@ layout(std140) uniform glowUniforms {
     stainRing: "f32" as const,
     stainHeart: "f32" as const,
     wobble: "f32" as const,
+    tiers: "f32" as const,
   },
 };
 
@@ -103,6 +105,16 @@ void main(void) {
   // Bright hot core + long soft tail.
   float core = exp(-pow(rr / glow.coreRadius, 1.8));
   float tail = pow(1.0 - rr, glow.tailFalloff);
+
+  // THE WOVEN WASH at diary scale (2026-07-08): the skirt settles into a
+  // few translucent tiers with a breath of pigment pooled at each contour
+  // — the same layered matte depth as the public field. tiers 0 = smooth.
+  if (glow.tiers > 0.0) {
+    float lv = tail * glow.tiers;
+    float f = fract(lv);
+    tail = (floor(lv) + smoothstep(0.35, 0.65, f)) / glow.tiers;
+    tail *= 1.0 - 0.14 * exp(-pow((f - 0.5) / 0.11, 2.0));
+  }
   float lum = glow.corePeak * core + tail;
 
   // Peak brightness scales with weight; breath modulates it gently.
@@ -190,6 +202,9 @@ type LightParams = {
   /** 0 = perfect circle; >0 = free-form living blot (the journal). The
    *  value is the max inward dent as a fraction of the radius. */
   wobble: number;
+  /** 0 = smooth skirt; >0 = the skirt settles into this many translucent
+   *  tiers (the woven wash's layered matte depth, at diary scale). */
+  tiers: number;
 };
 
 type EmotionGlowLayerProps = ScatterplotLayerProps<GlowDatum> & {
@@ -239,6 +254,7 @@ export class EmotionGlowLayer extends ScatterplotLayer<
       stainRing: 0,
       stainHeart: 0,
       wobble: 0,
+      tiers: 0,
       ...light,
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -261,6 +277,7 @@ export class EmotionGlowLayer extends ScatterplotLayer<
         stainRing: p.stainRing,
         stainHeart: p.stainHeart,
         wobble: p.wobble,
+        tiers: p.tiers,
       },
     });
     super.draw(params as never);

@@ -221,8 +221,9 @@ export function buildTrailLayers(
         timeSec,
         radiusScale: 1,
         radiusMaxPixels: TRAIL.spark.cluster.maxRadiusPx,
-        // Constellations wear the same lamp — and the same free silhouette.
-        light: { gain: TRAIL.gain * fade, wobble: TRAIL.spark.wobble },
+        // Constellations wear the same lamp — same free silhouette, same
+        // layered matte skirt (the woven wash at world scale).
+        light: { gain: TRAIL.gain * fade, wobble: TRAIL.spark.wobble, tiers: TRAIL.spark.tiers },
         parameters: ADDITIVE_LIGHT,
       }),
       new TextLayer<SparkCluster>({
@@ -299,8 +300,13 @@ export function buildTrailLayers(
           return true;
         },
         // The LAMP's core and falloff, with the journal's free-form
-        // silhouette (Eli: "less circular") — a living blot, not a disc.
-        light: { gain: TRAIL.gain * fade * night, wobble: TRAIL.spark.wobble },
+        // silhouette (Eli: "less circular") and the woven wash's layered
+        // matte skirt — a living blot of stacked pigment, not a disc.
+        light: {
+          gain: TRAIL.gain * fade * night,
+          wobble: TRAIL.spark.wobble,
+          tiers: TRAIL.spark.tiers,
+        },
         parameters: ADDITIVE_LIGHT,
       }),
     );

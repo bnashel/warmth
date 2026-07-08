@@ -139,9 +139,11 @@ export const LAMP = {
   /** Hot core: fraction of radius that burns near-peak before falloff. */
   coreRadius: 0.26,
   /** Extra brightness of the core above the tail's own peak. */
-  corePeak: 1.35,
-  /** How far the core whitens toward "hot filament" (0 = pure hue). */
-  coreWhiteness: 0.35,
+  corePeak: 1.25,
+  /** How far the core whitens toward "hot filament" (0 = pure hue).
+   *  Dropped for the woven wash (2026-07-08): the finish is MATTE — the
+   *  core burns in the hue's own light, never toward glassy white. */
+  coreWhiteness: 0.12,
   /** Falloff exponent — higher = tighter, more jewel-like skirt. */
   tailFalloff: 4.2,
   /** Brightness floor + intensity gain: dim moments glow, big ones blaze. */
@@ -302,6 +304,10 @@ export const TRAIL = {
     /** Max inward dent of the silhouette (fraction of radius). 0 = circle;
      *  ~0.4 = a clearly organic, slowly-shifting blot, unique per entry. */
     wobble: 0.42,
+    /** THE WOVEN WASH in the journal (2026-07-08): the spark's skirt
+     *  settles into this many translucent tiers — the same layered matte
+     *  depth as the public field, at diary scale. 0 = smooth skirt. */
+    tiers: 3,
     /** A named star: entries carrying a memory wear a delicate ring. */
     ring: { radiusFactor: 1.55, widthPx: 1.2, alpha: 130 },
     /** Constellations: below this zoom, nearby sparks gather into one
