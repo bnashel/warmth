@@ -16,7 +16,7 @@
  * adds echo-dedupe via `momentsStore.has`).
  */
 import { supabase } from "@/lib/supabase";
-import { currentUserId } from "@/lib/auth";
+import { currentUserId, isSignedIn } from "@/lib/auth";
 import type { Memory, Moment } from "@/lib/momentsStore";
 
 /** Fresh commit → anonymous public row + owned journal row. */
@@ -29,7 +29,9 @@ function report(where: string, error: { message: string } | null) {
 }
 
 export async function pushMomentToCloud(m: Moment): Promise<void> {
-  if (!supabase) return;
+  // No client, or no session yet (first-frame race): the on-device journal
+  // already holds the entry; a later hydrate/claim reconciles it.
+  if (!supabase || !isSignedIn()) return;
   try {
     // PUBLIC: picked fields only — structurally incapable of carrying
     // identity. No id: the DB mints its own; no key is shared with the
@@ -58,7 +60,7 @@ export async function pushMomentToCloud(m: Moment): Promise<void> {
 
 /** Memory add/edit → journal row only. The public side NEVER sees memories. */
 export async function pushMemoryToCloud(id: string, memory: Memory | undefined): Promise<void> {
-  if (!supabase || !memory) return;
+  if (!supabase || !memory || !isSignedIn()) return;
   try {
     const res = await supabase
       .from("journal_entries")

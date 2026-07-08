@@ -11,6 +11,20 @@ const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 export const supabase: SupabaseClient | null =
-  url && anonKey ? createClient(url, anonKey) : null;
+  url && anonKey
+    ? createClient(url, anonKey, {
+        auth: {
+          // The session lives across reloads and refreshes itself; the OAuth
+          // redirect (Google/Apple) and magic link land back in the tab and
+          // are detected from the URL. PKCE so the code exchange is safe on
+          // a public client. A named storageKey keeps it ours.
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+          flowType: "pkce",
+          storageKey: "warmth-auth",
+        },
+      })
+    : null;
 
 export const isSupabaseConfigured = Boolean(url && anonKey);
