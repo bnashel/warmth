@@ -63,9 +63,9 @@ export async function pushMemoryToCloud(id: string, memory: Memory | undefined):
     const res = await supabase
       .from("journal_entries")
       .update({
+        // Song columns still exist in the schema but are no longer written
+        // (Eli, 2026-07-08: prompt + photo is the complete set).
         description: memory.description ?? null,
-        song_title: memory.songTitle ?? null,
-        song_artist: memory.songArtist ?? null,
         photo_path: memory.photoPath ?? null,
         updated_at: new Date().toISOString(),
       })

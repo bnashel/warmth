@@ -4,10 +4,13 @@
  * The memory card — tap a spark, hold the moment.
  *
  * A quiet glass card for one journal entry: when and what you felt, plus
- * the memory you attach to it — words, a song, (soon) a photo. Saves are
- * optimistic: every edit lands in the store (and localStorage) on blur or
- * after a short pause, with a whispered "kept" as confirmation. The cloud
- * write rides the same call once Supabase is linked.
+ * the memory you attach — one journaling prompt ("what do you want to
+ * remember about this?") and, once cloud sync lands, a photo. That is the
+ * complete set (Eli, 2026-07-08 — the song fields are gone; its "by…"
+ * artist input read as a mystery "buy" button). Saves are optimistic:
+ * every edit lands in the store (and localStorage) on blur or after a
+ * short pause, with a whispered "kept" as confirmation. The cloud write
+ * rides the same call once Supabase is linked.
  */
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -147,27 +150,6 @@ export function MemoryCard({ entryId, onClose }: { entryId: string; onClose: () 
           onBlur={() => flush(memoryRef.current)}
           style={inputStyle}
         />
-
-        <div style={{ display: "flex", gap: 8 }}>
-          <input
-            aria-label="Song title"
-            placeholder="a song…"
-            value={memory.songTitle ?? ""}
-            maxLength={200}
-            onChange={(e) => save({ ...memory, songTitle: e.target.value })}
-            onBlur={() => flush(memoryRef.current)}
-            style={{ ...inputStyle, flex: 1.4 }}
-          />
-          <input
-            aria-label="Artist"
-            placeholder="by…"
-            value={memory.songArtist ?? ""}
-            maxLength={200}
-            onChange={(e) => save({ ...memory, songArtist: e.target.value })}
-            onBlur={() => flush(memoryRef.current)}
-            style={{ ...inputStyle, flex: 1 }}
-          />
-        </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {/* Photo: arrives with cloud sync — honest whisper, not a dead button. */}
