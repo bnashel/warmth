@@ -195,34 +195,42 @@ export const GLOW = {
 /* emotion, brightness = amount of feeling. No individual points.      */
 /* ------------------------------------------------------------------ */
 export const FIELD = {
-  /** Kernel footprint in METERS — TIGHT (2026-07-08, Eli: blobs spanned
-   *  too wide): a feeling warms ~1/16 mile around it. Entries and
-   *  neighborhood pockets read as defined local glows; the WASH layer
+  /** Kernel footprint in METERS — ELI'S DIAL (has ranged 1/16 → 1/8 mile,
+   *  may yet go toward 1/2; retune HERE, one line). Currently 1/8 mile:
+   *  entries read as present local glows that genuinely overlap where
+   *  people cluster — the density-to-intensity read is the product's
+   *  coolest moment and needs real overlap to exist. The WASH layer
    *  below carries the between-space so the city never fragments. */
-  radiusM: 100,
-  /** + meters per unit intensity (1..10 → up to ~2.6× wider). */
-  radiusPerIntensityM: 18,
+  radiusM: 200,
+  /** + meters per unit intensity (1..10 → up to ~2.4× wider). */
+  radiusPerIntensityM: 30,
   /** Pixel clamps: min keeps one lonely commit visibly present at every
    *  zoom (a tight ember, no longer a whole-neighborhood bloom); max
    *  protects DPR-3 fill-rate. CSS px. */
-  minRadiusPx: 30,
+  minRadiusPx: 38,
   maxRadiusPx: 300,
   /** THE UNDER-WASH (the no-dead-space layer): the ambient lattice keeps
    *  its wide soft skirt — much dimmer and quieter than any entry — so
    *  zoomed out the city still reads as one continuous glowing field
    *  while entries stay tight and defined up close. */
-  wash: { radiusM: 900, minRadiusPx: 56, gain: 0.36 },
+  wash: { radiusM: 900, minRadiusPx: 56, gain: 0.42 },
   /** Kernel falloff exponent on (1 − t²): higher = tighter heart,
    *  longer relative skirt. The edge ALWAYS reaches zero — no rims. */
   kernelSoftness: 2.5,
   /** Filmic knee: brightness = 1 − exp(−exposure · pooledWeight).
-   *  Raises how fast pooled feeling brightens; never clips to white. */
-  exposure: 1.05,
+   *  Raises how fast pooled feeling brightens; never clips to white.
+   *  Raised 2026-07-08 (Eli: brighter, still warm/matte) — with the knee
+   *  and the never-white cap, extra exposure deepens the DENSITY read:
+   *  stacked feeling climbs visibly faster than a lone entry. */
+  exposure: 1.2,
   /** THE LUMINOUS HEART: where density peaks, the hue itself lifts toward
    *  light (OKLab L, capped well below white) — aurora over a dark planet,
    *  never fog banks. Rides the knee output b across [from, to]. Lift
    *  halved for the woven wash: matte depth, not a glassy hot spot. */
-  heart: { from: 0.55, to: 0.95, lift: 0.05 },
+  /** Lift raised 2026-07-08: where entries STACK, the pooled heart must
+   *  read obviously warmer and more alive — the density payoff. Still
+   *  hard-capped by the never-white ceiling. */
+  heart: { from: 0.5, to: 0.92, lift: 0.09 },
   /** LAND MASK: the field clips to the coastline (rivers and harbor stay
    *  pure void; fields inherit the city's silhouette). Built by
    *  scripts/build-landmask.mjs from the neighborhood polygons; sampled in
@@ -232,7 +240,16 @@ export const FIELD = {
    *  close = the field THINS into breathing ambient light so the city
    *  shows through (never to zero). Applies to the field + bloom passes;
    *  the streetlight stays — it IS the city glowing through. */
-  zoomThin: { from: 13.0, to: 16.3, floor: 0.35 },
+  /** Floor raised 2026-07-08 (was 0.35): approaching a cluster must make
+   *  it MORE intense, never thinner — the zoom narrative now only takes
+   *  the field down to a strong ambient, and density does the talking. */
+  zoomThin: { from: 13.0, to: 16.3, floor: 0.55 },
+  /** CLOSE-ZOOM GRAIN (2026-07-08): fine geographic texture inside the
+   *  glow — anchored in mercator space (meters, not pixels), so zooming
+   *  in reveals real structure instead of a scaled-up blur. Fades in
+   *  across zoomIn; amp is brightness modulation (matte, never sparkle);
+   *  cellM is the coarsest cell (fbm adds 2 finer octaves below it). */
+  grain: { amp: 0.16, cellM: 260, zoomIn: { from: 12.3, to: 14.2 } },
   /** Dominance power (the mud rule knob): hues mix by Iᵖ share in OKLab.
    *  Higher p = dominant emotion snaps harder, narrower weather fronts.
    *  Lowered for the woven wash (2026-07-08): wide melding fronts — the
@@ -252,8 +269,9 @@ export const FIELD = {
    *  the fronts (chromaFloor is relative to the boosted anchors), the
    *  streetlight catch. 1 = the raw First Light palette. */
   anchorChroma: 1.15,
-  /** Overall field gain on the additive composite. */
-  gain: 1.0,
+  /** Overall field gain on the additive composite. 1.15 (2026-07-08):
+   *  a touch more luminosity across the board — warm pop, hue untouched. */
+  gain: 1.15,
   /** Pocket-seed weight dimmer: the placeholder neighborhood moods sit
    *  below any real feeling — a commit burns through at full strength.
    *  (The lattice wash has its own, quieter gain: FIELD.wash.gain.) */
@@ -302,6 +320,12 @@ export const TRAIL = {
    *  `ring` deeper at the rim, and a `heart` faintly lighter at the center
    *  (water pushes pigment outward as it dries) so it never reads as a disc. */
   stain: { edge: 0.88, ring: 0.28, radiusScale: 0.85, gainBoost: 1.25, heart: 0.12 },
+  /** THE THREAD (2026-07-08, PROTOTYPE for Eli's Ribbon+Constellation
+   *  merge — confirm before full build): a dim filament weaving through
+   *  the journal's stars in time order, its color flowing between the
+   *  hues of the entries it connects. Quieter than any spark (the stars
+   *  stay the subject; the thread is the story between them). */
+  thread: { widthPx: 2.2, alpha: 105, subdiv: 14, tautness: 0.72 },
   /** THE JOURNAL EXTRAS (2026-07-07): the candle keeps the LAMP's core and
    *  falloff — but its SILHOUETTE is free-form (Eli: "less circular").
    *  These are only what a journal adds: the living-blot wobble, memory
@@ -420,7 +444,7 @@ export const WOVEN = {
    *  the contours wander, like paint still deciding where to dry;
    *  keep = how much of the tiering shows over the live wash beneath
    *  (1 = full posterization, 0 = none). */
-  tiers: { count: 5, rim: 0.16, richen: 0.4, crawl: 0.05, keep: 0.85 },
+  tiers: { count: 5, rim: 0.16, richen: 0.55, crawl: 0.05, keep: 0.85 },
 } as const;
 
 /* ------------------------------------------------------------------ */

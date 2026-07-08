@@ -194,6 +194,10 @@ uniform float uShimmer;   // hue flow along the wind (max OKLab rotation)
 uniform vec4 uTiers;      // matte layers: count, rim, richen, crawl
 uniform float uTierKeep;  // tiering over the live wash beneath (0..1)
 uniform vec2 uOverlap;    // genuine-overlap gate: smoothstep from, to
+// CLOSE-ZOOM GRAIN: geographic texture (mercator-anchored — meters, not
+// pixels) that resolves as you approach. amp arrives pre-gated by zoom.
+uniform vec2 uGrain;      // amp (zoom-gated), 1/cell in mercator units
+uniform vec2 uMercAnchor; // fixed NYC anchor — keeps fbm args small/stable
 out vec4 fragColor;
 
 // Value-noise fbm, 3 octaves — cheap enough for a half-res target.
@@ -325,12 +329,15 @@ void main() {
   // asymptotically — never white. The low end is linear: the long fade.
   float b = 1.0 - exp(-uExposure * total);
 
+  // The TRUE pixel's world position (vUv, unwarped) — shared by the land
+  // mask and the close-zoom grain: the shore and the grain are facts of
+  // geography, never weather.
+  vec2 merc = uMercOrigin + uMercDx * vUv.x + uMercDy * vUv.y;
+
   // THE LAND MASK — geography shapes the feeling: the field dies over
   // water so rivers and harbor stay pure void and every silhouette
-  // inherits the coastline. Sampled at the TRUE pixel (vUv, unwarped):
-  // the shore is a fact, not weather.
+  // inherits the coastline.
   if (uMaskOn > 0.5) {
-    vec2 merc = uMercOrigin + uMercDx * vUv.x + uMercDy * vUv.y;
     vec2 muv = vec2((merc.x - uMaskRect.x) * uMaskRect.z,
                     (merc.y - uMaskRect.y) * uMaskRect.w);
     float land = smoothstep(0.12, 0.82, texture(uMask, muv).r);
@@ -366,6 +373,16 @@ void main() {
     b = mix(b, b2 * (1.0 - uTiers.y * rim), uTierKeep);
     lab.yz *= 1.0 + uTiers.z * b2;
     lab.x -= 0.04 * uTiers.z * b2;
+  }
+
+  // CLOSE-ZOOM GRAIN (2026-07-08): fine pigment mottle anchored in the
+  // WORLD, not the screen — zooming in resolves finer structure the way
+  // paper grain emerges as you lean into a painting. Zoom-gated on the
+  // CPU (amp 0 at the wide view keeps the quilt smooth); scaled by b so
+  // the skirt stays clean; matte modulation only, never sparkle.
+  if (uGrain.x > 0.0) {
+    float g = fbm((merc - uMercAnchor) * uGrain.y);
+    b *= 1.0 + uGrain.x * (g - 0.5) * 2.0 * smoothstep(0.04, 0.28, b);
   }
 
   // THE LUMINOUS HEART: where pooled feeling peaks, the hue itself lifts
@@ -509,6 +526,10 @@ export class FieldLayer implements CustomLayerInterface {
   /** Screen→mercator affine (pitch 0): origin at screen bottom-left plus
    *  the two screen-edge deltas, rebuilt each frame from unproject. */
   private mercFrame = { ox: 0, oy: 0, dxx: 0, dxy: 0, dyx: 0, dyy: 0, ok: false };
+  /** Grain geometry: fixed NYC anchor (keeps shader fbm args small and
+   *  stable) + 1/cell in mercator units. Set once in onAdd. */
+  private mercAnchor: [number, number] = [0, 0];
+  private grainScale = 0;
 
   constructor() {
     EMOTIONS.forEach((e, i) => {
@@ -541,7 +562,10 @@ export class FieldLayer implements CustomLayerInterface {
       // The wash lattice keeps the wide dim skirt that carries the
       // between-space, so zoomed out the city is one continuous glow.
       this.floorPx[i] = p.wash ? FIELD.wash.minRadiusPx : FIELD.minRadiusPx;
-      this.isSeed[i] = p.seed ? 1 : 0;
+      // Only the WASH thins with zoom (it's a city-scale impression);
+      // pocket seeds are stand-ins for real entries and must intensify on
+      // approach exactly as commits do — the density payoff (2026-07-08).
+      this.isSeed[i] = p.wash ? 1 : 0;
       const mc = mapboxgl.MercatorCoordinate.fromLngLat({
         lng: p.position[0],
         lat: p.position[1],
@@ -602,6 +626,13 @@ export class FieldLayer implements CustomLayerInterface {
     const tl = mapboxgl.MercatorCoordinate.fromLngLat({ lng: west, lat: north });
     const br = mapboxgl.MercatorCoordinate.fromLngLat({ lng: east, lat: south });
     this.maskRect = [tl.x, tl.y, 1 / (br.x - tl.x), 1 / (br.y - tl.y)];
+    // Grain anchor + scale (mercator units per meter is ~constant citywide).
+    const anchor = mapboxgl.MercatorCoordinate.fromLngLat({
+      lng: CAMERA.initial.longitude,
+      lat: CAMERA.initial.latitude,
+    });
+    this.mercAnchor = [anchor.x, anchor.y];
+    this.grainScale = 1 / (FIELD.grain.cellM * anchor.meterInMercatorCoordinateUnits());
     const img = new Image();
     img.onload = () => {
       if (!this.gl) return;
@@ -863,8 +894,15 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform1f(u("uAspect"), this.texW / Math.max(1, this.texH));
     const w = this.weather;
     gl.uniform2f(u("uAxis"), w.axisX, w.axisY);
-    // The coastline (off until the mask texture lands — never a blocker).
+    // Screen → world (shared by the land mask and the close-zoom grain);
+    // both features gate off when the frame isn't derivable.
     const mf = this.mercFrame;
+    if (mf.ok) {
+      gl.uniform2f(u("uMercOrigin"), mf.ox, mf.oy);
+      gl.uniform2f(u("uMercDx"), mf.dxx, mf.dxy);
+      gl.uniform2f(u("uMercDy"), mf.dyx, mf.dyy);
+    }
+    // The coastline (off until the mask texture lands — never a blocker).
     const maskOn = this.maskReady && mf.ok;
     gl.uniform1f(u("uMaskOn"), maskOn ? 1 : 0);
     if (maskOn) {
@@ -872,11 +910,15 @@ export class FieldLayer implements CustomLayerInterface {
       gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
       gl.uniform1i(u("uMask"), 2);
       gl.uniform4f(u("uMaskRect"), ...this.maskRect);
-      gl.uniform2f(u("uMercOrigin"), mf.ox, mf.oy);
-      gl.uniform2f(u("uMercDx"), mf.dxx, mf.dxy);
-      gl.uniform2f(u("uMercDy"), mf.dyx, mf.dyy);
       gl.uniform1f(u("uWaterAtten"), FIELD.landMask.waterAtten);
     }
+    // Close-zoom grain: amp fades in as the camera commits to a place.
+    const gz = FIELD.grain.zoomIn;
+    const zNow = this.map?.getZoom() ?? 0;
+    const gt = Math.min(1, Math.max(0, (zNow - gz.from) / (gz.to - gz.from)));
+    const grainAmp = mf.ok ? FIELD.grain.amp * gt * gt * (3 - 2 * gt) : 0;
+    gl.uniform2f(u("uGrain"), grainAmp, this.grainScale);
+    gl.uniform2f(u("uMercAnchor"), this.mercAnchor[0], this.mercAnchor[1]);
     gl.uniform3f(u("uHeart"), FIELD.heart.from, FIELD.heart.to, FIELD.heart.lift);
   }
 
