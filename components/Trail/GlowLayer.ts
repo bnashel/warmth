@@ -36,6 +36,8 @@ layout(std140) uniform glowUniforms {
   float stainHeart;
   float wobble;
   float tiers;
+  float matte;
+  float matteGlint;
 } glow;
 `,
   uniformTypes: {
@@ -56,6 +58,8 @@ layout(std140) uniform glowUniforms {
     stainHeart: "f32" as const,
     wobble: "f32" as const,
     tiers: "f32" as const,
+    matte: "f32" as const,
+    matteGlint: "f32" as const,
   },
 };
 
@@ -101,6 +105,29 @@ void main(void) {
     rr = rr / max(shrink, 0.35);
   }
   if (rr >= 1.0) discard;
+
+  // THE MATTE GEM (2026-07-08, the journal's memory node): not a point
+  // of light — a solid mark of pigment. Full hue depth to the edge with
+  // pigment pooling darker at the rim (sealing wax), a small pure-hue
+  // glint at the heart, the living-blot silhouette, and NOTHING white:
+  // the color is capped below the hue's own full brightness. Caller
+  // blends premultiplied-over (MATTE_OVER), never additive.
+  if (glow.matte > 0.0) {
+    float n0 = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+    float edge = smoothstep(1.0, glow.stainEdge, rr);
+    float rim = smoothstep(glow.stainEdge * 0.55, glow.stainEdge, rr);
+    float tone = 0.62 + 0.3 * w;
+    vec3 col = vFillColor.rgb * tone * (1.0 - glow.stainRing * rim);
+    col += vFillColor.rgb * glow.matteGlint * exp(-pow(rr / 0.17, 2.0)) * (0.6 + 0.4 * w);
+    col = min(col, vFillColor.rgb * 0.96); // the hue itself is the ceiling
+    float a = edge * (glow.peakBase + glow.peakPerIntensity * w) * glow.gain;
+    a *= smoothstep(0.0, 0.12, w);          // arrivals/fades reach zero
+    a *= 1.0 + 0.04 * s;                    // the quietest breath
+    a = clamp(a + (n0 - 0.5) * 0.006, 0.0, 0.92);
+    fragColor = vec4(col * a, a);
+    DECKGL_FILTER_COLOR(fragColor, geometry);
+    return;
+  }
 
   // Bright hot core + long soft tail.
   float core = exp(-pow(rr / glow.coreRadius, 1.8));
@@ -205,6 +232,11 @@ type LightParams = {
   /** 0 = smooth skirt; >0 = the skirt settles into this many translucent
    *  tiers (the woven wash's layered matte depth, at diary scale). */
   tiers: number;
+  /** 1 = THE MATTE GEM (journal memory node): solid pigment mark, darker
+   *  rim, pure-hue glint — pair with MATTE_OVER blending. 0 = light. */
+  matte: number;
+  /** Heart glint strength for the matte gem. */
+  matteGlint: number;
 };
 
 type EmotionGlowLayerProps = ScatterplotLayerProps<GlowDatum> & {
@@ -255,6 +287,8 @@ export class EmotionGlowLayer extends ScatterplotLayer<
       stainHeart: 0,
       wobble: 0,
       tiers: 0,
+      matte: 0,
+      matteGlint: 0,
       ...light,
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -278,6 +312,8 @@ export class EmotionGlowLayer extends ScatterplotLayer<
         stainHeart: p.stainHeart,
         wobble: p.wobble,
         tiers: p.tiers,
+        matte: p.matte,
+        matteGlint: p.matteGlint,
       },
     });
     super.draw(params as never);
@@ -310,6 +346,20 @@ export const PIGMENT_STAIN = {
   blendAlphaOperation: "min",
   blendAlphaSrcFactor: "one",
   blendAlphaDstFactor: "one",
+  depthWriteEnabled: false,
+  depthCompare: "always",
+} as const;
+
+/** Matte-gem state (the journal's memory nodes): plain premultiplied
+ *  OVER — a solid mark on the city, not light added into it. */
+export const MATTE_OVER = {
+  blend: true,
+  blendColorOperation: "add",
+  blendColorSrcFactor: "one",
+  blendColorDstFactor: "one-minus-src-alpha",
+  blendAlphaOperation: "add",
+  blendAlphaSrcFactor: "one",
+  blendAlphaDstFactor: "one-minus-src-alpha",
   depthWriteEnabled: false,
   depthCompare: "always",
 } as const;
