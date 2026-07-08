@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import OneScreen from "@/components/Screen/OneScreen";
 import { AuthOverlay } from "@/components/Auth/AuthOverlay";
-import { initAuth, useSession } from "@/lib/auth";
+import { initAuth, onAuthChange, isSignedIn, currentUserId, useSession } from "@/lib/auth";
+import { claimLocalJournal, hydrateJournalFromCloud } from "@/lib/journalSync";
 
 /**
  * THE GATE. OneScreen is always mounted so the living field breathes behind
@@ -23,6 +24,24 @@ export default function AppGate() {
   // but calling here means the session resolves even before first paint.
   useEffect(() => {
     void initAuth();
+  }, []);
+
+  // On sign-in, reconcile the journal with the account: claim on-device
+  // entries up, then pull the full set (other devices) down. Once per uid
+  // per session; also fires if a session was already restored at mount.
+  const syncedFor = useRef<string | null>(null);
+  useEffect(() => {
+    const sync = () => {
+      const uid = currentUserId();
+      if (!isSignedIn() || syncedFor.current === uid) return;
+      syncedFor.current = uid;
+      void (async () => {
+        await claimLocalJournal();
+        await hydrateJournalFromCloud();
+      })();
+    };
+    sync(); // already signed in? (session restored)
+    return onAuthChange(sync); // or when sign-in lands
   }, []);
 
   return (

@@ -237,7 +237,7 @@ class MomentsStore {
    * Add a moment (idempotent by id — realtime echoes dedupe here).
    * `quiet` skips the arrival bloom (seed data, trail rehydration).
    */
-  add(m: Moment, opts?: { quiet?: boolean; persist?: boolean }): boolean {
+  add(m: Moment, opts?: { quiet?: boolean; persist?: boolean; fromCloud?: boolean }): boolean {
     const quiet = opts?.quiet ?? false;
     const isNew = !this.ids.has(m.id) && !this.ownIds.has(m.id);
     if (!isNew) return false;
@@ -265,9 +265,11 @@ class MomentsStore {
       this.ownRaw.push(m); // rehydration re-fills the in-memory mirror too
       if (opts?.persist !== false) {
         this.persistOwn();
-        // Fresh commit (not rehydration/seed): the dual write. One action,
-        // two destinations — anonymous public row + owned journal row.
-        void pushMomentToCloud(m);
+        // Fresh commit (not rehydration/seed/cloud-hydrate): the dual write.
+        // One action, two destinations — anonymous public row + owned journal
+        // row. `fromCloud` entries are ALREADY on the server; caching them
+        // locally must not echo them back up.
+        if (!opts?.fromCloud) void pushMomentToCloud(m);
       }
     }
     this.dirty = true;
@@ -296,6 +298,35 @@ class MomentsStore {
   /** The full journal record for one entry (memory editor reads this). */
   journalEntry(id: string): Moment | undefined {
     return this.ownRaw.find((m) => m.id === id);
+  }
+
+  /** Every own journal entry (for the sign-in claim → cloud). A copy, so
+   *  callers can't mutate the store's array. */
+  ownEntries(): Moment[] {
+    return this.ownRaw.slice();
+  }
+
+  /**
+   * Merge one server journal row into the local trail — the pull half of
+   * sync (never re-pushes). A row not seen on this device is added; an
+   * existing BARE entry gets its memory filled from the cloud (so a memory
+   * written on another device appears here) — but a local edit is never
+   * clobbered. Full cross-device conflict resolution is a follow-up.
+   */
+  ingestCloudEntry(m: Moment): void {
+    if (!this.ownIds.has(m.id)) {
+      this.add(m, { fromCloud: true });
+      return;
+    }
+    const local = this.ownRaw.find((x) => x.id === m.id);
+    if (local && !hasMemoryContent(local.memory) && hasMemoryContent(m.memory)) {
+      local.memory = { ...m.memory };
+      const point = this.ownPoints.find((p) => p.id === m.id);
+      if (point) point.hasMemory = true;
+      this.ownVersion++;
+      this.dirty = true;
+      this.persistOwn();
+    }
   }
 
   /**
