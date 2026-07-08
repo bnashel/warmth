@@ -230,17 +230,18 @@ function buildMoments(): Moment[] {
     }
   }
 
-  // Wash: the thin water itself. Jittered lattice over each landmass,
-  // low intensity, 85% keep-rate so the sheet stays organic.
+  // Wash: the thin water itself. Jittered lattice over the real landmass,
+  // low intensity, 92% keep-rate (2026-07-08: was 85% — the merged look
+  // wants an unbroken quiet base; no land cell may read as a void).
   for (let lng = -74.24; lng <= -73.72; lng += SPACING_LNG) {
     for (let lat = 40.5; lat <= 40.92; lat += SPACING_LAT) {
       if (!insideLand(lng, lat)) continue;
-      if (rng() > 0.85) continue;
+      if (rng() > 0.92) continue;
       push(
         lng + (rng() - 0.5) * 0.008,
         lat + (rng() - 0.5) * 0.006,
         washEmotion(lng, lat, rng()),
-        1 + rng() * 2,
+        1.5 + rng() * 2,
       );
     }
   }

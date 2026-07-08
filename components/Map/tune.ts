@@ -214,8 +214,9 @@ export const FIELD = {
   exposure: 1.05,
   /** THE LUMINOUS HEART: where density peaks, the hue itself lifts toward
    *  light (OKLab L, capped well below white) — aurora over a dark planet,
-   *  never fog banks. Rides the knee output b across [from, to]. */
-  heart: { from: 0.55, to: 0.95, lift: 0.1 },
+   *  never fog banks. Rides the knee output b across [from, to]. Lift
+   *  halved for the woven wash: matte depth, not a glassy hot spot. */
+  heart: { from: 0.55, to: 0.95, lift: 0.05 },
   /** LAND MASK: the field clips to the coastline (rivers and harbor stay
    *  pure void; fields inherit the city's silhouette). Built by
    *  scripts/build-landmask.mjs from the neighborhood polygons; sampled in
@@ -228,8 +229,11 @@ export const FIELD = {
   zoomThin: { from: 13.0, to: 16.3, floor: 0.35 },
   /** Dominance power (the mud rule knob): hues mix by Iᵖ share in OKLab.
    *  Higher p = dominant emotion snaps harder, narrower weather fronts.
-   *  Lowered in the wow pass: wider, lusher blend bands between feelings. */
-  dominance: 4.0,
+   *  Lowered for the woven wash (2026-07-08): wide melding fronts — the
+   *  weave threads give them fabric, the chroma floor keeps them COLOR, so
+   *  neighbors flow into each other with no seam and no mud. (2.2 washed
+   *  whole boroughs toward one mauve average — regions lost their names.) */
+  dominance: 2.8,
   /** Minimum front chroma as a fraction of the anchors' own chroma —
    *  fronts rotate hue but can never wash to gray. High on purpose: where
    *  two feelings meet, the in-between color must be BEAUTIFUL, never mud. */
@@ -237,6 +241,11 @@ export const FIELD = {
   /** Shared OKLab lightness for all six anchors: equal feeling = equal
    *  light (raw brand hues span L .62–.87). */
   anchorL: 0.78,
+  /** Anchor chroma push (2026-07-08, Eli: "pop more, never neon"): the
+   *  five hues carry a touch more pigment. Rides every path — the field,
+   *  the fronts (chromaFloor is relative to the boosted anchors), the
+   *  streetlight catch. 1 = the raw First Light palette. */
+  anchorChroma: 1.15,
   /** Overall field gain on the additive composite. */
   gain: 1.0,
   /** Ambient-seed weight dimmer: the placeholder city is a thin translucent
@@ -353,89 +362,44 @@ export const ATMOSPHERE = {
 } as const;
 
 /* ------------------------------------------------------------------ */
-/* THE SHAPE OF FEELING — how the field draws emotion (Look panel).    */
-/* All four are the same shader; a mode is just uniform values, so     */
-/* switching is instant and free. Units: warpAmp is a fraction of the  */
-/* screen the edges may wander; scale is noise cells across the width; */
-/* drift is how fast the flow crawls; streak stretches the flow along  */
-/* one axis (0 = round, 1 = fully ribboned); band modulates brightness */
-/* into aurora curtains (0 = off).                                     */
+/* THE SHAPE OF FEELING — how the field's edges move. One shape now:   */
+/* the woven wash (Eli's silk+pigment merge, 2026-07-08). Units:       */
+/* warpAmp is a fraction of the screen the edges may wander; scale is  */
+/* noise cells across the width; drift is how fast the flow crawls;    */
+/* streak stretches the flow along the wind (0 round, 1 ribboned);     */
+/* band modulates brightness into slow luminous curtains (0 = off).    */
 /* ------------------------------------------------------------------ */
 export const SHAPES = {
-  /** The original: soft circular blooms, edges untouched. */
-  bloom: { warpAmp: 0, scale: 8, drift: 0, streak: 0, band: 0 },
-  /** Ink on wet paper: blotted, seeping edges; barely-moving weather.
-   *  warpAmp raised 2026-07-06: silhouettes come from data + geography,
-   *  never perfect circles (constitution / phase 3). */
-  watercolor: { warpAmp: 0.085, scale: 10, drift: 0.01, streak: 0, band: 0 },
-  /** Drops dispersing in water: streakier, curling, visibly alive. */
-  ink: { warpAmp: 0.095, scale: 14, drift: 0.05, streak: 0.5, band: 0 },
-  /** Northern lights: feeling stretched into flowing ribbons. */
-  aurora: { warpAmp: 0.09, scale: 6.5, drift: 0.02, streak: 0.9, band: 0.5 },
+  /** THE WOVEN WASH: edges brushed out along the wind, alive but quiet.
+   *  (The bloom/watercolor/ink/aurora exploration presets and the 07-08
+   *  ember/silk/pigment directions are retired — docs/later.md.) */
+  woven: { warpAmp: 0.105, scale: 9, drift: 0.035, streak: 0.5, band: 0.25 },
 } as const;
 
 /* ------------------------------------------------------------------ */
-/* BLOB DIRECTIONS — the 2026-07-08 redesign exploration. Three        */
-/* genuinely different ways the field can paint feeling, each a branch */
-/* in the resolve shader selected by `?blob=` (or __warmthBlob(name)   */
-/* in the console). `current` is the shipped look, untouched. Each     */
-/* direction differs on real axes: how color moves across a blob, how  */
-/* the edge behaves, how neighbors meet, and how the motion feels.     */
-/* params = the shader's vec4 uDirParams (meaning per direction).      */
+/* THE WOVEN WASH — the field's one identity (Eli's pick, 2026-07-08:  */
+/* silk's living color motion through pigment's layered matte depth).  */
+/* From SILK: the hue itself flows with the field's motion (shimmer),  */
+/* and neighboring feelings INTERLEAVE in threads where they meet      */
+/* (weave) instead of averaging. From PIGMENT: pooled feeling settles  */
+/* into translucent tiers with a breath of edge-darkening at every     */
+/* contour (tiers) — depth from stacked layers, matte, never glassy.   */
 /* ------------------------------------------------------------------ */
-export const DIRECTIONS = {
-  /** The shipped look — no direction branch runs. */
-  current: {
-    index: 0,
-    shape: SHAPES.watercolor,
-    dominance: FIELD.dominance,
-    chromaFloor: FIELD.chromaFloor,
-    breathAmp: FIELD.breath.amp,
-    params: [0, 0, 0, 0] as const,
-  },
-  /** EMBER — heat that cools at the rim. Interiors glow warm; skirts
-   *  sink into a deeper coal-shade of the same hue; edges crumble like
-   *  charred paper; motion is a spatial smolder, not a global sine.
-   *  params: [edgeSink (OKLab L drop at the skirt), tearAmp (edge
-   *  crumble), warmNudge (skirt hue leans toward coal), smolderAmp]. */
-  ember: {
-    index: 1,
-    shape: { warpAmp: 0.07, scale: 11, drift: 0.006, streak: 0, band: 0 },
-    dominance: 5.0, // regions own their hue; fronts are narrow ash seams
-    chromaFloor: 0.85,
-    breathAmp: 0, // replaced by the in-shader smolder
-    params: [0.16, 0.5, 0.1, 0.07] as const,
-  },
-  /** SILK — woven light. Hue shimmers gently along the wind axis
-   *  (iridescence inside one emotion); edges brush out into fibers;
-   *  where two feelings meet their threads INTERLEAVE instead of
-   *  averaging; motion is a continuous slow drift.
-   *  params: [hueDrift (max OKLab rotation, rad), weaveAmp (thread
-   *  interleave strength), weaveScale (threads across screen), -]. */
-  silk: {
-    index: 2,
-    shape: { warpAmp: 0.13, scale: 7, drift: 0.045, streak: 0.9, band: 0.5 },
-    dominance: 2.6, // softer ownership — threads share ground
-    chromaFloor: 0.8,
-    breathAmp: 0.03,
-    params: [0.45, 0.85, 14.0, 0] as const,
-  },
-  /** PIGMENT — layered wash. Pooled feeling quantizes into a few
-   *  translucent tiers (tissue-paper layers) with watercolor edge-
-   *  darkening at every contour; wide overlaps overprint a visible
-   *  third tone; contours crawl slowly like drying paint.
-   *  params: [pools (tier count), rimDark (contour darkening),
-   *  richen (deep pools carry more pigment), crawl (contour drift)]. */
-  pigment: {
-    index: 3,
-    shape: { warpAmp: 0.09, scale: 12, drift: 0.004, streak: 0, band: 0 },
-    dominance: 1.8, // wide fronts — overprints are the point
-    chromaFloor: 0.75,
-    breathAmp: 0.02,
-    params: [4.0, 0.22, 0.35, 0.06] as const,
-  },
+export const WOVEN = {
+  /** Thread interleave at emotion fronts: amp = how far a thread can
+   *  tilt the local vote; scale = threads across the screen width. */
+  weave: { amp: 0.6, scale: 11 },
+  /** Hue flow along the wind axis (max OKLab rotation, radians): the
+   *  color genuinely moves — motion is never just alpha. */
+  shimmer: 0.35,
+  /** Layered matte depth: count = translucent tiers; rim = pigment
+   *  pooling darker along each contour; richen = deep pools carry more
+   *  pigment (more chroma, slightly deeper — matte); crawl = how far
+   *  the contours wander, like paint still deciding where to dry;
+   *  keep = how much of the tiering shows over the live wash beneath
+   *  (1 = full posterization, 0 = none). */
+  tiers: { count: 5, rim: 0.16, richen: 0.4, crawl: 0.05, keep: 0.85 },
 } as const;
-export type DirectionName = keyof typeof DIRECTIONS;
 
 /* ------------------------------------------------------------------ */
 /* Solar drift — the ink follows the real sun. Three intensities       */
@@ -553,7 +517,8 @@ export const WEATHER = {
 
   /* -- bloom (v2): feeling blooms real light into the night ---------- */
   bloom: {
-    gain: 0.7, // strength of the halo pass (night only; 0 kills it)
+    gain: 0.35, // halo strength — halved for the woven wash (2026-07-08):
+    // the finish is MATTE; the halo is a whisper of night air, never gloss
     /** Above the ambient wash (~0.22 pooled), below pockets (~0.46) and
      *  commits (~0.66): concentrated feeling blooms, the wash never does —
      *  the darkness between the lights is what makes the lights read. */
