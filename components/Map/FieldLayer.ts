@@ -188,6 +188,10 @@ uniform float uWaterAtten;
 // THE LUMINOUS HEART: density peaks lift toward light (OKLab L), capped
 // far below white — aurora, never fog.
 uniform vec3 uHeart;      // from, to, lift
+// BLOB DIRECTIONS (2026-07-08 exploration): 0 = shipped look,
+// 1 = EMBER, 2 = SILK, 3 = PIGMENT. Params per direction — tune.ts.
+uniform int uDirection;
+uniform vec4 uDirParams;
 out vec4 fragColor;
 
 // Value-noise fbm, 3 octaves — cheap enough for a half-res target.
@@ -272,8 +276,17 @@ void main() {
   float anchorChroma = 0.0;
   int top = 0;
   float topW = -1.0;
+  // Screen-space noise domain shared by the direction branches below.
+  vec2 nq = vec2(vUv.x * uAspect, vUv.y);
   for (int i = 0; i < ${NE}; i++) {
     float w = pow(I[i], uDominance);
+    // SILK: where feelings meet, their threads INTERLEAVE — per-emotion
+    // bands of noise tilt the local vote so neighbors weave through each
+    // other in strands instead of averaging into one front color.
+    if (uDirection == 2) {
+      float band = vnoise(nq * uDirParams.z + float(i) * 17.31 + uTimeSec * 0.02);
+      w *= 1.0 + uDirParams.y * (band - 0.5) * 2.0;
+    }
     lab += w * uHueLab[i];
     anchorChroma += w * length(uHueLab[i].yz);
     wsum += w;
@@ -301,6 +314,47 @@ void main() {
                     (merc.y - uMaskRect.y) * uMaskRect.w);
     float land = smoothstep(0.12, 0.82, texture(uMask, muv).r);
     b *= mix(uWaterAtten, 1.0, land);
+  }
+
+  // ---- BLOB DIRECTIONS (2026-07-08 exploration) -----------------------
+  if (uDirection == 1) {
+    // EMBER — heat that cools at the rim. The skirt of every blob sinks
+    // into a deeper, coal-dark shade of its own hue (never gray), the
+    // boundary crumbles like charred paper, and the whole field smolders
+    // with a slow spatial flicker instead of one global breath.
+    float d = smoothstep(0.0, 0.7, b);
+    lab.x -= uDirParams.x * (1.0 - d);
+    lab.yz *= 1.0 + 0.3 * (1.0 - d);
+    lab.yz += (1.0 - d) * uDirParams.z * normalize(vec2(0.75, 0.66));
+    float g = fbm(nq * 34.0 + uTimeSec * 0.006);
+    float tear = smoothstep(0.05, 0.4, b);
+    b *= 1.0 - uDirParams.y * (1.0 - tear) * (1.0 - g);
+    float smolder = fbm(nq * 3.0 + vec2(uTimeSec * 0.05, -uTimeSec * 0.03));
+    b *= 1.0 + uDirParams.w * (smolder - 0.5) * 2.0;
+  } else if (uDirection == 2) {
+    // SILK — woven light. Within one feeling the hue shimmers gently
+    // along the flow axis (OKLab rotation — iridescence, same emotion),
+    // riding the same wind the edges are brushed out along.
+    vec2 axis2 = normalize(uAxis);
+    float along = dot(nq, axis2);
+    float rot = (fbm(vec2(along * 5.0 - uTimeSec * 0.03, 4.7)) - 0.5) * 2.0 * uDirParams.x;
+    float cr = cos(rot);
+    float sr = sin(rot);
+    lab.yz = mat2(cr, -sr, sr, cr) * lab.yz;
+  } else if (uDirection == 3) {
+    // PIGMENT — layered wash. Pooled feeling quantizes into a few
+    // translucent tiers; pigment pools darker along every contour
+    // (watercolor edge-darkening); deep pools carry more pigment; the
+    // contours crawl slowly, like paint still deciding where to dry.
+    float crawl = (fbm(nq * 3.0 + uTimeSec * 0.008) - 0.5) * uDirParams.w;
+    float lv = clamp(b + crawl, 0.0, 1.0) * uDirParams.x;
+    float f = fract(lv);
+    float soft = smoothstep(0.38, 0.62, f);
+    float b2 = (floor(lv) + soft) / uDirParams.x;
+    float rim = exp(-pow((f - 0.5) / 0.10, 2.0));
+    b = b2 * (1.0 - uDirParams.y * rim);
+    lab.yz *= 1.0 + uDirParams.z * b2;
+    lab.x -= 0.05 * uDirParams.z * b2;
   }
 
   // THE LUMINOUS HEART: where pooled feeling peaks, the hue itself lifts
@@ -403,6 +457,17 @@ export class FieldLayer implements CustomLayerInterface {
    *  MapStage every frame from the atmosphere; crossfades the two ways of
    *  painting. */
   paper = 0;
+
+  /** BLOB DIRECTIONS (2026-07-08 exploration): which shader branch paints
+   *  the field, its vec4 params, and the tuning it overrides. Set from
+   *  MapStage (DIRECTIONS in tune.ts); 0/defaults = the shipped look. */
+  direction = 0;
+  dirParams: [number, number, number, number] = [0, 0, 0, 0];
+  tuning: { dominance: number; chromaFloor: number; breathAmp: number } = {
+    dominance: FIELD.dominance,
+    chromaFloor: FIELD.chromaFloor,
+    breathAmp: FIELD.breath.amp,
+  };
 
   /** THE LIVING ATMOSPHERE — plain fields mutated in place from MapStage
    *  every push (no allocation): the sky's weight on the light. */
@@ -777,11 +842,13 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform1i(u("uField1"), 1);
     gl.uniform3fv(u("uHueLab"), this.hueLab);
     gl.uniform1f(u("uExposure"), FIELD.exposure);
-    gl.uniform1f(u("uDominance"), FIELD.dominance);
-    gl.uniform1f(u("uChromaFloor"), FIELD.chromaFloor);
+    gl.uniform1f(u("uDominance"), this.tuning.dominance);
+    gl.uniform1f(u("uChromaFloor"), this.tuning.chromaFloor);
     gl.uniform1f(u("uTimeSec"), this.timeSec);
     gl.uniform1f(u("uBreathPeriod"), FIELD.breath.periodMs / 1000);
-    gl.uniform1f(u("uBreathAmp"), FIELD.breath.amp);
+    gl.uniform1f(u("uBreathAmp"), this.tuning.breathAmp);
+    gl.uniform1i(u("uDirection"), this.direction);
+    gl.uniform4f(u("uDirParams"), ...this.dirParams);
     gl.uniform4f(u("uShape"), this.look.warpAmp, this.look.scale, this.look.drift, this.look.streak);
     gl.uniform1f(u("uBand"), this.look.band);
     gl.uniform1f(u("uAspect"), this.texW / Math.max(1, this.texH));

@@ -9,7 +9,18 @@ import { MAPBOX_TOKEN } from "@/lib/map";
 import { momentsStore } from "@/lib/momentsStore";
 import { atmosphere } from "@/lib/atmosphere";
 import { setRainLevel } from "@/lib/sound";
-import { CAMERA, CHOREO, INK, LABELS, MOTION, PERF, SHAPES, SOLAR, WEATHER } from "./tune";
+import {
+  CAMERA,
+  CHOREO,
+  DIRECTIONS,
+  INK,
+  LABELS,
+  MOTION,
+  PERF,
+  SOLAR,
+  WEATHER,
+  type DirectionName,
+} from "./tune";
 import { buildStyle } from "./styles";
 import { applyAtmosphereInk } from "./solar";
 import { FieldLayer } from "./FieldLayer";
@@ -139,6 +150,39 @@ export default function MapStage({
     onEntryTapRef.current = onEntryTap;
   }, [onEntryTap]);
 
+  // BLOB DIRECTIONS (2026-07-08 exploration): `?blob=ember|silk|pigment`
+  // picks a field direction; __warmthBlob("silk") switches live from the
+  // console. `current` (default) is the shipped look, untouched.
+  const directionRef = useRef<DirectionName>(
+    (() => {
+      if (typeof window === "undefined") return "current";
+      const q = new URLSearchParams(window.location.search).get("blob");
+      return q && q in DIRECTIONS ? (q as DirectionName) : "current";
+    })(),
+  );
+  const applyDirection = (field: FieldLayer | null, name: DirectionName) => {
+    directionRef.current = name;
+    if (!field) return;
+    const d = DIRECTIONS[name];
+    field.direction = d.index;
+    field.dirParams = [...d.params] as [number, number, number, number];
+    field.tuning = {
+      dominance: d.dominance,
+      chromaFloor: d.chromaFloor,
+      breathAmp: d.breathAmp,
+    };
+  };
+  useEffect(() => {
+    const w = window as unknown as { __warmthBlob?: (name: string) => void };
+    w.__warmthBlob = (name: string) => {
+      if (name in DIRECTIONS) applyDirection(fieldRef.current, name as DirectionName);
+      else console.warn(`warmth: unknown blob direction "${name}"`, Object.keys(DIRECTIONS));
+    };
+    return () => {
+      delete w.__warmthBlob;
+    };
+  }, []);
+
   const style = useMemo(() => buildStyle(INK, "ink-and-glow"), []);
   // DPR cap: 3× phones render near-identically at 2× on a dark map, for
   // 2.25× less fill — Ben's lag report, honored. Mapbox v3 sizes its canvas
@@ -221,10 +265,14 @@ export default function MapStage({
       if (field) {
         field.fade = 1 - viewMix.current;
         field.paper = atmo.paper;
+        // The wind rides ON TOP of the active direction's base shape.
+        const S = DIRECTIONS[directionRef.current].shape;
         const look = field.look;
-        look.warpAmp = SHAPES.watercolor.warpAmp + atmo.wind * WEATHER.windWarp;
-        look.drift = SHAPES.watercolor.drift + atmo.wind * WEATHER.windDrift;
-        look.streak = atmo.wind * WEATHER.windStreak;
+        look.warpAmp = S.warpAmp + atmo.wind * WEATHER.windWarp;
+        look.scale = S.scale;
+        look.drift = S.drift + atmo.wind * WEATHER.windDrift;
+        look.streak = Math.min(1, S.streak + atmo.wind * WEATHER.windStreak);
+        look.band = S.band;
         const w = field.weather;
         w.fog = atmo.fog;
         w.wet = rain;
@@ -346,7 +394,8 @@ export default function MapStage({
           // never take the whole screen down (design-review finding).
           try {
             const field = new FieldLayer();
-            field.look = { ...SHAPES.watercolor };
+            field.look = { ...DIRECTIONS[directionRef.current].shape };
+            applyDirection(field, directionRef.current);
             map.addLayer(field);
             fieldRef.current = field;
           } catch (err) {
@@ -377,7 +426,8 @@ export default function MapStage({
             try {
               const fresh = new FieldLayer();
               fresh.fade = fieldRef.current?.fade ?? 1;
-              fresh.look = { ...SHAPES.watercolor };
+              fresh.look = { ...DIRECTIONS[directionRef.current].shape };
+              applyDirection(fresh, directionRef.current);
               fresh.paper = paperRef.current; // day must survive the restore too
               map.addLayer(fresh, beforeId);
               fieldRef.current = fresh;

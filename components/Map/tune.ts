@@ -374,6 +374,69 @@ export const SHAPES = {
 } as const;
 
 /* ------------------------------------------------------------------ */
+/* BLOB DIRECTIONS — the 2026-07-08 redesign exploration. Three        */
+/* genuinely different ways the field can paint feeling, each a branch */
+/* in the resolve shader selected by `?blob=` (or __warmthBlob(name)   */
+/* in the console). `current` is the shipped look, untouched. Each     */
+/* direction differs on real axes: how color moves across a blob, how  */
+/* the edge behaves, how neighbors meet, and how the motion feels.     */
+/* params = the shader's vec4 uDirParams (meaning per direction).      */
+/* ------------------------------------------------------------------ */
+export const DIRECTIONS = {
+  /** The shipped look — no direction branch runs. */
+  current: {
+    index: 0,
+    shape: SHAPES.watercolor,
+    dominance: FIELD.dominance,
+    chromaFloor: FIELD.chromaFloor,
+    breathAmp: FIELD.breath.amp,
+    params: [0, 0, 0, 0] as const,
+  },
+  /** EMBER — heat that cools at the rim. Interiors glow warm; skirts
+   *  sink into a deeper coal-shade of the same hue; edges crumble like
+   *  charred paper; motion is a spatial smolder, not a global sine.
+   *  params: [edgeSink (OKLab L drop at the skirt), tearAmp (edge
+   *  crumble), warmNudge (skirt hue leans toward coal), smolderAmp]. */
+  ember: {
+    index: 1,
+    shape: { warpAmp: 0.07, scale: 11, drift: 0.006, streak: 0, band: 0 },
+    dominance: 5.0, // regions own their hue; fronts are narrow ash seams
+    chromaFloor: 0.85,
+    breathAmp: 0, // replaced by the in-shader smolder
+    params: [0.16, 0.5, 0.1, 0.07] as const,
+  },
+  /** SILK — woven light. Hue shimmers gently along the wind axis
+   *  (iridescence inside one emotion); edges brush out into fibers;
+   *  where two feelings meet their threads INTERLEAVE instead of
+   *  averaging; motion is a continuous slow drift.
+   *  params: [hueDrift (max OKLab rotation, rad), weaveAmp (thread
+   *  interleave strength), weaveScale (threads across screen), -]. */
+  silk: {
+    index: 2,
+    shape: { warpAmp: 0.13, scale: 7, drift: 0.045, streak: 0.9, band: 0.5 },
+    dominance: 2.6, // softer ownership — threads share ground
+    chromaFloor: 0.8,
+    breathAmp: 0.03,
+    params: [0.45, 0.85, 14.0, 0] as const,
+  },
+  /** PIGMENT — layered wash. Pooled feeling quantizes into a few
+   *  translucent tiers (tissue-paper layers) with watercolor edge-
+   *  darkening at every contour; wide overlaps overprint a visible
+   *  third tone; contours crawl slowly like drying paint.
+   *  params: [pools (tier count), rimDark (contour darkening),
+   *  richen (deep pools carry more pigment), crawl (contour drift)]. */
+  pigment: {
+    index: 3,
+    shape: { warpAmp: 0.09, scale: 12, drift: 0.004, streak: 0, band: 0 },
+    dominance: 1.8, // wide fronts — overprints are the point
+    chromaFloor: 0.75,
+    breathAmp: 0.02,
+    params: [4.0, 0.22, 0.35, 0.06] as const,
+  },
+} as const;
+export type DirectionName = keyof typeof DIRECTIONS;
+
+/* ------------------------------------------------------------------ */
 /* Solar drift — the ink follows the real sun. Three intensities       */
 /* (Look panel): subtle keeps the original whisper; bold is unmissable */
 /* at a glance; sky lets the map take on real sky color (the one mode  */
