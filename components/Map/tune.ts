@@ -249,7 +249,7 @@ export const FIELD = {
    *  in reveals real structure instead of a scaled-up blur. Fades in
    *  across zoomIn; amp is brightness modulation (matte, never sparkle);
    *  cellM is the coarsest cell (fbm adds 2 finer octaves below it). */
-  grain: { amp: 0.16, cellM: 260, zoomIn: { from: 12.3, to: 14.2 } },
+  grain: { amp: 0.16, cellM: 260, zoomIn: { from: 12.0, to: 14.0 } },
   /** Dominance power (the mud rule knob): hues mix by Iᵖ share in OKLab.
    *  Higher p = dominant emotion snaps harder, narrower weather fronts.
    *  Lowered for the woven wash (2026-07-08): wide melding fronts — the
@@ -282,7 +282,11 @@ export const FIELD = {
    *  of the wash's GPU overdraw right when tiles are loading. `floor` keeps
    *  a quiet ambient base at street zoom: no place ever reads as a void
    *  (Eli, 2026-07-08 — was 0, which re-opened dead space up close). */
-  seedZoomFade: { from: 12.6, to: 14.0, floor: 0.3 },
+  /** Pushed later + shallower 2026-07-08 (medium-zoom valley): the wash
+   *  was dropping exactly where entries were still small, opening dead
+   *  gaps at z12.5–13.5. It now holds full through the middle distance
+   *  and settles higher, so the ground never falls out of the picture. */
+  seedZoomFade: { from: 13.2, to: 14.8, floor: 0.38 },
   /** Living tide: subtle brightness breath. */
   breath: { periodMs: 2500, amp: 0.045 },
   /** Streetlight signature: the field multiplied onto the base map so
@@ -320,12 +324,37 @@ export const TRAIL = {
    *  `ring` deeper at the rim, and a `heart` faintly lighter at the center
    *  (water pushes pigment outward as it dries) so it never reads as a disc. */
   stain: { edge: 0.88, ring: 0.28, radiusScale: 0.85, gainBoost: 1.25, heart: 0.12 },
-  /** THE THREAD (2026-07-08, PROTOTYPE for Eli's Ribbon+Constellation
-   *  merge — confirm before full build): a dim filament weaving through
-   *  the journal's stars in time order, its color flowing between the
-   *  hues of the entries it connects. Quieter than any spark (the stars
-   *  stay the subject; the thread is the story between them). */
-  thread: { widthPx: 2.2, alpha: 105, subdiv: 14, tautness: 0.72 },
+  /** THE MEMORY NODE (2026-07-08 full redesign, Eli): a matte pigment
+   *  gem, not a point of light — solid hue at pigment depth with a
+   *  darker rim (sealing-wax edge), a small pure-hue glint at the heart,
+   *  and the living-blot silhouette. ZERO white anywhere in the node. */
+  node: {
+    /** Solid to this fraction of the radius, then a short soft edge. */
+    edge: 0.86,
+    /** How much darker the pigment pools at the rim (0..1). */
+    rim: 0.34,
+    /** Pure-hue glint at the heart (additive within the matte pass). */
+    glint: 0.5,
+  },
+  /** THE AURORA (2026-07-08, Eli): connections between memories as
+   *  flowing curtains — soft feathered ribbons whose light drifts and
+   *  shimmers along real geography, dimming into the past. Tap one to
+   *  learn how far apart the two moments were. Geometry: Catmull-Rom
+   *  with adaptive tautness + a gentle meander; shading: AuroraLayer. */
+  aurora: {
+    widthPx: 13,
+    /** Peak curtain opacity (feather/flow reduce from here). */
+    alpha: 0.5,
+    subdiv: 18,
+    tautness: 0.72,
+    /** Perpendicular meander amplitude as a fraction of span length. */
+    meander: 0.12,
+    /** Noise cells per degree (curtain texture scale). */
+    noiseScale: 620,
+    flowSpeed: 0.055,
+    /** The far past dims to this fraction (newest span = 1). */
+    oldDim: 0.4,
+  },
   /** THE JOURNAL EXTRAS (2026-07-07): the candle keeps the LAMP's core and
    *  falloff — but its SILHOUETTE is free-form (Eli: "less circular").
    *  These are only what a journal adds: the living-blot wobble, memory
@@ -575,7 +604,10 @@ export const WEATHER = {
      *  interior exceeds the threshold everywhere, and halo-over-field
      *  converged the whole screen toward white (Eli: "I do not want it in
      *  white"). It bows out on approach. */
-    closeFade: { from: 12.0, to: 13.2 },
+    /** Extended 2026-07-08: the halo was bowing out at 13.2 — the exact
+     *  middle distance — taking the field's cohesion with it. It now
+     *  holds through the valley and is gone by the close view. */
+    closeFade: { from: 12.8, to: 14.2 },
   },
 
   /* -- precipitation (v2): visible weather between you and the city --- */

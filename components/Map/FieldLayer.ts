@@ -558,10 +558,15 @@ export class FieldLayer implements CustomLayerInterface {
     for (let i = 0; i < n; i++) {
       const p = points[i];
       // TWO LAYERS, ONE FIELD (2026-07-08): entries (commits + pocket
-      // seeds) are TIGHT — ~1/16 mile, defined, pinned to their place.
-      // The wash lattice keeps the wide dim skirt that carries the
-      // between-space, so zoomed out the city is one continuous glow.
-      this.floorPx[i] = p.wash ? FIELD.wash.minRadiusPx : FIELD.minRadiusPx;
+      // seeds) are TIGHT, defined, pinned to their place. The wash
+      // lattice keeps the wide dim skirt that carries the between-space,
+      // so zoomed out the city is one continuous glow. The entry floor
+      // scales with intensity: at middle distance everything sits on its
+      // pixel floor, and one flat floor turned the city into uniform
+      // polka dots (the medium-zoom valley, Eli 2026-07-08).
+      this.floorPx[i] = p.wash
+        ? FIELD.wash.minRadiusPx
+        : FIELD.minRadiusPx * (0.78 + 0.055 * (p.intensity - 1));
       // Only the WASH thins with zoom (it's a city-scale impression);
       // pocket seeds are stand-ins for real entries and must intensify on
       // approach exactly as commits do — the density payoff (2026-07-08).
