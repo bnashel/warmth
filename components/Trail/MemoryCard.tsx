@@ -4,13 +4,12 @@
  * The memory card — tap a spark, hold the moment.
  *
  * A quiet glass card for one journal entry: when and what you felt, plus
- * the memory you attach — one journaling prompt ("what do you want to
- * remember about this?") and, once cloud sync lands, a photo. That is the
- * complete set (Eli, 2026-07-08 — the song fields are gone; its "by…"
- * artist input read as a mystery "buy" button). Saves are optimistic:
- * every edit lands in the store (and localStorage) on blur or after a
- * short pause, with a whispered "kept" as confirmation. The cloud write
- * rides the same call once Supabase is linked.
+ * the memory you attach — one journaling prompt ("how did you feel?") and
+ * a photo. That is the complete set (Eli, 2026-07-08). The photo is
+ * local-first like the words: picked, downscaled on-device, stored with
+ * the entry; it uploads to Storage when the cloud lands. Saves are
+ * optimistic: every edit lands in the store (and localStorage) on blur or
+ * after a short pause, with a whispered "kept" as confirmation.
  */
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -18,6 +17,31 @@ import { momentsStore, type Memory } from "@/lib/momentsStore";
 import { EMOTION_HUES, SPRING, type Emotion } from "@/lib/theme";
 
 const MAX_DESCRIPTION = 2000;
+
+/** Longest edge of the stored photo (px). Local-first storage rides
+ *  localStorage for now, so the photo is shrunk hard on-device: a 640px
+ *  JPEG (~60–120 KB) keeps years of entries inside the quota; the honest
+ *  "couldn't keep" path already covers the day it fills anyway. */
+const PHOTO_MAX_PX = 640;
+
+async function shrinkPhoto(file: File): Promise<string | null> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, PHOTO_MAX_PX / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close();
+    return canvas.toDataURL("image/jpeg", 0.72);
+  } catch {
+    return null; // unreadable file — the card simply stays photo-less
+  }
+}
 
 function whenLabel(createdAt: number): string {
   const d = new Date(createdAt);
@@ -141,8 +165,8 @@ export function MemoryCard({ entryId, onClose }: { entryId: string; onClose: () 
         </div>
 
         <textarea
-          aria-label="What do you want to remember?"
-          placeholder="what do you want to remember about this?"
+          aria-label="How did you feel?"
+          placeholder="how did you feel?"
           value={memory.description ?? ""}
           maxLength={MAX_DESCRIPTION}
           rows={3}
@@ -151,11 +175,68 @@ export function MemoryCard({ entryId, onClose }: { entryId: string; onClose: () 
           style={inputStyle}
         />
 
+        {/* The photo — a memory you can see again. */}
+        {memory.photo ? (
+          <div style={{ position: "relative" }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={memory.photo}
+              alt="Photo attached to this memory"
+              style={{
+                width: "100%",
+                maxHeight: 180,
+                objectFit: "cover",
+                borderRadius: 12,
+                display: "block",
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => save({ ...memory, photo: undefined })}
+              style={{
+                position: "absolute",
+                top: 8,
+                right: 8,
+                border: "1px solid rgba(233,236,244,0.18)",
+                borderRadius: 999,
+                background: "rgba(10,11,15,0.66)",
+                color: "rgba(233,236,244,0.75)",
+                fontSize: 11,
+                padding: "3px 9px",
+                cursor: "pointer",
+              }}
+            >
+              remove
+            </button>
+          </div>
+        ) : (
+          <label
+            style={{
+              ...inputStyle,
+              cursor: "pointer",
+              textAlign: "center",
+              color: "rgba(233,236,244,0.55)",
+              userSelect: "none",
+            }}
+          >
+            add a photo
+            <input
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                void shrinkPhoto(file).then((dataUrl) => {
+                  if (dataUrl) save({ ...memoryRef.current, photo: dataUrl });
+                });
+                e.target.value = ""; // same file re-pickable after remove
+              }}
+            />
+          </label>
+        )}
+
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {/* Photo: arrives with cloud sync — honest whisper, not a dead button. */}
-          <span style={{ fontSize: 11.5, color: "rgba(233,236,244,0.35)" }}>
-            photos arrive with cloud sync
-          </span>
           <AnimatePresence>
             {kept && (
               <motion.span

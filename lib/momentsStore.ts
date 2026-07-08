@@ -22,7 +22,7 @@ import { pushMemoryToCloud, pushMomentToCloud } from "@/lib/sync";
 
 /** A memory counts once it carries any real content. */
 function hasMemoryContent(memory: Memory | undefined): boolean {
-  return Boolean(memory && (memory.description?.trim() || memory.photoPath));
+  return Boolean(memory && (memory.description?.trim() || memory.photo || memory.photoPath));
 }
 
 /** The memory a journal entry can carry — all optional, editable forever.
@@ -30,7 +30,10 @@ function hasMemoryContent(memory: Memory | undefined): boolean {
  *  (Song fields removed from the type; old localStorage/DB rows keeping
  *  them are harmless — unknown keys ride the spread untouched.) */
 export type Memory = {
-  description?: string; // "what do you want to remember about this?" ≤2000
+  description?: string; // "how did you feel?" ≤2000
+  /** The photo, local-first: a downscaled data URL living with the entry
+   *  (same story as the words). Uploads to Storage when the cloud lands. */
+  photo?: string;
   /** Supabase Storage path once photos sync; unused until the cloud lands. */
   photoPath?: string;
 };

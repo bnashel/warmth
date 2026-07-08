@@ -5,7 +5,7 @@
  * place). `version` keys deck.gl's updateTriggers so weight changes actually
  * reach the GPU — without it, in-place mutation is invisible.
  */
-import { ScatterplotLayer, TextLayer } from "deck.gl";
+import { PathLayer, ScatterplotLayer, TextLayer } from "deck.gl";
 import {
   ADDITIVE_LIGHT,
   PIGMENT_STAIN,
@@ -170,6 +170,66 @@ const getClusterRadius = (d: SparkCluster) =>
 let clusterCache: { key: string; clusters: SparkCluster[] } | null = null;
 let ringCache: { version: number; data: LivePoint[]; remembered: LivePoint[] } | null = null;
 
+/* ---- THE THREAD (prototype — Eli's Ribbon+Constellation merge) ------- */
+
+type ThreadSegment = { path: [number, number][]; color: [number, number, number, number] };
+
+/** Catmull-Rom through the entries in time order, chopped into short
+ *  2-point paths whose colors lerp between the entries' hues — the
+ *  thread's color flows along its length. Cached by version. */
+function threadSegments(data: LivePoint[], alpha: number): ThreadSegment[] {
+  const pts = [...data].sort((a, b) => a.createdAt - b.createdAt);
+  if (pts.length < 2) return [];
+  const n = TRAIL.thread.subdiv;
+  const segs: ThreadSegment[] = [];
+  const P = (i: number) => pts[Math.min(pts.length - 1, Math.max(0, i))].position;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = P(i - 1);
+    const p1 = P(i);
+    const p2 = P(i + 1);
+    const p3 = P(i + 2);
+    // Adaptive tautness: short hops curve like handwriting; a long jump
+    // across the city runs nearly straight (full Catmull-Rom overshoots
+    // into wide loops over the river on distant consecutive entries).
+    const len = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+    const t = TRAIL.thread.tautness * Math.min(1, 0.012 / Math.max(len, 1e-6));
+    let prev: [number, number] = [p1[0], p1[1]];
+    for (let k = 1; k <= n; k++) {
+      const s = k / n;
+      const s2 = s * s;
+      const s3 = s2 * s;
+      const cr = (a: number, b: number, c: number, d: number) =>
+        b + t * ((-a + c) * s + (2 * a - 5 * b + 4 * c - d) * s2 + (-a + 3 * b - 3 * c + d) * s3) * 0.5 +
+        (1 - t) * ((c - b) * s); // tautness blends the spline toward a straight run
+      const pt: [number, number] = [
+        cr(p0[0], p1[0], p2[0], p3[0]),
+        cr(p0[1], p1[1], p2[1], p3[1]),
+      ];
+      const mix = (a: number, b: number) => Math.round(a + (b - a) * s);
+      segs.push({
+        path: [prev, pt],
+        color: [
+          mix(pts[i].hue[0], pts[i + 1].hue[0]),
+          mix(pts[i].hue[1], pts[i + 1].hue[1]),
+          mix(pts[i].hue[2], pts[i + 1].hue[2]),
+          alpha,
+        ],
+      });
+      prev = pt;
+    }
+  }
+  return segs;
+}
+
+let threadCache: { version: number; segs: ThreadSegment[] } | null = null;
+
+function cachedThread(data: LivePoint[], version: number): ThreadSegment[] {
+  if (!threadCache || threadCache.version !== version) {
+    threadCache = { version, segs: threadSegments(data, TRAIL.thread.alpha) };
+  }
+  return threadCache.segs;
+}
+
 function cachedClusters(data: LivePoint[], version: number, zoom: number): SparkCluster[] {
   const key = `${version}:${Math.round(zoom * 4) / 4}`;
   if (!clusterCache || clusterCache.key !== key) {
@@ -288,6 +348,32 @@ export function buildTrailLayers(
     );
   }
   if (night > 0.01) {
+    // THE THREAD (prototype): the story between the stars — drawn first,
+    // so every spark sits above its own history.
+    if (data.length > 1) {
+      layers.push(
+        new PathLayer<ThreadSegment>({
+          id: "journal-thread",
+          data: cachedThread(data, version),
+          getPath: (d) => d.path,
+          getColor: (d) =>
+            [d.color[0], d.color[1], d.color[2], Math.round(d.color[3] * fade * night)] as [
+              number,
+              number,
+              number,
+              number,
+            ],
+          updateTriggers: { getColor: [version, Math.round(fade * night * 32)] },
+          widthUnits: "pixels" as const,
+          getWidth: TRAIL.thread.widthPx,
+          widthMinPixels: 1.1,
+          capRounded: true,
+          jointRounded: true,
+          pickable: false,
+          parameters: { depthWriteEnabled: false },
+        }),
+      );
+    }
     // THE SPARKS: each moment a star — pinpoint filament core, fast-dying
     // skirt, the per-point breath reading as a slow twinkle. Tappable.
     layers.push(
