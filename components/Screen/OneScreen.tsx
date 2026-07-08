@@ -14,6 +14,7 @@ import { Atmosphere, MissingToken } from "@/components/Map/Atmosphere";
 import { Lightning } from "@/components/Map/Lightning";
 import MapStage from "@/components/Map/MapStage";
 import { ambientSeedMoments } from "@/components/Map/ambientSeed";
+import { fetchPublicField, subscribePublicField, markSelfCommit } from "@/lib/publicField";
 import { CAMERA, CHOREO, MOTION } from "@/components/Map/tune";
 import { OrbFlow } from "@/components/Orb/OrbFlow";
 import { atmosphere } from "@/lib/atmosphere";
@@ -141,26 +142,43 @@ export default function OneScreen() {
     return `rgba(${c(233, 52)},${c(236, 58)},${c(244, 70)},${Math.min(1, alpha * (1 + 0.5 * paper))})`;
   };
 
-  // Sweep lab data, then lay in the ambient city — the public map opens
-  // onto standing feeling (clearly-labeled seed until realtime replaces it).
-  // The seed ages out over the 24h recency window, so a long-lived or
-  // re-surfaced tab replenishes it: dedupe keeps living seeds, culled ones
-  // re-enter fresh — the water never evaporates (review finding).
+  // The public map opens onto the REAL last-24h field (coarsened cells from
+  // the DB). If the database is empty or unreachable, the ambient seed city
+  // stands in so the map is never blank — and it replenishes on the 24h
+  // window like before. Realtime keeps the real field live thereafter.
   useEffect(() => {
+    let cancelled = false;
+    let replenish: number | undefined;
+    let stopLive: (() => void) | undefined;
+
     momentsStore.clearTest();
-    momentsStore.seedAmbient(ambientSeedMoments());
-    const replenish = window.setInterval(
-      () => momentsStore.seedAmbient(ambientSeedMoments()),
-      30 * 60_000,
-    );
+    void fetchPublicField().then((cells) => {
+      if (cancelled) return;
+      if (cells.length > 0) {
+        momentsStore.ingestPublicField(cells);
+      } else {
+        // Fallback: the ambient placeholder city, replenished on the window.
+        momentsStore.seedAmbient(ambientSeedMoments());
+        replenish = window.setInterval(
+          () => momentsStore.seedAmbient(ambientSeedMoments()),
+          30 * 60_000,
+        );
+      }
+      // Live: others' feelings arrive as coarsened blooms (no-op without a
+      // client). Runs in both modes — a fallback map still goes live when
+      // the first real feeling lands.
+      stopLive = subscribePublicField((cell) => momentsStore.ingestLivePublic(cell));
+    });
+
     // Sounds must never survive the tab losing focus mid-gesture.
     const onVisibility = () => {
       if (document.hidden) panic();
-      else momentsStore.seedAmbient(ambientSeedMoments());
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
-      window.clearInterval(replenish);
+      cancelled = true;
+      if (replenish) window.clearInterval(replenish);
+      stopLive?.();
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
@@ -241,6 +259,9 @@ export default function OneScreen() {
       };
 
       const ignite = () => {
+        // My own feeling renders locally at its exact spot; when its
+        // coarsened echo returns over realtime, skip it (no double bloom).
+        markSelfCommit(lng, lat, emotion);
         momentsStore.add(moment);
         setHasOwn(true); // the private diary has its first entry
       };

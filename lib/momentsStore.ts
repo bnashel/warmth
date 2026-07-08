@@ -19,6 +19,7 @@
 import { CHOREO, FIELD, GLOW, RECENCY, TRAIL } from "@/components/Map/tune";
 import { EMOTION_HUES, type Emotion } from "@/lib/theme";
 import { pushMemoryToCloud, pushMomentToCloud } from "@/lib/sync";
+import type { PublicCell } from "@/lib/publicField";
 
 /** A memory counts once it carries any real content. */
 function hasMemoryContent(memory: Memory | undefined): boolean {
@@ -345,9 +346,54 @@ class MomentsStore {
       .sort((a, b) => b.createdAt - a.createdAt);
   }
 
-  /** The ambient placeholder city (until realtime): quiet, idempotent. */
+  /** The ambient placeholder city (fallback when the DB is empty): quiet,
+   *  idempotent. */
   seedAmbient(moments: Moment[]) {
     for (const m of moments) this.add(m, { quiet: true });
+  }
+
+  /**
+   * The REAL public field, read from the database (coarsened to a privacy
+   * grid — every point sits on a cell centre). Density is recreated exactly
+   * like the seed: a cell of n feelings becomes min(n, 6) points stacked on
+   * the centre, so a busier cell glows brighter. seed:false — real feeling
+   * burns at full weight. Idempotent by id (stable per cell+emotion+copy).
+   */
+  ingestPublicField(cells: PublicCell[]): void {
+    for (const c of cells) {
+      const copies = Math.max(1, Math.min(6, c.n));
+      for (let k = 0; k < copies; k++) {
+        this.add(
+          {
+            id: `pf:${c.cellId}:${k}`,
+            emotion: c.emotion,
+            intensity: Math.min(10, Math.max(1, c.avgIntensity)),
+            lng: c.lng,
+            lat: c.lat,
+            createdAt: c.bucket,
+            seed: false,
+          },
+          { quiet: true },
+        );
+      }
+    }
+  }
+
+  /** A single LIVE public feeling (someone else, just now) — blooms on
+   *  arrival at the cell centre. Own echoes are filtered upstream. */
+  ingestLivePublic(cell: PublicCell): void {
+    this.add(
+      {
+        id: cell.eid ? `pf:live:${cell.eid}` : `pf:${cell.cellId}:live`,
+        emotion: cell.emotion,
+        intensity: Math.min(10, Math.max(1, cell.avgIntensity)),
+        lng: cell.lng,
+        lat: cell.lat,
+        createdAt: cell.bucket,
+        seed: false,
+      },
+      { quiet: false },
+    );
   }
 
   /** Seed data is lab-only; the product screen sweeps it on mount. */
