@@ -205,7 +205,7 @@ function buildMoments(): Moment[] {
   const now = Date.now();
   const moments: Moment[] = [];
   let i = 0;
-  const push = (lng: number, lat: number, emotion: Emotion, intensity: number) => {
+  const push = (lng: number, lat: number, emotion: Emotion, intensity: number, wash = false) => {
     moments.push({
       id: `ambient-${i++}`,
       emotion,
@@ -214,16 +214,19 @@ function buildMoments(): Moment[] {
       lat,
       createdAt: now - rng() * 12 * 3600_000,
       seed: true,
+      ...(wash ? { wash: true } : {}),
     });
   };
 
-  // Pockets: 2–3 moments each, scattered ~600m, strength wobbling ±1.5.
+  // Pockets: 2–3 moments each, scattered ~200m (tightened 2026-07-08 for
+  // the 1/16-mile kernels — a pocket must read as ONE local glow, not a
+  // scatter of separate dots), strength wobbling ±1.5.
   for (const [lng, lat, emotion, strength] of POCKETS) {
     const n = 2 + Math.round(rng());
     for (let k = 0; k < n; k++) {
       push(
-        lng + (rng() - 0.5) * 0.012,
-        lat + (rng() - 0.5) * 0.01,
+        lng + (rng() - 0.5) * 0.004,
+        lat + (rng() - 0.5) * 0.0032,
         emotion,
         strength + (rng() - 0.5) * 3,
       );
@@ -242,6 +245,7 @@ function buildMoments(): Moment[] {
         lat + (rng() - 0.5) * 0.006,
         washEmotion(lng, lat, rng()),
         1.5 + rng() * 2,
+        true, // the under-wash: wide dim skirt, never an entry
       );
     }
   }

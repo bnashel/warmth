@@ -193,6 +193,7 @@ uniform vec2 uWeave;      // thread interleave at fronts: amp, scale
 uniform float uShimmer;   // hue flow along the wind (max OKLab rotation)
 uniform vec4 uTiers;      // matte layers: count, rim, richen, crawl
 uniform float uTierKeep;  // tiering over the live wash beneath (0..1)
+uniform vec2 uOverlap;    // genuine-overlap gate: smoothstep from, to
 out vec4 fragColor;
 
 // Value-noise fbm, 3 octaves — cheap enough for a half-res target.
@@ -279,14 +280,34 @@ void main() {
   float topW = -1.0;
   // Screen-space noise domain shared by the woven-wash passes below.
   vec2 nq = vec2(vUv.x * uAspect, vUv.y);
+
+  // THE GENUINE-OVERLAP GATE (Eli, 2026-07-08: colors interact ONLY where
+  // feelings truly share ground in the data). Measured, not decorative:
+  // the runner-up emotion's pooled intensity as a share of the leader's,
+  // AT THIS PIXEL. A blob alone gates to 0 — its hue holds perfectly
+  // still; a real meeting of feelings opens the gate to 1.
+  float top1 = 0.0;
+  float top2 = 0.0;
+  for (int i = 0; i < ${NE}; i++) {
+    if (I[i] > top1) { top2 = top1; top1 = I[i]; }
+    else if (I[i] > top2) { top2 = I[i]; }
+  }
+  float overlap = smoothstep(uOverlap.x, uOverlap.y, top2 / max(top1, 1e-5));
+
   for (int i = 0; i < ${NE}; i++) {
     float w = pow(I[i], uDominance);
-    // THE WEAVE (from silk): where feelings meet, threads of each
-    // interleave through the front — per-emotion bands of slow noise tilt
-    // the local vote, so neighbors meld as woven strands, never a hard
-    // seam and never one averaged smear.
-    float band = vnoise(nq * uWeave.y + float(i) * 17.31 + uTimeSec * 0.025);
-    w *= 1.0 + uWeave.x * (band - 0.5) * 2.0;
+    // THE WEAVE (from silk): where feelings GENUINELY meet, threads of
+    // each interleave through the front — per-emotion bands of slow noise
+    // tilt the local vote, so neighbors meld as woven strands, never a
+    // hard seam and never one averaged smear. Gated by the overlap above
+    // (belt to its by-construction suspenders: with one emotion present,
+    // tilting its own vote is a no-op anyway).
+    // The flow clock is brisk ON PURPOSE: the overlap gate holds every
+    // lone feeling perfectly still, so speed here only animates genuine
+    // meetings (measured 2026-07-08: at 0.025 the interaction was lost
+    // under the breath's noise floor).
+    float band = vnoise(nq * uWeave.y + float(i) * 17.31 + uTimeSec * 0.08);
+    w *= 1.0 + uWeave.x * (band - 0.5) * 2.0 * overlap;
     lab += w * uHueLab[i];
     anchorChroma += w * length(uHueLab[i].yz);
     wsum += w;
@@ -317,13 +338,14 @@ void main() {
   }
 
   // ---- THE WOVEN WASH (Eli's silk+pigment merge, 2026-07-08) ----------
-  // From SILK — the hue itself flows: a slow OKLab rotation riding the
-  // same wind-borne noise the edges drift with, so when the field moves
-  // its COLOR moves — never a static shape with an alpha animation.
+  // From SILK — the hue flows: a slow OKLab rotation riding the wind.
+  // GATED BY GENUINE OVERLAP (Eli's correctness rule): a lone feeling's
+  // hue is a fact and holds still; only where two feelings truly share
+  // ground does the color visibly flow between them.
   {
     vec2 axis2 = normalize(uAxis);
     float along = dot(nq, axis2);
-    float rot = (fbm(vec2(along * 5.0 - uTimeSec * 0.035, 4.7)) - 0.5) * 2.0 * uShimmer;
+    float rot = (fbm(vec2(along * 5.0 - uTimeSec * 0.12, 4.7)) - 0.5) * 2.0 * uShimmer * overlap;
     float cr = cos(rot);
     float sr = sin(rot);
     lab.yz = mat2(cr, -sr, sr, cr) * lab.yz;
@@ -514,16 +536,19 @@ export class FieldLayer implements CustomLayerInterface {
     const d = this.instanceData;
     for (let i = 0; i < n; i++) {
       const p = points[i];
-      // The lonely-commit floor is for real feelings; the seed sheet keeps
-      // its geographic scale (small floor) so it can't pool into blobs.
-      this.floorPx[i] = p.seed ? FIELD.seedMinRadiusPx : FIELD.minRadiusPx;
+      // TWO LAYERS, ONE FIELD (2026-07-08): entries (commits + pocket
+      // seeds) are TIGHT — ~1/16 mile, defined, pinned to their place.
+      // The wash lattice keeps the wide dim skirt that carries the
+      // between-space, so zoomed out the city is one continuous glow.
+      this.floorPx[i] = p.wash ? FIELD.wash.minRadiusPx : FIELD.minRadiusPx;
       this.isSeed[i] = p.seed ? 1 : 0;
       const mc = mapboxgl.MercatorCoordinate.fromLngLat({
         lng: p.position[0],
         lat: p.position[1],
       });
-      const radiusM =
-        FIELD.radiusM + FIELD.radiusPerIntensityM * (p.intensity - 1);
+      const radiusM = p.wash
+        ? FIELD.wash.radiusM
+        : FIELD.radiusM + FIELD.radiusPerIntensityM * (p.intensity - 1);
       const o = i * FLOATS_PER_INSTANCE;
       d[o] = mc.x;
       d[o + 1] = mc.y;
@@ -832,6 +857,7 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform1f(u("uShimmer"), WOVEN.shimmer);
     gl.uniform4f(u("uTiers"), WOVEN.tiers.count, WOVEN.tiers.rim, WOVEN.tiers.richen, WOVEN.tiers.crawl);
     gl.uniform1f(u("uTierKeep"), WOVEN.tiers.keep);
+    gl.uniform2f(u("uOverlap"), WOVEN.overlap.from, WOVEN.overlap.to);
     gl.uniform4f(u("uShape"), this.look.warpAmp, this.look.scale, this.look.drift, this.look.streak);
     gl.uniform1f(u("uBand"), this.look.band);
     gl.uniform1f(u("uAspect"), this.texW / Math.max(1, this.texH));

@@ -195,19 +195,23 @@ export const GLOW = {
 /* emotion, brightness = amount of feeling. No individual points.      */
 /* ------------------------------------------------------------------ */
 export const FIELD = {
-  /** Kernel footprint in METERS (geographic; a feeling warms its area). */
-  radiusM: 900,
-  /** + meters per unit intensity (1..10 → up to ~60% wider). */
-  radiusPerIntensityM: 55,
-  /** Pixel clamps: min keeps one lonely commit a NEIGHBORHOOD bloom at
-   *  every zoom (never a pin); max protects DPR-3 fill-rate. CSS px. */
-  minRadiusPx: 92,
+  /** Kernel footprint in METERS — TIGHT (2026-07-08, Eli: blobs spanned
+   *  too wide): a feeling warms ~1/16 mile around it. Entries and
+   *  neighborhood pockets read as defined local glows; the WASH layer
+   *  below carries the between-space so the city never fragments. */
+  radiusM: 100,
+  /** + meters per unit intensity (1..10 → up to ~2.6× wider). */
+  radiusPerIntensityM: 18,
+  /** Pixel clamps: min keeps one lonely commit visibly present at every
+   *  zoom (a tight ember, no longer a whole-neighborhood bloom); max
+   *  protects DPR-3 fill-rate. CSS px. */
+  minRadiusPx: 30,
   maxRadiusPx: 300,
-  /** The ambient seed's own floor: the wash is a continuous SHEET, so its
-   *  kernels don't need the lonely-commit clamp — a small floor keeps the
-   *  lattice overlapping at rest zoom without the 92px blobs that pooled
-   *  hard enough to out-vote a real commit's hue (and cost ~26× overdraw). */
-  seedMinRadiusPx: 56,
+  /** THE UNDER-WASH (the no-dead-space layer): the ambient lattice keeps
+   *  its wide soft skirt — much dimmer and quieter than any entry — so
+   *  zoomed out the city still reads as one continuous glowing field
+   *  while entries stay tight and defined up close. */
+  wash: { radiusM: 900, minRadiusPx: 56, gain: 0.36 },
   /** Kernel falloff exponent on (1 − t²): higher = tighter heart,
    *  longer relative skirt. The edge ALWAYS reaches zero — no rims. */
   kernelSoftness: 2.5,
@@ -250,9 +254,9 @@ export const FIELD = {
   anchorChroma: 1.15,
   /** Overall field gain on the additive composite. */
   gain: 1.0,
-  /** Ambient-seed weight dimmer: the placeholder city is a thin translucent
-   *  water layer — REAL feelings (your commit, realtime) burn through it at
-   *  full strength. Applies to `seed: true` moments only. */
+  /** Pocket-seed weight dimmer: the placeholder neighborhood moods sit
+   *  below any real feeling — a commit burns through at full strength.
+   *  (The lattice wash has its own, quieter gain: FIELD.wash.gain.) */
   seedGain: 0.45,
   /** The wash is a CITY-SCALE impression: as you zoom into a neighborhood
    *  it thins (real commits stay). Kills the giant murky blobs a single
@@ -289,7 +293,9 @@ export const TRAIL = {
   /** Freshness floor for entries OLDER than the window: the journal is
    *  forever — an old spark settles to this steady ember, never to zero. */
   emberFloor: 0.35,
-  gain: 1.15,
+  /** Quieted 2026-07-08 (Eli: the private view rendered too LOUD for an
+   *  intimate space) — same matte, non-neon bar as the public field. */
+  gain: 0.8,
   /** The paper-day stain is a MARK, not a glow (Ben: the glow tail read as
    *  180p blur). Real watercolor: flat wash to `edge` of the radius with a
    *  short hand-soft feather (0.74 read as blur — Eli), pigment pooling
@@ -377,9 +383,12 @@ export const ATMOSPHERE = {
 /* ------------------------------------------------------------------ */
 export const SHAPES = {
   /** THE WOVEN WASH: edges brushed out along the wind, alive but quiet.
+   *  warpAmp/drift cut 2026-07-08 (Eli: an emotion's LOCATION is a fact):
+   *  the old 0.105 warp visibly sloshed small pools to new positions —
+   *  now edges undulate in place and centers stay pinned to the data.
    *  (The bloom/watercolor/ink/aurora exploration presets and the 07-08
    *  ember/silk/pigment directions are retired — docs/later.md.) */
-  woven: { warpAmp: 0.105, scale: 9, drift: 0.035, streak: 0.5, band: 0.25 },
+  woven: { warpAmp: 0.045, scale: 11, drift: 0.01, streak: 0.35, band: 0.25 },
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -398,6 +407,13 @@ export const WOVEN = {
   /** Hue flow along the wind axis (max OKLab rotation, radians): the
    *  color genuinely moves — motion is never just alpha. */
   shimmer: 0.35,
+  /** DATA-DRIVEN MOTION (Eli, 2026-07-08): the colors-interacting effects
+   *  (shimmer + weave) only run where two feelings GENUINELY overlap in
+   *  the pooled data. Gate = runner-up emotion's local intensity as a
+   *  share of the leader's, smoothstepped across [from, to]: below from,
+   *  a blob is alone and its hue holds perfectly still; above to, a true
+   *  meeting of feelings flows at full strength. */
+  overlap: { from: 0.12, to: 0.45 },
   /** Layered matte depth: count = translucent tiers; rim = pigment
    *  pooling darker along each contour; richen = deep pools carry more
    *  pigment (more chroma, slightly deeper — matte); crawl = how far
@@ -509,7 +525,8 @@ export const WEATHER = {
   snowNightLift: 0.06, // ink lifts a breath (snow-lit sky)
 
   /* -- wind: the flow follows the real air --------------------------- */
-  windWarp: 0.05, // + warp amplitude at full wind
+  windWarp: 0.02, // + warp amplitude at full wind (trimmed 2026-07-08:
+  // even at full storm, no feeling may visibly leave its place)
   windDrift: 0.06, // + drift speed at full wind
   windStreak: 0.35, // anisotropy along the real wind axis
 
