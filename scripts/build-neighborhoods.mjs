@@ -9,6 +9,13 @@
  *     → 5-decimal coords, centroid label anchor + area tier per feature
  *     → public/data/nyc-neighborhoods.json (committed; no runtime fetch)
  *
+ * ALSO emits public/data/nyc-landareas.json: EVERY NTA polygon — including
+ * the parks, airports, and cemeteries the neighborhoods file drops — as
+ * bare geometry (heavier simplification, 4-decimal coords). This is the
+ * city's LAND, not its names: the land mask and the ambient wash build on
+ * it, so Central Park is land that can feel, never a hole (Eli, 2026-07-08:
+ * parks are emotionally significant places, not voids).
+ *
  * Run: node scripts/build-neighborhoods.mjs
  * No dependencies — algorithms are hand-rolled below.
  */
@@ -127,11 +134,40 @@ const props = (f) => {
   };
 };
 
+// The LAND file: every NTA polygon of every type, geometry only. Same
+// tolerance as the neighborhoods (23m): anything coarser bulged shorelines
+// into the East River channels — rivers must stay void. 4-decimal coords.
+const LAND_TOLERANCE = 0.00025;
+const landPolys = [];
+for (const f of raw.features) {
+  const geomType = f.geometry?.type;
+  const polys =
+    geomType === "Polygon"
+      ? [f.geometry.coordinates]
+      : geomType === "MultiPolygon"
+        ? f.geometry.coordinates
+        : [];
+  for (const rings of polys) {
+    const processed = rings
+      .map((r) => {
+        let ring = r;
+        if (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])
+          ring = [...ring, ring[0]];
+        let s = simplify(ring, LAND_TOLERANCE);
+        if (s.length < 5) s = ring;
+        return s.map(([x, y]) => [Math.round(x * 1e4) / 1e4, Math.round(y * 1e4) / 1e4]);
+      })
+      .filter((r) => r.length >= 5);
+    if (processed.length) landPolys.push(processed);
+  }
+}
+
 const features = [];
 for (const f of raw.features) {
   const { name, borough, type } = props(f);
   // ntatype 0 = residential neighborhood. Parks/airports/cemeteries/rikers
   // (types 5/6/7/8/9…) are places, not neighborhoods — no shapes, no names.
+  // (They ARE still land: see nyc-landareas.json above.)
   if (type !== "0" || !name) continue;
 
   const geomType = f.geometry?.type;
@@ -181,4 +217,11 @@ const json = JSON.stringify(fc);
 await writeFile(OUT, json);
 console.log(
   `wrote ${OUT}: ${features.length} neighborhoods, ${(json.length / 1024).toFixed(0)} KB`,
+);
+
+// The land file: a bare MultiPolygon-shaped array — [poly][ring][point].
+const landJson = JSON.stringify({ polygons: landPolys });
+await writeFile("public/data/nyc-landareas.json", landJson);
+console.log(
+  `wrote public/data/nyc-landareas.json: ${landPolys.length} land polygons, ${(landJson.length / 1024).toFixed(0)} KB`,
 );

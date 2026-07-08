@@ -68,19 +68,57 @@ const POCKETS: [number, number, Emotion, number][] = [
   [-73.83, 40.759, "joy", 6.5], // Flushing
   [-73.858, 40.7, "gratitude", 5], // Forest Hills
   [-73.795, 40.707, "joy", 5], // Jamaica
+  // …and the east/coast (2026-07-08: these were pitch black — the old
+  // ellipse landmass missed them entirely; no place is a void):
+  [-73.845, 40.735, "joy", 5], // Flushing Meadows-Corona Park
+  [-73.765, 40.697, "gratitude", 4.5], // St. Albans
+  [-73.77, 40.765, "calm", 4.5], // Bayside
+  [-73.86, 40.58, "calm", 5], // the Rockaways (beach air)
   // The Bronx
   [-73.92, 40.827, "energy", 6.5], // South Bronx
   [-73.877, 40.86, "calm", 5.5], // Bronx Park
   [-73.905, 40.881, "gratitude", 4.5], // Riverdale-ish
+  [-73.828, 40.85, "love", 4.5], // Parkchester / eastern Bronx
   // Staten Island
   [-74.077, 40.641, "gratitude", 5.5], // St. George
   [-74.15, 40.58, "calm", 5], // mid-island
   [-74.19, 40.54, "calm", 4.5], // south shore
 ];
 
-/** Borough landmasses as (optionally rotated) ellipses — coarse on purpose;
- *  the field's soft kernels forgive a little shoreline spill. */
-const LAND: { cx: number; cy: number; rx: number; ry: number; rotDeg: number }[] = [
+/** THE REAL LANDMASS (2026-07-08): the wash walks the same NTA polygons the
+ *  land mask is built from — parks, airports, and cemeteries included — so
+ *  ambient feeling reaches every place the field is allowed to live. The
+ *  old borough ellipses missed eastern Queens, the Rockaways, and City
+ *  Island entirely (Eli's dead-space report); they remain only as the
+ *  fetch-failure fallback so the city is never a void. */
+const LAND_URL = "/data/nyc-landareas.json";
+
+type LandPoly = { rings: number[][][]; bbox: [number, number, number, number] };
+let landPolys: LandPoly[] | null = null;
+let landLoad: Promise<void> | null = null;
+
+async function loadLand(): Promise<void> {
+  try {
+    const res = await fetch(LAND_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = (await res.json()) as { polygons: number[][][][] };
+    landPolys = data.polygons.map((rings) => {
+      let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
+      for (const [x, y] of rings[0]) {
+        if (x < w) w = x;
+        if (x > e) e = x;
+        if (y < s) s = y;
+        if (y > n) n = y;
+      }
+      return { rings, bbox: [w, s, e, n] };
+    });
+  } catch (err) {
+    console.warn("warmth: land polygons unavailable, wash falls back to ellipses", err);
+  }
+}
+
+/** Fallback borough ellipses — coarse; used only if the land fetch fails. */
+const LAND_FALLBACK: { cx: number; cy: number; rx: number; ry: number; rotDeg: number }[] = [
   { cx: -73.967, cy: 40.788, rx: 0.016, ry: 0.088, rotDeg: -17 }, // Manhattan (tilted)
   { cx: -73.944, cy: 40.655, rx: 0.066, ry: 0.056, rotDeg: 0 }, // Brooklyn
   { cx: -73.85, cy: 40.72, rx: 0.095, ry: 0.052, rotDeg: 0 }, // Queens
@@ -93,7 +131,25 @@ const SPACING_LNG = 0.018;
 const SPACING_LAT = 0.0145;
 
 function insideLand(lng: number, lat: number): boolean {
-  for (const e of LAND) {
+  if (landPolys) {
+    for (const p of landPolys) {
+      const [w, s, e, n] = p.bbox;
+      if (lng < w || lng > e || lat < s || lat > n) continue;
+      let inside = false;
+      for (const ring of p.rings) {
+        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+          const [xa, ya] = ring[i];
+          const [xb, yb] = ring[j];
+          if (ya > lat !== yb > lat && lng < xa + ((lat - ya) / (yb - ya)) * (xb - xa)) {
+            inside = !inside;
+          }
+        }
+      }
+      if (inside) return true;
+    }
+    return false;
+  }
+  for (const e of LAND_FALLBACK) {
     const rad = (e.rotDeg * Math.PI) / 180;
     const dx = lng - e.cx;
     const dy = lat - e.cy;
@@ -134,10 +190,17 @@ function washEmotion(lng: number, lat: number, roll: number): Emotion {
 }
 
 /**
- * The standing city: ~90 pocket moments + ~200 wash moments, ages staggered
- * across the last 12h so the recency fade gives the water natural depth.
+ * The standing city: ~100 pocket moments + wash moments across the REAL
+ * landmass, ages staggered across the last 12h so the recency fade gives
+ * the water natural depth. Async: waits (once) for the land polygons —
+ * on fetch failure it degrades to the ellipse fallback, never a blocker.
  */
-export function ambientSeedMoments(): Moment[] {
+export async function ambientSeedMoments(): Promise<Moment[]> {
+  await (landLoad ??= loadLand());
+  return buildMoments();
+}
+
+function buildMoments(): Moment[] {
   const rng = mulberry32(0x5eed);
   const now = Date.now();
   const moments: Moment[] = [];

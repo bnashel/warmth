@@ -244,11 +244,12 @@ export const FIELD = {
    *  full strength. Applies to `seed: true` moments only. */
   seedGain: 0.45,
   /** The wash is a CITY-SCALE impression: as you zoom into a neighborhood
-   *  it dissolves (real commits stay). Kills the giant murky blobs a single
-   *  dim seed became at street zoom (Ben's field report) — and drops ~290
-   *  max-size kernels of GPU overdraw right when tiles are loading, which
-   *  is most of the zoom-in stutter. */
-  seedZoomFade: { from: 12.6, to: 14.0 },
+   *  it thins (real commits stay). Kills the giant murky blobs a single
+   *  dim seed became at street zoom (Ben's field report) — and drops most
+   *  of the wash's GPU overdraw right when tiles are loading. `floor` keeps
+   *  a quiet ambient base at street zoom: no place ever reads as a void
+   *  (Eli, 2026-07-08 — was 0, which re-opened dead space up close). */
+  seedZoomFade: { from: 12.6, to: 14.0, floor: 0.3 },
   /** Living tide: subtle brightness breath. */
   breath: { periodMs: 2500, amp: 0.045 },
   /** Streetlight signature: the field multiplied onto the base map so

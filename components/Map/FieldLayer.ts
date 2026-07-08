@@ -731,12 +731,13 @@ export class FieldLayer implements CustomLayerInterface {
         this.clamped = new Float32Array(src.length);
       }
       this.clamped.set(src.subarray(0, n * FLOATS_PER_INSTANCE));
-      // The ambient wash is a city-scale impression: it dissolves as you
-      // zoom into a neighborhood (real commits stay). Smoothstep, so the
-      // fade is continuous with the camera.
+      // The ambient wash is a city-scale impression: it thins to a quiet
+      // floor as you zoom into a neighborhood (real commits stay). Smooth-
+      // step, so the fade is continuous with the camera — and never zero:
+      // no place reads as a void at street level (Eli, 2026-07-08).
       const sf = FIELD.seedZoomFade;
       const zt = Math.min(1, Math.max(0, (zoom - sf.from) / (sf.to - sf.from)));
-      const seedFade = 1 - zt * zt * (3 - 2 * zt);
+      const seedFade = 1 - (1 - sf.floor) * zt * zt * (3 - 2 * zt);
       for (let i = 0; i < n; i++) {
         const o = i * FLOATS_PER_INSTANCE + 2;
         const minMerc = this.floorPx[i] * mercPerCssPx;

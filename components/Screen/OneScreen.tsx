@@ -148,15 +148,15 @@ export default function OneScreen() {
   // re-enter fresh — the water never evaporates (review finding).
   useEffect(() => {
     momentsStore.clearTest();
-    momentsStore.seedAmbient(ambientSeedMoments());
-    const replenish = window.setInterval(
-      () => momentsStore.seedAmbient(ambientSeedMoments()),
-      30 * 60_000,
-    );
+    // Async: the seed waits for the real land polygons (idempotent adds,
+    // so racing calls are harmless — dedupe is by id).
+    const seed = () => void ambientSeedMoments().then((m) => momentsStore.seedAmbient(m));
+    seed();
+    const replenish = window.setInterval(seed, 30 * 60_000);
     // Sounds must never survive the tab losing focus mid-gesture.
     const onVisibility = () => {
       if (document.hidden) panic();
-      else momentsStore.seedAmbient(ambientSeedMoments());
+      else seed();
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
