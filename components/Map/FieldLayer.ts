@@ -155,6 +155,7 @@ uniform sampler2D uField0;
 uniform sampler2D uField1;
 uniform vec3 uHueLab[${NE}];
 uniform float uExposure;
+uniform vec2 uFloor;   // darkness budget: pooled-total smoothstep (from, to)
 uniform float uDominance;
 uniform float uChromaFloor;
 uniform float uGain;
@@ -328,6 +329,12 @@ void main() {
   // Pooled feeling → light through a filmic knee: more feeling = brighter,
   // asymptotically — never white. The low end is linear: the long fade.
   float b = 1.0 - exp(-uExposure * total);
+
+  // THE DARKNESS BUDGET (round 2): below uFloor.x pooled feeling the land
+  // stays night; full presence by uFloor.y. Most of the city is dark —
+  // feelings are distinct luminous islands, at every zoom. Applied to b
+  // (not a discard) so the edge of an island is still a smooth exhale.
+  b *= smoothstep(uFloor.x, uFloor.y, total);
 
   // The TRUE pixel's world position (vUv, unwarped) — shared by the land
   // mask and the close-zoom grain: the shore and the grain are facts of
@@ -884,6 +891,7 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform1i(u("uField1"), 1);
     gl.uniform3fv(u("uHueLab"), this.hueLab);
     gl.uniform1f(u("uExposure"), FIELD.exposure);
+    gl.uniform2f(u("uFloor"), FIELD.floor.from, FIELD.floor.to);
     gl.uniform1f(u("uDominance"), FIELD.dominance);
     gl.uniform1f(u("uChromaFloor"), FIELD.chromaFloor);
     gl.uniform1f(u("uTimeSec"), this.timeSec);

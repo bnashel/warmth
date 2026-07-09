@@ -209,11 +209,13 @@ export const FIELD = {
    *  protects DPR-3 fill-rate. CSS px. */
   minRadiusPx: 38,
   maxRadiusPx: 300,
-  /** THE UNDER-WASH (the no-dead-space layer): the ambient lattice keeps
-   *  its wide soft skirt — much dimmer and quieter than any entry — so
-   *  zoomed out the city still reads as one continuous glowing field
-   *  while entries stay tight and defined up close. */
-  wash: { radiusM: 900, minRadiusPx: 56, gain: 0.42 },
+  /** THE UNDER-WASH, disciplined (Eli round-2, 2026-07-08): the lattice
+   *  no longer carries a continuous glowing field — "the void is gone and
+   *  nothing reads as special." It survives only as faint pooling that
+   *  darkness (FIELD.floor) mostly swallows; the city at rest is NIGHT
+   *  with distinct luminous islands. Footprint cut (56→44px floors were
+   *  inflating each splat to ~1.8 km at rest, pooling 4-6 deep). */
+  wash: { radiusM: 900, minRadiusPx: 44, gain: 0.26 },
   /** Kernel falloff exponent on (1 − t²): higher = tighter heart,
    *  longer relative skirt. The edge ALWAYS reaches zero — no rims. */
   kernelSoftness: 2.5,
@@ -223,6 +225,14 @@ export const FIELD = {
    *  and the never-white cap, extra exposure deepens the DENSITY read:
    *  stacked feeling climbs visibly faster than a lone entry. */
   exposure: 1.2,
+  /** THE DARKNESS BUDGET (Eli round-2, 2026-07-08): below `from` pooled
+   *  feeling the land stays night; full presence by `to`. Kills the
+   *  wall-to-wall carpet at rest — most of the city is dark and feelings
+   *  are luminous islands (the mid-zoom look, now at every zoom). Sits on
+   *  pooled TOTAL right after the knee, so tiers/heart/grain inherit it.
+   *  Reference pooled weights: lone wash splat ≈ 0.12, wash pooling ≈
+   *  0.2-0.3, pocket seeds ≈ 0.3-0.5, fresh real commit ≈ 0.75. */
+  floor: { from: 0.09, to: 0.3 },
   /** THE LUMINOUS HEART: where density peaks, the hue itself lifts toward
    *  light (OKLab L, capped well below white) — aurora over a dark planet,
    *  never fog banks. Rides the knee output b across [from, to]. Lift
