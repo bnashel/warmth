@@ -27,7 +27,7 @@ const VIEWS = [
   { key: "public", label: "public", caption: "the whole city, feeling together" },
   // The journal must read cold: whose it is, what the marks are, and that
   // they're one story through time (Eli, 2026-07-08 clarity pass).
-  { key: "private", label: "private", caption: "your journal — every feeling, one thread through time" },
+  { key: "private", label: "private", caption: "only you can see this" },
 ] as const;
 type ViewKey = (typeof VIEWS)[number]["key"];
 
@@ -463,7 +463,7 @@ export default function OneScreen() {
               zIndex: 10,
             }}
           >
-            your trail starts here — hold the orb to leave your first feeling
+            hold the orb to leave your first feeling
           </motion.p>
         )}
       </AnimatePresence>
@@ -580,7 +580,7 @@ export default function OneScreen() {
                 boxShadow: `0 0 8px ${EMOTION_HUES_SAFE[onThisDay.emotion]}99`,
               }}
             />
-            {agoLabel(onThisDay.createdAt)} — {onThisDay.emotion}
+            {agoLabel(onThisDay.createdAt)} · {onThisDay.emotion}
           </motion.button>
         )}
       </AnimatePresence>

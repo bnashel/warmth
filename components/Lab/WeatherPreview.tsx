@@ -227,7 +227,7 @@ export function WeatherPreview() {
                   color: "rgba(233,236,244,0.3)",
                 }}
               >
-                dev preview — never ships in the product
+                dev preview, never ships in the product
               </p>
             </motion.div>
           </>

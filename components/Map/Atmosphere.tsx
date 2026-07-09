@@ -72,9 +72,9 @@ export function MissingToken() {
       }}
     >
       <p style={{ maxWidth: 340, fontSize: 14, lineHeight: 1.6, color: "rgba(255,255,255,0.5)" }}>
-        Set <code style={{ color: "rgba(255,255,255,0.7)" }}>NEXT_PUBLIC_MAPBOX_TOKEN</code> in{" "}
-        <code style={{ color: "rgba(255,255,255,0.7)" }}>.env.local</code> and restart — the map
-        renders here.
+        set <code style={{ color: "rgba(255,255,255,0.7)" }}>NEXT_PUBLIC_MAPBOX_TOKEN</code> in{" "}
+        <code style={{ color: "rgba(255,255,255,0.7)" }}>.env.local</code> and restart. the map
+        renders here
       </p>
     </div>
   );

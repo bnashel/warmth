@@ -71,7 +71,7 @@ export default function AuthCallback() {
             cursor: "pointer",
           }}
         >
-          that link didn&apos;t work — try again
+          that link didn&apos;t work. try again
         </button>
       ) : (
         "signing you in…"

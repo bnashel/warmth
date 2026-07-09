@@ -310,7 +310,7 @@ export function MemoryCard({ entryId, onClose }: { entryId: string; onClose: () 
                   marginLeft: "auto",
                 }}
               >
-                {kept === "kept" ? "kept" : "couldn't keep — device storage is full"}
+                {kept === "kept" ? "kept" : "couldn't keep, device storage is full"}
               </motion.span>
             )}
           </AnimatePresence>

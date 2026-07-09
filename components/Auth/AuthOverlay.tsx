@@ -131,7 +131,7 @@ export function AuthOverlay() {
             style={{ height: 3, width: 64, borderRadius: 3, background: HUE_RIBBON, opacity: 0.9 }}
           />
           <span style={{ fontSize: 13.5, lineHeight: 1.5, color: "rgba(233,236,244,0.5)" }}>
-            sign in to feel the city and keep your own trail.
+            sign in to feel the city and keep your own trail
           </span>
         </div>
 
@@ -150,14 +150,14 @@ export function AuthOverlay() {
                 disabled={busy}
                 onClick={() => run(() => signInWithProvider("google"), () => {})}
               >
-                Continue with Google
+                continue with Google
               </button>
               <button
                 style={glassButton}
                 disabled={busy}
                 onClick={() => run(() => signInWithProvider("apple"), () => {})}
               >
-                Continue with Apple
+                continue with Apple
               </button>
 
               <Divider />
@@ -192,8 +192,8 @@ export function AuthOverlay() {
           {stage.kind === "email-code" && (
             <CodeStage
               key="email-code"
-              lead={`We emailed a link and a code to ${stage.email}.`}
-              hint="Tap the link on this device, or paste the 6-digit code:"
+              lead={`we emailed a link and a code to ${stage.email}`}
+              hint="tap the link on this device, or paste the 6-digit code:"
               code={code}
               setCode={setCode}
               busy={busy}
@@ -247,8 +247,8 @@ export function AuthOverlay() {
           {stage.kind === "phone-code" && (
             <CodeStage
               key="phone-code"
-              lead={`We texted a 6-digit code to ${stage.phone}.`}
-              hint="Enter it here:"
+              lead={`we texted a 6-digit code to ${stage.phone}`}
+              hint="enter it here:"
               code={code}
               setCode={setCode}
               busy={busy}
