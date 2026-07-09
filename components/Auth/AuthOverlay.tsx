@@ -4,82 +4,48 @@ import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Inter } from "next/font/google";
 import { EMOTION_HUES, SPRING } from "@/lib/theme";
-import {
-  signInWithEmail,
-  signInWithPhone,
-  verifyEmail,
-  verifyPhone,
-  signInWithProvider,
-} from "@/lib/auth";
+import { signInWithEmail } from "@/lib/auth";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
 
 /** The five hues, left→right, as a soft signature ribbon under the title. */
 const HUE_RIBBON = `linear-gradient(90deg, ${EMOTION_HUES.joy}, ${EMOTION_HUES.energy}, ${EMOTION_HUES.love}, ${EMOTION_HUES.gratitude}, ${EMOTION_HUES.calm})`;
 
-type Stage =
-  | { kind: "choose" }
-  | { kind: "email-code"; email: string }
-  | { kind: "phone" }
-  | { kind: "phone-code"; phone: string };
-
-const glassButton: React.CSSProperties = {
-  width: "100%",
-  padding: "13px 16px",
-  borderRadius: 14,
-  border: "1px solid rgba(233,236,244,0.16)",
-  background: "rgba(233,236,244,0.05)",
-  color: "rgba(233,236,244,0.92)",
-  fontSize: 14.5,
-  fontWeight: 500,
-  cursor: "pointer",
-  textAlign: "center",
-};
-
-const fieldStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "13px 14px",
-  borderRadius: 14,
-  border: "1px solid rgba(233,236,244,0.16)",
-  background: "rgba(10,11,15,0.5)",
-  color: "rgba(233,236,244,0.95)",
-  fontSize: 14.5,
-  outline: "none",
-};
-
 /**
- * THE AUTH WALL — a gorgeous full-screen gate over the living field.
- * The city breathes behind glass; a single quiet card invites you in.
- * Google / Apple, or an email link (with a paste-a-code fallback so a link
- * opened on another device still works), or a phone code. Every state change
- * is a spring/fade — nothing pops (visual rule 4).
+ * The wall, simplified to the ONE path that works today (Eli, 2026-07-09):
+ * email → tap the link. Bigger type, one field, one button. Google and
+ * phone return when Ben lands OAuth/Twilio credentials (handoff doc);
+ * Apple is dropped (Eli's call). A type-a-code step returns with custom
+ * SMTP (free-tier emails are link-only). The living city breathes behind
+ * the glass; every state change is a spring — nothing pops (rule 4).
  */
 export function AuthOverlay() {
-  const [stage, setStage] = useState<Stage>({ kind: "choose" });
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [code, setCode] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState<"ask" | "sending" | "sent">("ask");
   const [error, setError] = useState<string | null>(null);
 
-  const run = async (fn: () => Promise<{ error?: string }>, onOk: () => void) => {
-    setBusy(true);
+  async function send() {
+    const addr = email.trim();
+    if (!addr.includes("@")) {
+      setError("that doesn't look like an email");
+      return;
+    }
     setError(null);
-    const { error } = await fn();
-    setBusy(false);
-    if (error) setError(error);
-    else onOk();
-  };
-
-  const accent = EMOTION_HUES.joy;
+    setStage("sending");
+    const res = await signInWithEmail(addr);
+    if (!res.error) setStage("sent");
+    else {
+      setStage("ask");
+      setError(res.error);
+    }
+  }
 
   return (
     <motion.div
       className={inter.className}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      exit={{ opacity: 0, transition: { duration: 0.5 } }}
-      transition={{ duration: 0.4 }}
+      exit={{ opacity: 0, transition: { duration: 0.6 } }}
       style={{
         position: "fixed",
         inset: 0,
@@ -87,265 +53,162 @@ export function AuthOverlay() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        padding: 24,
-        // Dim + blur the breathing city behind, so it reads as depth, not noise.
-        background: "rgba(6,7,10,0.55)",
+        padding: 20,
+        background: "rgba(6,7,10,0.42)",
         backdropFilter: "blur(14px)",
         WebkitBackdropFilter: "blur(14px)",
-        // Full-cover: nothing behind the wall is reachable pre-auth.
-        pointerEvents: "auto",
       }}
     >
       <motion.div
-        initial={{ opacity: 0, y: 16, scale: 0.98 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
+        initial={{ y: 14, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
         transition={SPRING.settle}
         style={{
-          width: "min(360px, calc(100vw - 40px))",
-          padding: "28px 24px 24px",
+          width: "min(440px, 100%)",
           borderRadius: 24,
-          background: "rgba(10,11,15,0.82)",
           border: "1px solid rgba(233,236,244,0.14)",
-          backdropFilter: "blur(24px)",
-          WebkitBackdropFilter: "blur(24px)",
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-          boxShadow: "0 24px 80px -20px rgba(0,0,0,0.7)",
+          background: "rgba(10,11,15,0.78)",
+          backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
+          padding: "44px 36px",
+          textAlign: "center",
         }}
       >
-        {/* Wordmark + the signature hue ribbon. */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 4 }}>
-          <span
-            style={{
-              fontSize: 26,
-              fontWeight: 500,
-              letterSpacing: "0.01em",
-              color: "rgba(233,236,244,0.96)",
-            }}
-          >
-            Warmth
-          </span>
-          <span
-            aria-hidden
-            style={{ height: 3, width: 64, borderRadius: 3, background: HUE_RIBBON, opacity: 0.9 }}
-          />
-          <span style={{ fontSize: 13.5, lineHeight: 1.5, color: "rgba(233,236,244,0.5)" }}>
-            sign in to feel the city and keep your own trail
-          </span>
-        </div>
+        <h1
+          style={{
+            fontSize: 34,
+            fontWeight: 500,
+            letterSpacing: "0.02em",
+            color: "rgba(233,236,244,0.95)",
+            margin: 0,
+          }}
+        >
+          warmth
+        </h1>
+        <div
+          aria-hidden
+          style={{
+            height: 3,
+            width: 132,
+            margin: "14px auto 18px",
+            borderRadius: 2,
+            background: HUE_RIBBON,
+            opacity: 0.8,
+          }}
+        />
+        <p
+          style={{
+            fontSize: 16.5,
+            lineHeight: 1.45,
+            color: "rgba(233,236,244,0.66)",
+            margin: "0 0 30px",
+          }}
+        >
+          sign in to feel the city
+          <br />
+          and keep your own trail
+        </p>
 
         <AnimatePresence mode="wait">
-          {stage.kind === "choose" && (
-            <motion.div
-              key="choose"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={SPRING.snappy}
-              style={{ display: "flex", flexDirection: "column", gap: 10 }}
-            >
-              <button
-                style={glassButton}
-                disabled={busy}
-                onClick={() => run(() => signInWithProvider("google"), () => {})}
-              >
-                continue with Google
-              </button>
-              <button
-                style={glassButton}
-                disabled={busy}
-                onClick={() => run(() => signInWithProvider("apple"), () => {})}
-              >
-                continue with Apple
-              </button>
-
-              <Divider />
-
+          {stage !== "sent" ? (
+            <motion.div key="ask" exit={{ opacity: 0, y: -8 }} transition={SPRING.settle}>
               <input
                 type="email"
                 inputMode="email"
                 autoComplete="email"
-                placeholder="you@email.com"
+                autoFocus
+                placeholder="your email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                style={fieldStyle}
+                onKeyDown={(e) => e.key === "Enter" && stage === "ask" && void send()}
+                style={{
+                  width: "100%",
+                  padding: "17px 18px",
+                  borderRadius: 16,
+                  border: "1px solid rgba(233,236,244,0.18)",
+                  background: "rgba(233,236,244,0.06)",
+                  color: "rgba(233,236,244,0.95)",
+                  fontSize: 18,
+                  textAlign: "center",
+                  outline: "none",
+                }}
               />
-              <button
-                style={{ ...glassButton, background: accent, color: "#141007", border: "none" }}
-                disabled={busy || !email.includes("@")}
-                onClick={() =>
-                  run(
-                    () => signInWithEmail(email.trim()),
-                    () => setStage({ kind: "email-code", email: email.trim() }),
-                  )
-                }
+              <motion.button
+                type="button"
+                whileTap={{ scale: 0.97 }}
+                onClick={() => void send()}
+                disabled={stage === "sending"}
+                style={{
+                  width: "100%",
+                  marginTop: 14,
+                  padding: "17px 18px",
+                  borderRadius: 16,
+                  border: "none",
+                  background: "rgba(233,236,244,0.92)",
+                  color: "#0A0B0F",
+                  fontSize: 18,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  opacity: stage === "sending" ? 0.6 : 1,
+                }}
               >
-                {busy ? "sending…" : "send me a link"}
-              </button>
-              <button style={textLink} onClick={() => setStage({ kind: "phone" })}>
-                use a phone number instead
-              </button>
+                {stage === "sending" ? "sending…" : "send me a sign-in link"}
+              </motion.button>
+              {error && (
+                <p style={{ fontSize: 14.5, color: EMOTION_HUES.energy, margin: "14px 0 0" }}>
+                  {error}
+                </p>
+              )}
             </motion.div>
-          )}
-
-          {stage.kind === "email-code" && (
-            <CodeStage
-              key="email-code"
-              lead={`we emailed a link and a code to ${stage.email}`}
-              hint="tap the link on this device, or paste the 6-digit code:"
-              code={code}
-              setCode={setCode}
-              busy={busy}
-              onVerify={() =>
-                run(() => verifyEmail(stage.email, code.trim()), () => {})
-              }
-              onBack={() => {
-                setCode("");
-                setError(null);
-                setStage({ kind: "choose" });
-              }}
-            />
-          )}
-
-          {stage.kind === "phone" && (
+          ) : (
             <motion.div
-              key="phone"
+              key="sent"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={SPRING.snappy}
-              style={{ display: "flex", flexDirection: "column", gap: 10 }}
+              transition={SPRING.settle}
             >
-              <input
-                type="tel"
-                inputMode="tel"
-                autoComplete="tel"
-                placeholder="+1 555 123 4567"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                style={fieldStyle}
-              />
-              <button
-                style={{ ...glassButton, background: accent, color: "#141007", border: "none" }}
-                disabled={busy || phone.replace(/\D/g, "").length < 7}
-                onClick={() =>
-                  run(
-                    () => signInWithPhone(phone.trim()),
-                    () => setStage({ kind: "phone-code", phone: phone.trim() }),
-                  )
-                }
+              <p
+                style={{
+                  fontSize: 19,
+                  lineHeight: 1.5,
+                  color: "rgba(233,236,244,0.92)",
+                  margin: 0,
+                }}
               >
-                {busy ? "sending…" : "text me a code"}
-              </button>
-              <button style={textLink} onClick={() => setStage({ kind: "choose" })}>
-                back
+                check your email
+              </p>
+              <p
+                style={{
+                  fontSize: 15.5,
+                  lineHeight: 1.55,
+                  color: "rgba(233,236,244,0.6)",
+                  margin: "12px 0 0",
+                }}
+              >
+                tap the link in it on this device
+                <br />
+                and you&apos;ll land right back here, signed in
+              </p>
+              <button
+                type="button"
+                onClick={() => setStage("ask")}
+                style={{
+                  marginTop: 26,
+                  padding: "10px 18px",
+                  borderRadius: 999,
+                  border: "1px solid rgba(233,236,244,0.16)",
+                  background: "transparent",
+                  color: "rgba(233,236,244,0.55)",
+                  fontSize: 14,
+                  cursor: "pointer",
+                }}
+              >
+                use a different email
               </button>
             </motion.div>
-          )}
-
-          {stage.kind === "phone-code" && (
-            <CodeStage
-              key="phone-code"
-              lead={`we texted a 6-digit code to ${stage.phone}`}
-              hint="enter it here:"
-              code={code}
-              setCode={setCode}
-              busy={busy}
-              onVerify={() => run(() => verifyPhone(stage.phone, code.trim()), () => {})}
-              onBack={() => {
-                setCode("");
-                setError(null);
-                setStage({ kind: "phone" });
-              }}
-            />
-          )}
-        </AnimatePresence>
-
-        <AnimatePresence>
-          {error && (
-            <motion.span
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={SPRING.snappy}
-              style={{ fontSize: 12.5, color: EMOTION_HUES.love, lineHeight: 1.4 }}
-            >
-              {error}
-            </motion.span>
           )}
         </AnimatePresence>
       </motion.div>
-    </motion.div>
-  );
-}
-
-function Divider() {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "2px 0" }}>
-      <span style={{ flex: 1, height: 1, background: "rgba(233,236,244,0.1)" }} />
-      <span style={{ fontSize: 11.5, color: "rgba(233,236,244,0.35)" }}>or</span>
-      <span style={{ flex: 1, height: 1, background: "rgba(233,236,244,0.1)" }} />
-    </div>
-  );
-}
-
-const textLink: React.CSSProperties = {
-  background: "none",
-  border: "none",
-  color: "rgba(233,236,244,0.5)",
-  fontSize: 12.5,
-  cursor: "pointer",
-  padding: "4px 0",
-  textAlign: "center",
-};
-
-function CodeStage({
-  lead,
-  hint,
-  code,
-  setCode,
-  busy,
-  onVerify,
-  onBack,
-}: {
-  lead: string;
-  hint: string;
-  code: string;
-  setCode: (v: string) => void;
-  busy: boolean;
-  onVerify: () => void;
-  onBack: () => void;
-}) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      transition={SPRING.snappy}
-      style={{ display: "flex", flexDirection: "column", gap: 10 }}
-    >
-      <span style={{ fontSize: 13, color: "rgba(233,236,244,0.72)", lineHeight: 1.5 }}>{lead}</span>
-      <span style={{ fontSize: 12, color: "rgba(233,236,244,0.45)" }}>{hint}</span>
-      <input
-        inputMode="numeric"
-        autoComplete="one-time-code"
-        maxLength={6}
-        placeholder="000000"
-        value={code}
-        onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-        style={{ ...fieldStyle, letterSpacing: "0.4em", textAlign: "center", fontSize: 18 }}
-      />
-      <button
-        style={{ ...glassButton, background: EMOTION_HUES.joy, color: "#141007", border: "none" }}
-        disabled={busy || code.length < 6}
-        onClick={onVerify}
-      >
-        {busy ? "signing you in…" : "enter"}
-      </button>
-      <button style={textLink} onClick={onBack}>
-        back
-      </button>
     </motion.div>
   );
 }

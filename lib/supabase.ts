@@ -14,14 +14,17 @@ export const supabase: SupabaseClient | null =
   url && anonKey
     ? createClient(url, anonKey, {
         auth: {
-          // The session lives across reloads and refreshes itself; the OAuth
-          // redirect (Google/Apple) and magic link land back in the tab and
-          // are detected from the URL. PKCE so the code exchange is safe on
-          // a public client. A named storageKey keeps it ours.
+          // The session lives across reloads and refreshes itself; the
+          // magic link lands back in the tab and is detected from the URL.
+          // Implicit, not PKCE (2026-07-09): the free-tier default email is
+          // LINK-ONLY (templates locked, no code shown), and a PKCE link
+          // dies unless it opens in the exact browser context that asked —
+          // Eli's link "didn't work". The hash-token flow is self-contained.
+          // Revisit with custom SMTP + a code-first template (handoff doc).
           persistSession: true,
           autoRefreshToken: true,
           detectSessionInUrl: true,
-          flowType: "pkce",
+          flowType: "implicit",
           storageKey: "warmth-auth",
         },
       })
