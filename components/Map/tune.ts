@@ -308,9 +308,18 @@ export const FIELD = {
    *  shimmer, weave, crawl, curtains, ripples). 1 = the old nervous
    *  pace; 0.22 = alive only if you watch (Eli's pick, 2026-07-09). */
   tempo: 0.22,
-  /** Living tide: subtle brightness breath — the one animation on the
-   *  unscaled clock. Amp cut for the held breath (was 0.045). */
-  breath: { periodMs: 2500, amp: 0.022 },
+  /** POOLS BREATHE SOLO (Eli, 2026-07-09: uniform stillness read as
+   *  dead): each island inhales/exhales on its own slow rhythm, seeded
+   *  by WHERE it is (cellM noise cells), out of phase with neighbors —
+   *  at any moment some pool is quietly alive while the rest rest.
+   *  periodMs is the BASE; each pool lands on 0.7-2.2× of it. */
+  breath: { periodMs: 11000, amp: 0.06, cellM: 1600 },
+  /** THE PULSE OF ARRIVAL: each new feeling sends one slow luminous
+   *  ring outward from its exact spot, then dissolves — a raindrop on
+   *  the pond; you see the city being felt in. Real commits ripple via
+   *  new-id detection; until realtime lands, the ambient city re-pulses
+   *  one seed every everyS (clearly-labeled placeholder life). */
+  ripple: { lifeMs: 5500, spanM: 850, widthM: 140, gain: 0.14, everyS: [14, 26] },
   /** Streetlight signature: the field multiplied onto the base map so
    *  streets inside a feeling catch its color. 0 kills it. */
   streetlightGain: 0.55,

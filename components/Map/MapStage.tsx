@@ -9,7 +9,7 @@ import { MAPBOX_TOKEN } from "@/lib/map";
 import { momentsStore } from "@/lib/momentsStore";
 import { atmosphere } from "@/lib/atmosphere";
 import { setRainLevel } from "@/lib/sound";
-import { CAMERA, CHOREO, DEFAULT_LOOK, INK, LABELS, LOOKS, MOTION, PERF, SOLAR, WEATHER, type LookName } from "./tune";
+import { CAMERA, CHOREO, DEFAULT_LOOK, FIELD, INK, LABELS, LOOKS, MOTION, PERF, SOLAR, WEATHER, type LookName } from "./tune";
 import { buildStyle } from "./styles";
 import { applyAtmosphereInk } from "./solar";
 import { FieldLayer } from "./FieldLayer";
@@ -76,6 +76,7 @@ export default function MapStage({
     return DEFAULT_LOOK;
   });
   const lookRef = useRef<LookName>(lookName);
+  const nextPulse = useRef(0);
   useEffect(() => {
     lookRef.current = lookName;
     const field = fieldRef.current;
@@ -271,8 +272,21 @@ export default function MapStage({
 
       // Rest-throttle — bypassed while moving, blooming, crossfading, or
       // precipitating (falling drops need full rate; only while it rains).
+      // THE PULSE OF ARRIVAL, ambient half: until realtime brings real
+      // strangers, the seeded city re-pulses one point every so often —
+      // a raindrop somewhere, the map visibly being felt in. Public only.
+      if (field && now > nextPulse.current) {
+        nextPulse.current =
+          now + (FIELD.ripple.everyS[0] + Math.random() * (FIELD.ripple.everyS[1] - FIELD.ripple.everyS[0])) * 1000;
+        if (viewMix.current < 0.5 && momentsStore.points.length > 0) {
+          const pool = momentsStore.points.filter((p) => !p.wash);
+          const pick = pool[Math.floor(Math.random() * pool.length)];
+          if (pick) field.addRippleLngLat(pick.position[0], pick.position[1], pick.emotion);
+        }
+      }
+      const rippling = field?.ripplesActive ?? false;
       const precipitating = atmo.wet > 0.03;
-      if (!map.isMoving() && !arriving && !fading && !precipitating && now - lastPush < PERF.restFrameMs)
+      if (!map.isMoving() && !arriving && !fading && !precipitating && !rippling && now - lastPush < PERF.restFrameMs)
         return;
       lastPush = now;
 

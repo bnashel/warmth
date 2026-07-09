@@ -178,6 +178,14 @@ uniform float uFlowTime;  // the flow clock — uTimeSec × FIELD.tempo (held br
 uniform vec2 uMercInvDx;  // uv per mercator-x (inverse frame affine)
 uniform vec2 uMercInvDy;  // uv per mercator-y
 uniform vec4 uRipple;     // living-water: amp, rings, speed, 0
+// THE PULSE OF ARRIVAL — up to 8 live rings: xy = mercator center,
+// z = age 0..1, w = gain. Hue rides along so a ring crossing dark land
+// still carries its feeling's color.
+uniform int uArrN;
+uniform vec4 uArr[8];
+uniform vec3 uArrLab[8];
+uniform vec2 uArrShape;   // span (mercator), 1/width (mercator)
+uniform vec3 uBreathVar;  // 1/cell (mercator), amp, base period s
 uniform float uBand;   // aurora curtains: brightness modulation (0 = off)
 uniform float uAspect; // target width / height, so the flow isn't squashed
 // THE LIVING ATMOSPHERE (lib/atmosphere.ts, eased): the flow axis follows
@@ -294,7 +302,21 @@ void main() {
 
   float total = 0.0;
   for (int i = 0; i < ${NE}; i++) total += I[i];
-  if (total < 0.002) discard;
+
+  // Arrival rings first: they must live even over land the darkness
+  // budget keeps night — a raindrop is visible on still water.
+  float ringSum = 0.0;
+  vec3 ringLab = vec3(0.0);
+  for (int i = 0; i < 8; i++) {
+    if (i >= uArrN) break;
+    vec4 rp = uArr[i];
+    float front = rp.z * uArrShape.x;
+    float dw = (length(merc - rp.xy) - front) * uArrShape.y;
+    float ring = exp(-dw * dw) * (1.0 - rp.z) * (1.0 - rp.z) * rp.w;
+    ringSum += ring;
+    ringLab += ring * uArrLab[i];
+  }
+  if (total < 0.002 && ringSum < 0.004) discard;
 
   // THE MUD RULE: hues mix by dominance share (I^p), never sum. Any local
   // majority snaps the area to its hue and fronts blend over a narrow band.
@@ -384,6 +406,7 @@ void main() {
                     (merc.y - uMaskRect.y) * uMaskRect.w);
     float land = smoothstep(0.12, 0.82, texture(uMask, muv).r);
     b *= mix(uWaterAtten, 1.0, land);
+    ringSum *= mix(uWaterAtten, 1.0, land); // rings drown in the rivers too
   }
 
   // ---- THE WOVEN WASH (Eli's silk+pigment merge, 2026-07-08) ----------
@@ -445,8 +468,20 @@ void main() {
   lab.x = min(lab.x, 0.8);
 
   // The living tide: a slow, subtle breath, phase-varied across hues.
-  float phase = fract(lab.y * 3.7 + lab.z * 5.3);
-  b *= 1.0 + uBreathAmp * sin(6.2831853 * (uTimeSec / uBreathPeriod + phase));
+  // POOLS BREATHE SOLO: rhythm seeded by WHERE the pool is — each island
+  // on its own slow clock (0.7-2.2× the base period), out of phase, so at
+  // any moment some pool visibly swells while its neighbors rest.
+  float bSeed = vnoise((merc - uMercAnchor) * uBreathVar.x);
+  float bPeriod = uBreathVar.z * mix(0.7, 2.2, bSeed);
+  b *= 1.0 + uBreathVar.y * sin(6.2831853 * (uTimeSec / bPeriod + bSeed * 7.31));
+
+  // THE PULSE OF ARRIVAL lands on top: the ring adds its light and pulls
+  // the local hue toward its feeling's color while it passes.
+  if (ringSum > 0.0005) {
+    b += ringSum;
+    lab = mix(lab, ringLab / max(ringSum, 1e-4), clamp(ringSum / (ringSum + max(b - ringSum, 0.02)), 0.0, 0.85));
+    lab.x = min(lab.x, 0.8);
+  }
 
   // Aurora curtains: slow luminous banding across the flow axis — hanging
   // in the CITY's space, swaying on the flow clock. Modulation only —
@@ -592,6 +627,23 @@ export class FieldLayer implements CustomLayerInterface {
   private mercAnchor: [number, number] = [0, 0];
   private grainScale = 0;
   private meterMerc = 1e-8; // meters → mercator units at the NYC anchor
+  /** THE PULSE OF ARRIVAL — live rings (≤8): real commits auto-ripple on
+   *  new-id detection; the ambient city re-pulses via addRippleLngLat. */
+  private ripples: { x: number; y: number; start: number; ch: number }[] = [];
+  private knownIds = new Set<string>();
+
+  get ripplesActive(): boolean {
+    return this.ripples.length > 0;
+  }
+
+  addRippleLngLat(lng: number, lat: number, emotion: string) {
+    const mc = mapboxgl.MercatorCoordinate.fromLngLat({ lng, lat });
+    const now = performance.now();
+    this.ripples = this.ripples.filter((r) => now - r.start < FIELD.ripple.lifeMs);
+    if (this.ripples.length >= 8) this.ripples.shift();
+    this.ripples.push({ x: mc.x, y: mc.y, start: now, ch: CHANNEL[emotion] ?? 0 });
+    this.map?.triggerRepaint();
+  }
 
   constructor() {
     EMOTIONS.forEach((e, i) => {
@@ -646,6 +698,14 @@ export class FieldLayer implements CustomLayerInterface {
       d[o + 2] = radiusM * mc.meterInMercatorCoordinateUnits();
       d[o + 3] = p.weight;
       d[o + 4] = CHANNEL[p.emotion] ?? 0;
+      // A REAL feeling arriving right now sends its ring (seeds re-pulse
+      // via the ambient timer instead — placeholder life, clearly labeled).
+      if (!this.knownIds.has(p.id)) {
+        this.knownIds.add(p.id);
+        if (!p.seed && performance.now() - p.born < 600) {
+          this.addRippleLngLat(p.position[0], p.position[1], p.emotion);
+        }
+      }
     }
     this.count = n;
     this.uploaded = false;
@@ -965,9 +1025,39 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform4f(u("uTiers"), WOVEN.tiers.count, WOVEN.tiers.rim, WOVEN.tiers.richen, WOVEN.tiers.crawl);
     gl.uniform1f(u("uTierKeep"), WOVEN.tiers.keep);
     gl.uniform2f(u("uOverlap"), WOVEN.overlap.from, WOVEN.overlap.to);
-    // THE HELD BREATH: one master tempo on every flow clock (the 2.5s
-    // breath keeps its own quiet heartbeat on the unscaled clock).
+    // THE HELD BREATH: one master tempo on every flow clock (the breath
+    // keeps its own unscaled clock).
     gl.uniform1f(u("uFlowTime"), this.timeSec * FIELD.tempo);
+    // Solo breathing + the arrival rings.
+    gl.uniform3f(
+      u("uBreathVar"),
+      1 / (FIELD.breath.cellM * this.meterMerc),
+      FIELD.breath.amp,
+      FIELD.breath.periodMs / 1000,
+    );
+    const nowR = performance.now();
+    this.ripples = this.ripples.filter((r) => nowR - r.start < FIELD.ripple.lifeMs);
+    gl.uniform1i(u("uArrN"), this.ripples.length);
+    if (this.ripples.length) {
+      const arr = new Float32Array(this.ripples.length * 4);
+      const labArr = new Float32Array(this.ripples.length * 3);
+      this.ripples.forEach((r, i) => {
+        arr[i * 4] = r.x;
+        arr[i * 4 + 1] = r.y;
+        arr[i * 4 + 2] = (nowR - r.start) / FIELD.ripple.lifeMs;
+        arr[i * 4 + 3] = FIELD.ripple.gain;
+        labArr[i * 3] = this.hueLab[r.ch * 3];
+        labArr[i * 3 + 1] = this.hueLab[r.ch * 3 + 1];
+        labArr[i * 3 + 2] = this.hueLab[r.ch * 3 + 2];
+      });
+      gl.uniform4fv(u("uArr"), arr);
+      gl.uniform3fv(u("uArrLab"), labArr);
+    }
+    gl.uniform2f(
+      u("uArrShape"),
+      FIELD.ripple.spanM * this.meterMerc,
+      1 / (FIELD.ripple.widthM * this.meterMerc),
+    );
     gl.uniform4f(u("uRipple"), lk.ripple.amp, lk.ripple.rings, lk.ripple.speed, 0);
     gl.uniform1f(u("uBand"), lk.band);
     gl.uniform1f(u("uAspect"), this.texW / Math.max(1, this.texH));
