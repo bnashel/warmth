@@ -10,6 +10,7 @@ import { momentsStore } from "@/lib/momentsStore";
 import { atmosphere } from "@/lib/atmosphere";
 import { setRainLevel } from "@/lib/sound";
 import { CAMERA, CHOREO, INK, LABELS, MOTION, PERF, SHAPES, SOLAR, WEATHER } from "./tune";
+import { currentLook, onLookChange } from "./lookState";
 import { buildStyle } from "./styles";
 import { applyAtmosphereInk } from "./solar";
 import { FieldLayer } from "./FieldLayer";
@@ -146,6 +147,15 @@ export default function MapStage({
   useEffect(() => {
     onGapTapRef.current = onGapTap;
   }, [onGapTap]);
+  // THE GALLERY: a look switch changes geometry dials (kernel radii,
+  // felt footprints) — force the next tick to re-feed the field's data.
+  useEffect(
+    () =>
+      onLookChange(() => {
+        dataVersion.current = -1;
+      }),
+    [],
+  );
 
   const style = useMemo(() => buildStyle(INK, "ink-and-glow"), []);
   // DPR cap: 3× phones render near-identically at 2× on a dark map, for
@@ -231,9 +241,14 @@ export default function MapStage({
         field.paper = atmo.paper;
         // The wind rides ON TOP of the woven wash's base shape.
         const look = field.look;
-        look.warpAmp = SHAPES.woven.warpAmp + atmo.wind * WEATHER.windWarp;
-        look.drift = SHAPES.woven.drift + atmo.wind * WEATHER.windDrift;
-        look.streak = Math.min(1, SHAPES.woven.streak + atmo.wind * WEATHER.windStreak);
+        // Silhouette baseline comes from THE GALLERY's live look; the
+        // real wind still adds its living motion on top.
+        const shape = currentLook().config.shape;
+        look.warpAmp = shape.warpAmp + atmo.wind * WEATHER.windWarp;
+        look.scale = shape.scale;
+        look.band = shape.band;
+        look.drift = shape.drift + atmo.wind * WEATHER.windDrift;
+        look.streak = Math.min(1, shape.streak + atmo.wind * WEATHER.windStreak);
         const w = field.weather;
         w.fog = atmo.fog;
         w.wet = rain;

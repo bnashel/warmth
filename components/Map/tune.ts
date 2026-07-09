@@ -485,6 +485,44 @@ export const WOVEN = {
 } as const;
 
 /* ------------------------------------------------------------------ */
+/* FELT EMOTIONS (2026-07-09, Eli): each emotion has its own quality   */
+/* of FORM and MOVEMENT, not just a hue — five recolored copies of one */
+/* template is structurally a census map. Grounded in: Laban effort    */
+/* (Time sustained↔sudden maps to arousal; motion-speed↔arousal r≈.61  */
+/* in affective-motion studies), Kandinsky (yellow moves outward/      */
+/* eccentric, cool colors settle inward/concentric; circle = harmony), */
+/* Kaya & Epps 2004 (green-family = relaxation/comfort; yellow =       */
+/* happiness), and curvature-valence research (round+slow = calm+      */
+/* positive; sharper+faster = aroused). All motion is BEHAVIOR of the  */
+/* standing field — positions stay pinned (the 07-08 correctness rule).*/
+/*                                                                     */
+/* period/amp: brightness breath (s / fraction). skew: phase-warp —    */
+/* >0 = quick swell + slow settle (buoyant). crisp: tanh sharpening    */
+/* (≈0 = pure sine; >1 = brisk, defined pulse). flicker: fine fast     */
+/* candle shimmer. rise: upward-traveling inner light (Kandinsky's    */
+/* eccentric yellow). radiusMul: kernel footprint. warpMul/scaleMul:   */
+/* edge amplitude / undulation frequency vs the look's baseline.       */
+/* ------------------------------------------------------------------ */
+export const FELT: Record<
+  string,
+  {
+    period: number; amp: number; skew: number; crisp: number;
+    flicker: number; rise: number; radiusMul: number; warpMul: number; scaleMul: number;
+  }
+> = {
+  /** Still water settling: slowest, widest, softest — sustained + light. */
+  calm: { period: 10.5, amp: 0.045, skew: -0.15, crisp: 0, flicker: 0, rise: 0, radiusMul: 1.3, warpMul: 0.55, scaleMul: 0.5 },
+  /** Buoyant, catching light: quicker swell, slow settle, light RISES. */
+  joy: { period: 4.6, amp: 0.075, skew: 0.5, crisp: 0, flicker: 0, rise: 0.14, radiusMul: 1.0, warpMul: 1.0, scaleMul: 1.0 },
+  /** Enveloping: wide reaching skirt, roundest lowest-frequency edges. */
+  love: { period: 7.2, amp: 0.07, skew: 0, crisp: 0, flicker: 0, rise: 0, radiusMul: 1.18, warpMul: 0.8, scaleMul: 0.55 },
+  /** Candlelight: near-still, a gentle fine inner flicker, quiet glow. */
+  gratitude: { period: 8.5, amp: 0.028, skew: 0, flicker: 0.06, crisp: 0, rise: 0, radiusMul: 0.95, warpMul: 0.6, scaleMul: 0.8 },
+  /** Alert and direct: fastest, crisp-edged pulse, tighter, finer edges. */
+  energy: { period: 2.7, amp: 0.09, skew: 0, crisp: 2.4, flicker: 0, rise: 0, radiusMul: 0.85, warpMul: 1.2, scaleMul: 1.7 },
+};
+
+/* ------------------------------------------------------------------ */
 /* Solar drift — the ink follows the real sun. Three intensities       */
 /* (Look panel): subtle keeps the original whisper; bold is unmissable */
 /* at a glance; sky lets the map take on real sky color (the one mode  */

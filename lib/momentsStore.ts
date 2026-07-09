@@ -17,6 +17,7 @@
  * any weight/membership change — deck.gl updateTriggers keys).
  */
 import { CHOREO, FIELD, GLOW, RECENCY, TRAIL } from "@/components/Map/tune";
+import { currentLook } from "@/components/Map/lookState";
 import { EMOTION_HUES, type Emotion } from "@/lib/theme";
 import { pushMemoryToCloud, pushMomentToCloud } from "@/lib/sync";
 
@@ -379,9 +380,13 @@ class MomentsStore {
       const arrival = arrivalEnvelope((nowPerf - p.born) / arrivalMs);
       // The ambient seed is a thin glaze; real feelings burn at full
       // weight — and the under-wash lattice is quieter still (the
-      // no-dead-space layer, never mistakable for an entry).
+      // no-dead-space layer, never mistakable for an entry). The wash
+      // gain rides the live gallery look (re-derived every tick anyway).
       const w =
-        base * freshness * arrival * (p.wash ? FIELD.wash.gain : p.seed ? FIELD.seedGain : 1);
+        base *
+        freshness *
+        arrival *
+        (p.wash ? currentLook().config.dials.washGain : p.seed ? FIELD.seedGain : 1);
       if (w !== p.weight) {
         p.weight = w;
         changed = true;

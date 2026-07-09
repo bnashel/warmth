@@ -19,7 +19,8 @@
 import mapboxgl, { type CustomLayerInterface, type Map as MapboxMap } from "mapbox-gl";
 import { EMOTION_HUES, EMOTIONS } from "@/lib/theme";
 import type { LivePoint } from "@/lib/momentsStore";
-import { CAMERA, FIELD, SHAPES, WEATHER, WOVEN } from "./tune";
+import { CAMERA, FELT, FIELD, SHAPES, WEATHER, WOVEN } from "./tune";
+import { currentLook } from "./lookState";
 
 /* ---------------- OKLab (Björn Ottosson, via components/Orb/oklch.ts) --- */
 
@@ -195,6 +196,12 @@ uniform vec4 uTiers;      // matte layers: count, rim, richen, crawl
 uniform float uTierKeep;  // tiering over the live wash beneath (0..1)
 uniform vec2 uOverlap;    // genuine-overlap gate: smoothstep from, to
 uniform vec2 uKnee;       // tone ceiling: knee start, hard asymptote
+// THE VERSION GALLERY + FELT EMOTIONS (2026-07-09):
+uniform float uSmoothWarp; // 1 = swell (few sweeping waves), 0 = 3-oct fbm
+uniform float uBreathShaped; // 1 = soft-clipped exhale, 0 = plain sine
+uniform float uFeltOn;    // 1 = per-emotion form + motion signatures
+uniform vec4 uEmoMotion[${NE}]; // period(s), amp, skew, crisp
+uniform vec4 uEmoFx[${NE}];     // flicker, rise, warpMul, scaleMul
 // CLOSE-ZOOM GRAIN: geographic texture (mercator-anchored — meters, not
 // pixels) that resolves as you approach. amp arrives pre-gated by zoom.
 uniform vec2 uGrain;      // amp (zoom-gated), 1/cell in mercator units
@@ -250,11 +257,34 @@ vec3 linearToSrgb(vec3 c) {
 }
 
 void main() {
-  // Free-flowing edges: pull each lookup through slowly-drifting fbm warp.
+  // The TRUE pixel's world position (vUv, unwarped) — shared by the land
+  // mask, the close-zoom grain, and the felt-emotion clocks: geography
+  // and time are facts, never weather.
+  vec2 merc = uMercOrigin + uMercDx * vUv.x + uMercDy * vUv.y;
+
+  // Free-flowing edges: pull each lookup through a slowly-drifting warp.
   // warpAmp 0 (bloom mode) short-circuits to the original circles.
   vec2 uv = vUv;
   if (uShape.x > 0.0) {
-    vec2 q = vec2(vUv.x * uAspect, vUv.y) * uShape.y;
+    // FELT EMOTIONS: the locally dominant feeling shapes its own edge —
+    // calm swells in wide slow waves, energy runs quicker and finer.
+    // One cheap unwarped pre-tap finds the local majority.
+    float wm = 1.0;
+    float sm = 1.0;
+    if (uFeltOn > 0.5) {
+      vec4 t0 = texture(uField0, vUv);
+      vec2 t1 = texture(uField1, vUv).xy;
+      float tI[${NE}];
+      ${["t0.x", "t0.y", "t0.z", "t0.w", "t1.x", "t1.y", "t1.z", "t1.w"]
+        .slice(0, NE)
+        .map((src, i) => `tI[${i}] = ${src};`)
+        .join(" ")}
+      int d = 0;
+      float dw = -1.0;
+      for (int i = 0; i < ${NE}; i++) if (tI[i] > dw) { dw = tI[i]; d = i; }
+      if (dw > 0.001) { wm = uEmoFx[d].z; sm = uEmoFx[d].w; }
+    }
+    vec2 q = vec2(vUv.x * uAspect, vUv.y) * uShape.y * sm;
     // The flow axis IS the real wind (a gentle diagonal when calm).
     vec2 axis = normalize(uAxis);
     // Streak stretches the noise domain along the axis (ribbons), and the
@@ -262,11 +292,13 @@ void main() {
     vec2 along = axis * dot(q, axis);
     q = mix(q, along, uShape.w * 0.72);
     q += uTimeSec * uShape.z * vec2(1.0, -0.6);
-    vec2 w = vec2(swell(q), swell(q + 31.416)) - 0.5;
+    // The gallery chooses the edge language: swell (07-09) or fbm (older).
+    vec2 w = mix(vec2(fbm(q), fbm(q + 31.416)),
+                 vec2(swell(q), swell(q + 31.416)), uSmoothWarp) - 0.5;
     // Warp mostly across the axis when streaked — edges feather sideways.
     vec2 across = vec2(-axis.y, axis.x);
     vec2 wStreak = across * dot(w, across) * 1.8;
-    uv += mix(w, wStreak, uShape.w) * uShape.x;
+    uv += mix(w, wStreak, uShape.w) * uShape.x * wm;
   }
   vec4 f0 = texture(uField0, uv);
   vec2 f1 = texture(uField1, uv).xy;
@@ -275,6 +307,32 @@ void main() {
     .slice(0, NE)
     .map((src, i) => `I[${i}] = ${src};`)
     .join(" ")}
+
+  // FELT EMOTIONS — each feeling's own clock, applied to its channel
+  // BEFORE mixing, so hue-votes and brightness both live at that
+  // emotion's tempo (Laban Time: sustained calm ↔ sudden energy).
+  // Phase varies across the city (geography-anchored noise) so pools of
+  // one feeling never beat in lockstep. Positions never move.
+  if (uFeltOn > 0.5) {
+    float ph = vnoise((merc - uMercAnchor) * uGrain.y * 0.06) * 0.9;
+    for (int i = 0; i < ${NE}; i++) {
+      vec4 m = uEmoMotion[i];
+      if (m.x < 0.1) continue;
+      float x = 6.2831853 * (uTimeSec / m.x + ph + float(i) * 0.37);
+      // skew: phase-warped sine — quick swell, slow settle (buoyant joy).
+      float s = sin(x - m.z * sin(x));
+      // crisp: tanh sharpening — energy pulses brisk and defined.
+      float cr = max(m.w, 0.001);
+      s = tanh(cr * s) / tanh(cr);
+      float env = 1.0 + m.y * s;
+      // flicker: fine, fast, tiny — candlelight for gratitude.
+      if (uEmoFx[i].x > 0.0) {
+        env += uEmoFx[i].x *
+          (vnoise((merc - uMercAnchor) * uGrain.y * 2.4 + uTimeSec * vec2(1.3, 1.9)) - 0.5);
+      }
+      I[i] *= max(env, 0.0);
+    }
+  }
 
   float total = 0.0;
   for (int i = 0; i < ${NE}; i++) total += I[i];
@@ -337,11 +395,6 @@ void main() {
   // asymptotically — never white. The low end is linear: the long fade.
   float b = 1.0 - exp(-uExposure * total);
 
-  // The TRUE pixel's world position (vUv, unwarped) — shared by the land
-  // mask and the close-zoom grain: the shore and the grain are facts of
-  // geography, never weather.
-  vec2 merc = uMercOrigin + uMercDx * vUv.x + uMercDy * vUv.y;
-
   // THE LAND MASK — geography shapes the feeling: the field dies over
   // water so rivers and harbor stay pure void and every silhouette
   // inherits the coastline.
@@ -393,6 +446,19 @@ void main() {
     b *= 1.0 + uGrain.x * (g - 0.5) * 2.0 * smoothstep(0.04, 0.28, b);
   }
 
+  // FELT EMOTIONS — joy's rising light (Kandinsky: yellow moves outward,
+  // toward the viewer): where joy holds ground, a slow band of inner
+  // light travels UP through the pool — catching light, not throbbing.
+  // Brightness only; the shape never moves.
+  if (uFeltOn > 0.5) {
+    float joyShare = I[${Math.max(0, EMOTIONS.indexOf("joy"))}] / max(total, 1e-5);
+    if (joyShare > 0.01) {
+      vec2 rq = (merc - uMercAnchor) * uGrain.y * 0.45;
+      float rise = vnoise(vec2(rq.x, rq.y + uTimeSec * 0.09));
+      b *= 1.0 + uEmoFx[${Math.max(0, EMOTIONS.indexOf("joy"))}].y * joyShare * (rise - 0.5) * 2.0;
+    }
+  }
+
   // THE LUMINOUS HEART: where pooled feeling peaks, the hue itself lifts
   // toward light — bright AND saturated, capped well below white.
   lab.x += uHeart.z * smoothstep(uHeart.x, uHeart.y, b);
@@ -405,10 +471,13 @@ void main() {
 
   // The living tide: a slow exhale, phase-varied across hues. The sine is
   // soft-clipped (s − 0.22s³): flattened crests read as a breath held and
-  // released — fabric settling — where a pure sine read as a throb.
+  // released — fabric settling — where a pure sine read as a throb. The
+  // gallery chooses the waveform; under FELT EMOTIONS the per-channel
+  // clocks above carry the life and this global tide stands down.
   float phase = fract(lab.y * 3.7 + lab.z * 5.3);
   float bs = sin(6.2831853 * (uTimeSec / uBreathPeriod + phase));
-  b *= 1.0 + uBreathAmp * (bs - 0.22 * bs * bs * bs) * 1.28;
+  float bwave = mix(bs, (bs - 0.22 * bs * bs * bs) * 1.28, uBreathShaped);
+  b *= 1.0 + uBreathAmp * bwave * (1.0 - uFeltOn);
 
   // Aurora curtains: slow luminous banding across the flow axis. Modulation
   // only — never to zero, so the field's coverage is untouched.
@@ -559,6 +628,10 @@ export class FieldLayer implements CustomLayerInterface {
    *  stable) + 1/cell in mercator units. Set once in onAdd. */
   private mercAnchor: [number, number] = [0, 0];
   private grainScale = 0;
+  /** FELT EMOTIONS uniform arrays (period/amp/skew/crisp + flicker/rise/
+   *  warpMul/scaleMul per channel), packed once from tune.FELT. */
+  private emoMotion = new Float32Array(NE * 4);
+  private emoFx = new Float32Array(NE * 4).fill(1);
 
   constructor() {
     EMOTIONS.forEach((e, i) => {
@@ -593,9 +666,15 @@ export class FieldLayer implements CustomLayerInterface {
       // scales with intensity: at middle distance everything sits on its
       // pixel floor, and one flat floor turned the city into uniform
       // polka dots (the medium-zoom valley, Eli 2026-07-08).
+      // Geometry dials read through THE GALLERY (a look switch re-feeds
+      // this whole buffer via MapStage's subscription). Under FELT
+      // EMOTIONS each feeling also has its own footprint: calm settles
+      // wide and soft, energy holds tight and defined, love reaches.
+      const lk = currentLook().config.dials;
+      const feltMul = lk.felt ? (FELT[p.emotion]?.radiusMul ?? 1) : 1;
       this.floorPx[i] = p.wash
         ? FIELD.wash.minRadiusPx
-        : FIELD.minRadiusPx * (0.78 + 0.055 * (p.intensity - 1));
+        : lk.minRadiusPx * (0.78 + 0.055 * (p.intensity - 1)) * feltMul;
       // Only the WASH thins with zoom (it's a city-scale impression);
       // pocket seeds are stand-ins for real entries and must intensify on
       // approach exactly as commits do — the density payoff (2026-07-08).
@@ -606,7 +685,7 @@ export class FieldLayer implements CustomLayerInterface {
       });
       const radiusM = p.wash
         ? FIELD.wash.radiusM
-        : FIELD.radiusM + FIELD.radiusPerIntensityM * (p.intensity - 1);
+        : (lk.radiusM + lk.radiusPerIntensityM * (p.intensity - 1)) * feltMul;
       const o = i * FLOATS_PER_INSTANCE;
       d[o] = mc.x;
       d[o + 1] = mc.y;
@@ -667,6 +746,13 @@ export class FieldLayer implements CustomLayerInterface {
     });
     this.mercAnchor = [anchor.x, anchor.y];
     this.grainScale = 1 / (FIELD.grain.cellM * anchor.meterInMercatorCoordinateUnits());
+    // Pack the felt-emotion signatures in channel order.
+    for (let i = 0; i < EMOTIONS.length; i++) {
+      const be = FELT[EMOTIONS[i]];
+      if (!be) continue;
+      this.emoMotion.set([be.period, be.amp, be.skew, be.crisp], i * 4);
+      this.emoFx.set([be.flicker, be.rise, be.warpMul, be.scaleMul], i * 4);
+    }
     const img = new Image();
     img.onload = () => {
       if (!this.gl) return;
@@ -852,7 +938,7 @@ export class FieldLayer implements CustomLayerInterface {
       gl.clear(gl.COLOR_BUFFER_BIT);
       this.bindResolve(gl);
       gl.uniform1i(this.loc(gl, this.resolveProgram!, "res", "uMode"), 0);
-      gl.uniform1f(this.loc(gl, this.resolveProgram!, "res", "uGain"), FIELD.gain);
+      gl.uniform1f(this.loc(gl, this.resolveProgram!, "res", "uGain"), currentLook().config.dials.gain);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       // 2) blur down into bloomTex[0] (thresholded), then widen into [1].
       gl.useProgram(this.blurProgram!);
@@ -912,18 +998,31 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform1i(u("uField0"), 0);
     gl.uniform1i(u("uField1"), 1);
     gl.uniform3fv(u("uHueLab"), this.hueLab);
-    gl.uniform1f(u("uExposure"), FIELD.exposure);
-    gl.uniform1f(u("uDominance"), FIELD.dominance);
+    // THE VERSION GALLERY: every overridable dial reads through the live
+    // look — switching iterations is a uniform change, never a rebuild.
+    const lk = currentLook().config;
+    const d = lk.dials;
+    gl.uniform1f(u("uExposure"), d.exposure);
+    gl.uniform1f(u("uDominance"), d.dominance);
     gl.uniform1f(u("uChromaFloor"), FIELD.chromaFloor);
     gl.uniform1f(u("uTimeSec"), this.timeSec);
-    gl.uniform1f(u("uBreathPeriod"), FIELD.breath.periodMs / 1000);
-    gl.uniform1f(u("uBreathAmp"), FIELD.breath.amp);
-    gl.uniform2f(u("uWeave"), WOVEN.weave.amp, WOVEN.weave.scale);
-    gl.uniform1f(u("uShimmer"), WOVEN.shimmer);
-    gl.uniform4f(u("uTiers"), WOVEN.tiers.count, WOVEN.tiers.rim, WOVEN.tiers.richen, WOVEN.tiers.crawl);
-    gl.uniform1f(u("uTierKeep"), WOVEN.tiers.keep);
-    gl.uniform2f(u("uOverlap"), WOVEN.overlap.from, WOVEN.overlap.to);
-    gl.uniform2f(u("uKnee"), FIELD.tone.kneeFrom, FIELD.tone.cap);
+    gl.uniform1f(u("uBreathPeriod"), d.breathPeriodMs / 1000);
+    gl.uniform1f(u("uBreathAmp"), d.breathAmp);
+    gl.uniform1f(u("uBreathShaped"), d.breathShaped);
+    gl.uniform2f(u("uWeave"), d.weaveAmp, WOVEN.weave.scale);
+    gl.uniform1f(u("uShimmer"), d.shimmer);
+    gl.uniform4f(u("uTiers"), WOVEN.tiers.count, WOVEN.tiers.rim, d.richen, WOVEN.tiers.crawl);
+    gl.uniform1f(u("uTierKeep"), d.tierKeep);
+    // Gate off = the pre-07-08 ungated flow (smoothstep saturates at 1).
+    if (d.overlapGate) gl.uniform2f(u("uOverlap"), WOVEN.overlap.from, WOVEN.overlap.to);
+    else gl.uniform2f(u("uOverlap"), -2.0, -1.0);
+    // Knee off = the pre-07-09 raw output (start above any real value).
+    if (d.toneKnee) gl.uniform2f(u("uKnee"), FIELD.tone.kneeFrom, FIELD.tone.cap);
+    else gl.uniform2f(u("uKnee"), 9.0, 9.5);
+    gl.uniform1f(u("uSmoothWarp"), lk.shape.smoothWarp);
+    gl.uniform1f(u("uFeltOn"), d.felt);
+    gl.uniform4fv(u("uEmoMotion"), this.emoMotion);
+    gl.uniform4fv(u("uEmoFx"), this.emoFx);
     gl.uniform4f(u("uShape"), this.look.warpAmp, this.look.scale, this.look.drift, this.look.streak);
     gl.uniform1f(u("uBand"), this.look.band);
     gl.uniform1f(u("uAspect"), this.texW / Math.max(1, this.texH));
@@ -954,7 +1053,7 @@ export class FieldLayer implements CustomLayerInterface {
     const grainAmp = mf.ok ? FIELD.grain.amp * gt * gt * (3 - 2 * gt) : 0;
     gl.uniform2f(u("uGrain"), grainAmp, this.grainScale);
     gl.uniform2f(u("uMercAnchor"), this.mercAnchor[0], this.mercAnchor[1]);
-    gl.uniform3f(u("uHeart"), FIELD.heart.from, FIELD.heart.to, FIELD.heart.lift);
+    gl.uniform3f(u("uHeart"), FIELD.heart.from, FIELD.heart.to, d.heartLift);
   }
 
   render(gl: WebGL2RenderingContext) {
@@ -1010,7 +1109,7 @@ export class FieldLayer implements CustomLayerInterface {
     // Over the near-black base, screen ≈ additive; only the top end bends.
     if (night > 0.01) {
       gl.uniform1i(u("uMode"), 0);
-      gl.uniform1f(u("uGain"), FIELD.gain * this.fade * night * thin);
+      gl.uniform1f(u("uGain"), currentLook().config.dials.gain * this.fade * night * thin);
       gl.blendFunc(gl.ONE_MINUS_DST_COLOR, gl.ONE);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }

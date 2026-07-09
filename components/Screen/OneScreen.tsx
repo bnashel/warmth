@@ -19,6 +19,7 @@ import { OrbFlow } from "@/components/Orb/OrbFlow";
 import { atmosphere } from "@/lib/atmosphere";
 import { WeatherPreview } from "@/components/Lab/WeatherPreview";
 import { MemoryCard } from "@/components/Trail/MemoryCard";
+import { LookGallery, galleryEnabled } from "@/components/Lab/LookGallery";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
 
@@ -112,6 +113,13 @@ export default function OneScreen() {
   // time between them surfaces right there, then breathes away.
   const [gapChip, setGapChip] = useState<{ text: string; x: number; y: number } | null>(null);
   const gapTimer = useRef<number | null>(null);
+  // The version gallery (dev-only). Set a beat after mount: SSR markup
+  // stays stable and the effect never sets state synchronously.
+  const [galleryOn, setGalleryOn] = useState(false);
+  useEffect(() => {
+    const id = window.setTimeout(() => setGalleryOn(galleryEnabled()), 0);
+    return () => window.clearTimeout(id);
+  }, []);
   // Learning mode: the first 3 commits name every picker dot (persisted —
   // storage can be blocked; never worth throwing over).
   const [commitCount, setCommitCount] = useState(() => {
@@ -519,6 +527,10 @@ export default function OneScreen() {
           onCommit={handleCommit}
         />
       </div>
+
+      {/* THE VERSION GALLERY (dev / ?looks=1): every field iteration,
+          selectable live. galleryOn is set post-mount — SSR-stable. */}
+      {galleryOn && <LookGallery />}
 
       {/* The journal: tap a spark, hold the moment. */}
       <AnimatePresence>
