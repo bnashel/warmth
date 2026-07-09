@@ -267,6 +267,11 @@ export const FIELD = {
    *  neighbors flow into each other with no seam and no mud. (2.2 washed
    *  whole boroughs toward one mauve average — regions lost their names.) */
   dominance: 2.8,
+  /** LOW-DENSITY DOMINANCE (round 2, item 2b): in thin connective tissue
+   *  the local winner takes the pixel (power p — the emotion stays
+   *  nameable, never averaged soup); the woven `dominance` above takes
+   *  over as pooled total climbs from→to. */
+  dominanceLow: { p: 4.6, from: 0.1, to: 0.4 },
   /** Minimum front chroma as a fraction of the anchors' own chroma —
    *  fronts rotate hue but can never wash to gray. High on purpose: where
    *  two feelings meet, the in-between color must be BEAUTIFUL, never mud. */
@@ -279,9 +284,11 @@ export const FIELD = {
    *  the fronts (chromaFloor is relative to the boosted anchors), the
    *  streetlight catch. 1 = the raw First Light palette. */
   anchorChroma: 1.15,
-  /** Overall field gain on the additive composite. 1.15 (2026-07-08):
-   *  a touch more luminosity across the board — warm pop, hue untouched. */
-  gain: 1.15,
+  /** Overall field gain on the additive composite. Trimmed 1.15→0.95 in
+   *  round 2: brightness now scales the LINEAR color (gamma-correct), which
+   *  reads brighter at the same number — the trim keeps peaks where Eli
+   *  left them while dims stay hue-true instead of olive. */
+  gain: 0.95,
   /** Pocket-seed weight dimmer: the placeholder neighborhood moods sit
    *  below any real feeling — a commit burns through at full strength.
    *  (The lattice wash has its own, quieter gain: FIELD.wash.gain.) */
@@ -483,7 +490,11 @@ export const WOVEN = {
    *  the contours wander, like paint still deciding where to dry;
    *  keep = how much of the tiering shows over the live wash beneath
    *  (1 = full posterization, 0 = none). */
-  tiers: { count: 5, rim: 0.16, richen: 0.55, crawl: 0.05, keep: 0.85 },
+  /** Round 2, item 2a: rim 0.16→0.05 (the dark ring at every contour WAS
+   *  the banding), crawl 0.05→0.22 (contours wander — no closed circles),
+   *  keep 0.85→0.5 (tiering is texture over the live wash, not structure).
+   *  The step transition also widened in the shader (0.35-0.65 → 0.12-0.88). */
+  tiers: { count: 5, rim: 0.05, richen: 0.55, crawl: 0.22, keep: 0.5 },
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -608,7 +619,8 @@ export const WEATHER = {
     /** Above the ambient wash (~0.22 pooled), below pockets (~0.46) and
      *  commits (~0.66): concentrated feeling blooms, the wash never does —
      *  the darkness between the lights is what makes the lights read. */
-    threshold: 0.26,
+    threshold: 0.32, // raised with the gamma-correct output (dims got brighter);
+    // the blur now soft-knees around it instead of hard-subtracting (item 2a)
     scale: 0.25, // blur-target scale vs field target (quarter = soft+cheap)
     /** The halo is a WIDE-VIEW grace: zoomed into a neighborhood the pooled
      *  interior exceeds the threshold everywhere, and halo-over-field

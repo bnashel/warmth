@@ -131,7 +131,13 @@ void main() {
          + texture(uSrc, vUv + vec2(-off.x,  off.y)).rgb
          + texture(uSrc, vUv + vec2( off.x, -off.y)).rgb
          + texture(uSrc, vUv + vec2(-off.x, -off.y)).rgb;
-  c = max(vec3(0.0), c * 0.25 - vec3(uThreshold));
+  c *= 0.25;
+  // Soft luminance knee (round 2, item 2a): the old hard subtract cut a
+  // clean iso-contour ring into every bloom at exactly the threshold.
+  if (uThreshold > 0.0) {
+    float l = dot(c, vec3(0.299, 0.587, 0.114));
+    c *= smoothstep(uThreshold * 0.55, uThreshold * 1.65, l);
+  }
   fragColor = vec4(c, 1.0);
 }
 `;
@@ -156,6 +162,7 @@ uniform sampler2D uField1;
 uniform vec3 uHueLab[${NE}];
 uniform float uExposure;
 uniform vec2 uFloor;   // darkness budget: pooled-total smoothstep (from, to)
+uniform vec3 uDomLow;  // low-density dominance: (power, rampFrom, rampTo)
 uniform float uDominance;
 uniform float uChromaFloor;
 uniform float uGain;
@@ -299,8 +306,15 @@ void main() {
   }
   float overlap = smoothstep(uOverlap.x, uOverlap.y, top2 / max(top1, 1e-5));
 
+  // DENSITY-ADAPTIVE DOMINANCE (round 2, item 2b): in thin connective
+  // tissue the winner takes the pixel (high power — the local emotion
+  // stays NAMEABLE, no averaged soup); where feeling genuinely pools the
+  // woven blend takes over (uDominance). Low-density mud was two small
+  // near-equal weights averaging through olive/brown midpoints.
+  float dom = mix(uDomLow.x, uDominance, smoothstep(uDomLow.y, uDomLow.z, total));
+
   for (int i = 0; i < ${NE}; i++) {
-    float w = pow(I[i], uDominance);
+    float w = pow(I[i], dom);
     // THE WEAVE (from silk): where feelings GENUINELY meet, threads of
     // each interleave through the front — per-emotion bands of slow noise
     // tilt the local vote, so neighbors meld as woven strands, never a
@@ -370,11 +384,18 @@ void main() {
   // deeper — matte, never glassy). The contours crawl slowly, like paint
   // still deciding where to dry — and the live wash beneath keeps the
   // tiers reading as stacked layers, not posterization.
+  // Round 2, item 2a: the tiers were drawing literal concentric rings —
+  // 70% of each step dead flat, a dark Gaussian rim at every contour.
+  // Now: the step transition spans most of the level (terraces, not
+  // cliffs), the rim is a whisper, and the contours WANDER (crawl up)
+  // so no ring closes on itself as a circle. The heart below rides the
+  // smooth pre-tier b, so its lift is never stepped.
+  float bSmooth = b;
   {
     float crawl = (fbm(nq * 3.0 + uTimeSec * 0.01) - 0.5) * uTiers.w;
     float lv = clamp(b + crawl, 0.0, 1.0) * uTiers.x;
     float f = fract(lv);
-    float soft = smoothstep(0.35, 0.65, f);
+    float soft = smoothstep(0.12, 0.88, f);
     float b2 = (floor(lv) + soft) / uTiers.x;
     float rim = exp(-pow((f - 0.5) / 0.11, 2.0));
     b = mix(b, b2 * (1.0 - uTiers.y * rim), uTierKeep);
@@ -393,8 +414,9 @@ void main() {
   }
 
   // THE LUMINOUS HEART: where pooled feeling peaks, the hue itself lifts
-  // toward light — bright AND saturated, capped well below white.
-  lab.x += uHeart.z * smoothstep(uHeart.x, uHeart.y, b);
+  // toward light — bright AND saturated, capped well below white. Rides
+  // the SMOOTH b (pre-tier), so the lift never steps at a contour.
+  lab.x += uHeart.z * smoothstep(uHeart.x, uHeart.y, bSmooth);
 
   // THE NEVER-WHITE CEILING (Eli, 2026-07-07): no matter how much feeling
   // pools — saturated knee, heart lift, the palest anchor (lilac) — the
@@ -437,7 +459,11 @@ void main() {
     return;
   }
 
-  vec3 color = linearToSrgb(oklabToLinear(lab)) * max(b, 0.0) * uGain;
+  // Brightness scales LIGHT, not code (round 2, items 2b/2c): b×gain
+  // multiplies the LINEAR color before sRGB encoding. The old gamma-space
+  // multiply literally turned every dim warm pixel olive-brown — the mud
+  // between hearts and the close-zoom stain were this one line.
+  vec3 color = linearToSrgb(oklabToLinear(lab) * (max(b, 0.0) * uGain));
   // uMode 0: alpha 0 under mapbox's premultiplied blend == pure additive.
   // uMode 1: caller sets blendFunc(DST_COLOR, ONE) — color multiplies the
   //          base map, so streets inside the field catch its light.
@@ -892,6 +918,12 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform3fv(u("uHueLab"), this.hueLab);
     gl.uniform1f(u("uExposure"), FIELD.exposure);
     gl.uniform2f(u("uFloor"), FIELD.floor.from, FIELD.floor.to);
+    gl.uniform3f(
+      u("uDomLow"),
+      FIELD.dominanceLow.p,
+      FIELD.dominanceLow.from,
+      FIELD.dominanceLow.to,
+    );
     gl.uniform1f(u("uDominance"), FIELD.dominance);
     gl.uniform1f(u("uChromaFloor"), FIELD.chromaFloor);
     gl.uniform1f(u("uTimeSec"), this.timeSec);
