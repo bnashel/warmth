@@ -375,24 +375,30 @@ export const TRAIL = {
     /** Pure-hue glint at the heart (additive within the matte pass). */
     glint: 0.5,
   },
-  /** THE AURORA (2026-07-08, Eli): connections between memories as
-   *  flowing curtains — soft feathered ribbons whose light drifts and
-   *  shimmers along real geography, dimming into the past. Tap one to
-   *  learn how far apart the two moments were. Geometry: Catmull-Rom
-   *  with adaptive tautness + a gentle meander; shading: AuroraLayer. */
-  aurora: {
-    widthPx: 13,
-    /** Peak curtain opacity (feather/flow reduce from here). */
-    alpha: 0.5,
-    subdiv: 18,
+  /** THE THREAD (round 2, item 4 — Ben + Eli: the always-on beaded
+   *  network is gone). ONE continuous quiet path through the moments in
+   *  time order, revealed on entering the private view, then gone.
+   *  `affordance` is Ben's pick between the two proposals:
+   *    "onEnter" — draws once softly on entering private, holds, fades
+   *                (current: zero new chrome);
+   *    "control" — a small quiet "thread" chip toggles it (build on pick).
+   *  Geometry keeps the aurora's good bones: Catmull-Rom with adaptive
+   *  tautness + a gentle meander, as one multi-vertex path (no beads). */
+  thread: {
+    affordance: "onEnter" as "onEnter" | "control",
+    widthPx: 2,
+    /** Peak opacity of the quiet line (whisper-ink, never a ribbon). */
+    alpha: 0.22,
+    subdiv: 12,
     tautness: 0.72,
-    /** Perpendicular meander amplitude as a fraction of span length. */
-    meander: 0.12,
-    /** Noise cells per degree (curtain texture scale). */
-    noiseScale: 620,
-    flowSpeed: 0.055,
-    /** The far past dims to this fraction (newest span = 1). */
-    oldDim: 0.4,
+    /** Perpendicular meander, near-zero on purpose: repeat trips (home ↔
+     *  work) must lie on the SAME worn path — one footpath deepened by
+     *  use, never a braid of strands (0.12 read as a cable). */
+    meander: 0.03,
+    /** The reveal envelope: inhale, hold a breath, exhale. */
+    inMs: 900,
+    holdMs: 3600,
+    outMs: 1400,
   },
   /** THE JOURNAL EXTRAS (2026-07-07): the candle keeps the LAMP's core and
    *  falloff — but its SILHOUETTE is free-form (Eli: "less circular").

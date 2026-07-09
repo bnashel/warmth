@@ -5,7 +5,7 @@
  * place). `version` keys deck.gl's updateTriggers so weight changes actually
  * reach the GPU — without it, in-place mutation is invisible.
  */
-import { ScatterplotLayer, TextLayer } from "deck.gl";
+import { PathLayer, ScatterplotLayer, TextLayer } from "deck.gl";
 import {
   ADDITIVE_LIGHT,
   SCREEN_LIGHT,
@@ -15,7 +15,6 @@ import {
   EmotionGlowLayer,
   type GlowDatum,
 } from "./GlowLayer";
-import { AuroraLayer, type AuroraDatum } from "./AuroraLayer";
 import { journalTestMode, journalTestPoints, JOURNAL_TEST_VERSION } from "./testJournal";
 import type { LivePoint } from "@/lib/momentsStore";
 import { GLOW, LAMP, TRAIL } from "@/components/Map/tune";
@@ -174,76 +173,81 @@ const getClusterRadius = (d: SparkCluster) =>
 let clusterCache: { key: string; clusters: SparkCluster[] } | null = null;
 let ringCache: { version: number; data: LivePoint[]; remembered: LivePoint[] } | null = null;
 
-/* ---- THE AURORA (Eli's redesign, 2026-07-08): the journey between ---- */
+/* ---- THE THREAD (round 2, item 4 — off by default, on demand) --------
+ * The always-on beaded network is gone (Ben + Eli). What remains is ONE
+ * single continuous quiet path through the moments in time order —
+ * revealed briefly when you enter the private view, then gone. Never a
+ * permanent network, never radiating strings.
+ *
+ * PROPOSED AFFORDANCES (Ben picks; TRAIL.thread.affordance flips it):
+ *   "onEnter"  — the path draws once, softly, on entering private view,
+ *                holds a breath, and fades. No new chrome. (Current.)
+ *   "control"  — a small quiet "thread" chip in the private view that
+ *                toggles it. (Not built until Ben chooses it.)
+ * -------------------------------------------------------------------- */
 
-/** Catmull-Rom through the entries in time order with a gentle meander,
- *  chopped into short 2-point paths whose colors lerp between the
- *  entries' hues. Older spans dim toward the past (the journey has a
- *  direction); every span carries the time gap it bridges (tap = reveal).
- *  Shading (feather/flow/rays) lives in AuroraLayer. Cached by version. */
-function auroraSegments(data: LivePoint[]): AuroraDatum[] {
+/** One smoothed polyline through ALL entries in time order — the same
+ *  Catmull-Rom + adaptive tautness + gentle meander the aurora used, but
+ *  a single multi-vertex path: no per-segment caps, so no beads. */
+function threadVertices(data: LivePoint[]): [number, number][] {
   const pts = [...data].sort((a, b) => a.createdAt - b.createdAt);
   if (pts.length < 2) return [];
-  const A = TRAIL.aurora;
-  const n = A.subdiv;
-  const segs: AuroraDatum[] = [];
+  const T = TRAIL.thread;
   const P = (i: number) => pts[Math.min(pts.length - 1, Math.max(0, i))].position;
-  const spans = pts.length - 1;
-  for (let i = 0; i < spans; i++) {
+  const verts: [number, number][] = [[P(0)[0], P(0)[1]]];
+  for (let i = 0; i < pts.length - 1; i++) {
     const p0 = P(i - 1);
     const p1 = P(i);
     const p2 = P(i + 1);
     const p3 = P(i + 2);
-    // Adaptive tautness: short hops curve like handwriting; a long jump
-    // across the city runs nearly straight (full Catmull-Rom overshoots
-    // into wide loops over the river on distant consecutive entries).
+    // Short hops curve like handwriting; long jumps run nearly straight
+    // (full Catmull-Rom loops wide over the river between far entries).
     const len = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
-    const t = A.tautness * Math.min(1, 0.012 / Math.max(len, 1e-6));
-    // The meander: a soft perpendicular sway, unique per span — the
-    // curtain wanders like weather, never a surveyor's line.
-    const perp: [number, number] = len > 1e-9 ? [-(p2[1] - p1[1]) / len, (p2[0] - p1[0]) / len] : [0, 0];
+    const t = T.tautness * Math.min(1, 0.012 / Math.max(len, 1e-6));
+    const perp: [number, number] =
+      len > 1e-9 ? [-(p2[1] - p1[1]) / len, (p2[0] - p1[0]) / len] : [0, 0];
     const phase = i * 2.399; // golden-angle-ish: no two spans sway alike
-    // The past dims: the newest span glows fullest.
-    const age = spans === 1 ? 1 : i / (spans - 1);
-    const dim = A.oldDim + (1 - A.oldDim) * age;
-    const gapMs = pts[i + 1].createdAt - pts[i].createdAt;
-    let prev: [number, number] = [p1[0], p1[1]];
-    for (let k = 1; k <= n; k++) {
-      const s = k / n;
+    for (let k = 1; k <= T.subdiv; k++) {
+      const s = k / T.subdiv;
       const s2 = s * s;
       const s3 = s2 * s;
       const cr = (a: number, b: number, c: number, d: number) =>
         b + t * ((-a + c) * s + (2 * a - 5 * b + 4 * c - d) * s2 + (-a + 3 * b - 3 * c + d) * s3) * 0.5 +
         (1 - t) * ((c - b) * s);
-      const sway = Math.sin(s * Math.PI * 1.7 + phase) * Math.sin(s * Math.PI) * len * A.meander;
-      const pt: [number, number] = [
+      const sway = Math.sin(s * Math.PI * 1.7 + phase) * Math.sin(s * Math.PI) * len * T.meander;
+      verts.push([
         cr(p0[0], p1[0], p2[0], p3[0]) + perp[0] * sway,
         cr(p0[1], p1[1], p2[1], p3[1]) + perp[1] * sway,
-      ];
-      const mix = (a: number, b: number) => Math.round(a + (b - a) * s);
-      segs.push({
-        path: [prev, pt],
-        color: [
-          mix(pts[i].hue[0], pts[i + 1].hue[0]),
-          mix(pts[i].hue[1], pts[i + 1].hue[1]),
-          mix(pts[i].hue[2], pts[i + 1].hue[2]),
-          Math.round(255 * A.alpha * dim),
-        ],
-        gapMs,
-      });
-      prev = pt;
+      ]);
     }
   }
-  return segs;
+  return verts;
 }
 
-let auroraCache: { version: number; segs: AuroraDatum[] } | null = null;
+let threadCache: { version: number; verts: [number, number][] } | null = null;
 
-function cachedAurora(data: LivePoint[], version: number): AuroraDatum[] {
-  if (!auroraCache || auroraCache.version !== version) {
-    auroraCache = { version, segs: auroraSegments(data) };
+function cachedThread(data: LivePoint[], version: number): [number, number][] {
+  if (!threadCache || threadCache.version !== version) {
+    threadCache = { version, verts: threadVertices(data) };
   }
-  return auroraCache.segs;
+  return threadCache.verts;
+}
+
+/** The on-enter reveal envelope: rises softly, holds a breath, exhales.
+ *  Tracks the public→private crossing from the fade the caller already
+ *  passes every frame — no new plumbing, no React. */
+let lastFade = 0;
+let enteredAtSec = -1e9;
+function threadReveal(fade: number, timeSec: number): number {
+  if (lastFade < 0.5 && fade >= 0.5) enteredAtSec = timeSec;
+  lastFade = fade;
+  const T = TRAIL.thread;
+  const t = (timeSec - enteredAtSec) * 1000;
+  if (t < 0) return 0;
+  if (t < T.inMs) return t / T.inMs;
+  if (t < T.inMs + T.holdMs) return 1;
+  const out = (t - T.inMs - T.holdMs) / T.outMs;
+  return Math.max(0, 1 - out);
 }
 
 function cachedClusters(data: LivePoint[], version: number, zoom: number): SparkCluster[] {
@@ -290,9 +294,6 @@ export function buildTrailLayers(
   paper = 0,
   onTapEntry?: (id: string) => void,
   onTapCluster?: (lngLat: [number, number]) => void,
-  /** A connection was tapped: how far apart its two memories are + where
-   *  (screen px) — the screen shows the time-gap whisper. */
-  onTapGap?: (gapMs: number, x: number, y: number) => void,
 ) {
   // DEV ONLY (`?journal=test`): the dense judging set — ~60 moments over
   // 3 months, home + work clusters + scatter. Never touches the store.
@@ -409,34 +410,25 @@ export function buildTrailLayers(
     );
   }
   if (night > 0.01) {
-    // THE AURORA: the journey between the memories — flowing curtains of
-    // light, drawn first so every node sits above its own history. Tap a
-    // curtain to learn how far apart its two moments were.
-    if (data.length > 1) {
+    // THE THREAD (item 4): one continuous quiet path through time,
+    // revealed on entering the private view, then gone. Drawn first so
+    // every mark sits above its own history.
+    const reveal = threadReveal(fade, timeSec);
+    if (data.length > 1 && reveal > 0.01) {
+      const alpha = Math.round(255 * TRAIL.thread.alpha * reveal * fade * night);
       layers.push(
-        new AuroraLayer({
-          id: "journal-aurora",
-          data: cachedAurora(data, version),
-          getPath: (d: AuroraDatum) => d.path,
-          getColor: (d: AuroraDatum) =>
-            [d.color[0], d.color[1], d.color[2], Math.round(d.color[3] * fade * night)] as [
-              number,
-              number,
-              number,
-              number,
-            ],
-          updateTriggers: { getColor: [version, Math.round(fade * night * 32)] },
-          timeSec,
+        new PathLayer({
+          id: "journal-thread",
+          data: [{ path: cachedThread(data, version) }],
+          getPath: (d: { path: [number, number][] }) => d.path,
+          getColor: [233, 236, 244, alpha] as [number, number, number, number],
+          updateTriggers: { getColor: [version, alpha] },
           widthUnits: "pixels" as const,
-          getWidth: TRAIL.aurora.widthPx,
-          widthMinPixels: 4,
+          getWidth: TRAIL.thread.widthPx,
+          widthMinPixels: 1.5,
           capRounded: true,
           jointRounded: true,
-          pickable: true,
-          onClick: (info: { object?: AuroraDatum; x?: number; y?: number }) => {
-            if (info.object && onTapGap) onTapGap(info.object.gapMs, info.x ?? 0, info.y ?? 0);
-            return true;
-          },
+          pickable: false,
           parameters: { depthWriteEnabled: false },
         }),
       );
@@ -506,22 +498,16 @@ export function buildTrailLayers(
       );
     }
     // WHERE IT BEGAN → NOW: two whispers that make the journey legible at
-    // a cold glance — the oldest memory carries its date, the newest says
-    // "now". Each speaks in its own entry's hue (no white in the journal).
+    // a cold glance — "now" on the newest moment ONLY (round 2, item 4).
     if (data.length > 1) {
       const byTime = [...data].sort((a, b) => a.createdAt - b.createdAt);
-      const first = byTime[0];
       const last = byTime[byTime.length - 1];
-      const began = new Date(first.createdAt).toLocaleDateString(undefined, {
-        month: "long",
-        day: "numeric",
-      });
       layers.push(
         new TextLayer<LivePoint>({
           id: "journal-journey-cues",
-          data: [first, last],
+          data: [last],
           getPosition: (d) => d.position,
-          getText: (d) => (d === first ? `began ${began}` : "now"),
+          getText: () => "now",
           getSize: 11,
           getColor: (d) => [d.hue[0], d.hue[1], d.hue[2], Math.round(190 * fade * night)],
           getPixelOffset: (d: LivePoint) => [0, -(getTrailRadius(d) + 14)] as [number, number],

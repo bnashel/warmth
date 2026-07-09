@@ -44,7 +44,6 @@ export default function MapStage({
   view = "public",
   onMapReady,
   onEntryTap,
-  onGapTap,
 }: {
   /** public = the field (everyone); private = your journal (sparks, only you). */
   view?: "public" | "private";
@@ -52,9 +51,6 @@ export default function MapStage({
   onMapReady?: (map: MapboxMap) => void;
   /** Private view: a spark was tapped — the screen opens its memory. */
   onEntryTap?: (id: string) => void;
-  /** Private view: an aurora connection was tapped — the screen whispers
-   *  the time between its two memories (gapMs, screen x/y). */
-  onGapTap?: (gapMs: number, x: number, y: number) => void;
 }) {
   const mapRef = useRef<MapRef | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
@@ -142,10 +138,6 @@ export default function MapStage({
   useEffect(() => {
     onEntryTapRef.current = onEntryTap;
   }, [onEntryTap]);
-  const onGapTapRef = useRef(onGapTap);
-  useEffect(() => {
-    onGapTapRef.current = onGapTap;
-  }, [onGapTap]);
 
   const style = useMemo(() => buildStyle(INK, "ink-and-glow"), []);
   // DPR cap: 3× phones render near-identically at 2× on a dark map, for
@@ -315,7 +307,6 @@ export default function MapStage({
               // Tap a constellation: descend toward its sparks.
               (lngLat) =>
                 map.easeTo({ center: lngLat, zoom: Math.min(zoom + 2.4, 14), duration: 900 }),
-              (gapMs, x, y) => onGapTapRef.current?.(gapMs, x, y),
             )
           : [];
         // Trail first: labels stay readable above your dots.
