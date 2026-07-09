@@ -38,6 +38,11 @@ layout(std140) uniform glowUniforms {
   float tiers;
   float matte;
   float matteGlint;
+  float ember;
+  float emberEdge;
+  float emberHeartR;
+  float emberHeartOff;
+  float emberWarmth;
 } glow;
 `,
   uniformTypes: {
@@ -60,6 +65,11 @@ layout(std140) uniform glowUniforms {
     tiers: "f32" as const,
     matte: "f32" as const,
     matteGlint: "f32" as const,
+    ember: "f32" as const,
+    emberEdge: "f32" as const,
+    emberHeartR: "f32" as const,
+    emberHeartOff: "f32" as const,
+    emberWarmth: "f32" as const,
   },
 };
 
@@ -75,6 +85,7 @@ precision highp float;
 in vec4 vFillColor;
 in vec2 unitPosition;
 in float vPhase;
+in float vSeed;
 out vec4 fragColor;
 
 void main(void) {
@@ -85,6 +96,58 @@ void main(void) {
 
   // Breathing: per-point phase — the city never throbs in lockstep.
   float s = sin(6.2831853 * (glow.timeSec / glow.periodSec + vPhase));
+
+  // THE EMBER (round 2, item 3 — the journal's memory mark). Sea-glass
+  // silhouette: a roundish base with 2-4 gentle undulations, seeded by the
+  // ENTRY'S ID and frozen forever — a memory has a shape the way a pebble
+  // does. Low frequency only (harmonics 2/3/4, ±~18%): nothing that reads
+  // as bacteria. The ember breathes in LIGHT, never in shape.
+  if (glow.ember > 0.0) {
+    float theta = atan(unitPosition.y, unitPosition.x);
+    float p2 = vSeed * 6.2831853;
+    float p3 = fract(vSeed * 7.5091) * 6.2831853;
+    float p4 = fract(vSeed * 3.1371) * 6.2831853;
+    float undul = 0.11 * sin(2.0 * theta + p2)
+                + 0.06 * sin(3.0 * theta + p3)
+                + 0.035 * sin(4.0 * theta + p4);
+    float rE = r / (1.0 + undul);
+    if (rE >= 1.0) discard;
+
+    // The heart: a soft warm luminous center, slightly off-center (seeded),
+    // falling off smoothly — felt warmth, never a point star.
+    vec2 hc = vec2(cos(p3), sin(p3)) * glow.emberHeartOff;
+    float hd = length(unitPosition / (1.0 + undul) - hc) / glow.emberHeartR;
+    float heart = exp(-hd * hd);
+
+    if (glow.ember > 1.5) {
+      // HEART PASS (additive, deliberately dim): where life stacks embers
+      // at one place — home, work — the repeats WARM instead of smearing.
+      vec3 warmHue = mix(vFillColor.rgb, vec3(1.0, 0.86, 0.7), glow.emberWarmth);
+      float hl = heart * (glow.peakBase + glow.peakPerIntensity * w) * glow.gain;
+      hl *= smoothstep(0.0, 0.12, w);
+      hl *= 1.0 + glow.brightnessAmp * s;
+      fragColor = vec4(warmHue * max(hl, 0.0), 0.0);
+      DECKGL_FILTER_COLOR(fragColor, geometry);
+      return;
+    }
+
+    // BODY PASS (premultiplied over): settled matte glass with the heart
+    // glowing through from inside — deeper than the old unlit stain,
+    // dimmer than the old candle. Overlaps deepen (alpha-over stacking).
+    float n0 = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+    float edge = smoothstep(1.0, glow.emberEdge, rE);
+    float tone = 0.5 + 0.28 * w;
+    vec3 col = vFillColor.rgb * tone;
+    col += vFillColor.rgb * 0.35 * heart * (0.5 + 0.5 * w);
+    col = min(col, vFillColor.rgb * 0.95); // the hue itself is the ceiling
+    float a = edge * (glow.peakBase + glow.peakPerIntensity * w) * glow.gain;
+    a *= smoothstep(0.0, 0.12, w);
+    a *= 1.0 + 0.04 * s;                   // the quietest breath, light only
+    a = clamp(a + (n0 - 0.5) * 0.006, 0.0, 0.88);
+    fragColor = vec4(col * a, a);
+    DECKGL_FILTER_COLOR(fragColor, geometry);
+    return;
+  }
 
   // Radius breathes but never leaves the quad: full size only at s = 1.
   float breathe = (1.0 + glow.radiusAmp * s) / (1.0 + glow.radiusAmp);
@@ -206,6 +269,8 @@ export type GlowDatum = {
   position: [number, number];
   hue: [number, number, number];
   weight: number; // 0..1 — intensity × freshness × arrival
+  /** Present on journal entries — seeds the ember's forever-shape. */
+  id?: string;
 };
 
 type LightParams = {
@@ -237,21 +302,57 @@ type LightParams = {
   matte: number;
   /** Heart glint strength for the matte gem. */
   matteGlint: number;
+  /** THE EMBER: 0 = off, 1 = body pass (MATTE_OVER), 2 = heart pass
+   *  (ADDITIVE_LIGHT). Silhouette seeded by getSeed (the entry id). */
+  ember: number;
+  /** Body edge feather start (fraction of the shaped radius). */
+  emberEdge: number;
+  /** Heart falloff radius (fraction of the shape). */
+  emberHeartR: number;
+  /** Heart off-center distance (fraction; direction is seeded). */
+  emberHeartOff: number;
+  /** Heart hue lift toward warm white on the additive pass. */
+  emberWarmth: number;
 };
 
 type EmotionGlowLayerProps = ScatterplotLayerProps<GlowDatum> & {
   timeSec?: number;
   /** Per-layer shading overrides (the streetlight pass has no hot core). */
   light?: Partial<LightParams>;
+  /** Per-datum shape seed (the ember hashes the entry id — the shape is
+   *  the memory's forever). Optional; defaults to 0. */
+  getSeed?: (d: GlowDatum) => number;
 };
 
 export class EmotionGlowLayer extends ScatterplotLayer<
   GlowDatum,
   // beforeId is read by MapboxOverlay (interleaved) to place the layer
   // within the mapbox style stack; deck's own types don't know it.
-  { timeSec?: number; light?: Partial<LightParams>; beforeId?: string }
+  {
+    timeSec?: number;
+    light?: Partial<LightParams>;
+    beforeId?: string;
+    getSeed?: (d: GlowDatum) => number;
+  }
 > {
   static layerName = "EmotionGlowLayer";
+  // Accessor default: layers that don't pass getSeed (public glow, gems,
+  // streetlight) fall back to a constant 0 instead of tripping deck's
+  // accessor assert — only the ember reads the seed.
+  static defaultProps = {
+    ...ScatterplotLayer.defaultProps,
+    getSeed: { type: "accessor", value: 0 },
+  };
+
+  initializeState() {
+    super.initializeState();
+    // The ember's forever-shape seed rides its own instanced attribute
+    // (hashed from the entry ID on the CPU — world position would give two
+    // moments at the same cafe the same pebble).
+    this.getAttributeManager()!.addInstanced({
+      instanceSeeds: { size: 1, accessor: "getSeed", defaultValue: [0] },
+    });
+  }
 
   getShaders() {
     const shaders = super.getShaders();
@@ -259,11 +360,13 @@ export class EmotionGlowLayer extends ScatterplotLayer<
     shaders.modules = [...shaders.modules, glowUniforms];
     // Per-point pulse phase, hashed from world position in the (otherwise
     // stock) vertex shader — hue or intensity alone would sync clusters.
+    // vSeed carries the id-hashed ember shape seed through.
     shaders.inject = {
       ...shaders.inject,
-      "vs:#decl": "out float vPhase;\n",
+      "vs:#decl": "in float instanceSeeds;\nout float vPhase;\nout float vSeed;\n",
       "vs:#main-end":
-        "vPhase = fract(sin(dot(instancePositions.xy, vec2(12.9898, 78.233))) * 43758.5453);\n",
+        "vPhase = fract(sin(dot(instancePositions.xy, vec2(12.9898, 78.233))) * 43758.5453);\n" +
+        "vSeed = instanceSeeds;\n",
     };
     return shaders;
   }
@@ -289,6 +392,11 @@ export class EmotionGlowLayer extends ScatterplotLayer<
       tiers: 0,
       matte: 0,
       matteGlint: 0,
+      ember: 0,
+      emberEdge: 0.8,
+      emberHeartR: 0.5,
+      emberHeartOff: 0.22,
+      emberWarmth: 0.35,
       ...light,
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -314,6 +422,11 @@ export class EmotionGlowLayer extends ScatterplotLayer<
         tiers: p.tiers,
         matte: p.matte,
         matteGlint: p.matteGlint,
+        ember: p.ember,
+        emberEdge: p.emberEdge,
+        emberHeartR: p.emberHeartR,
+        emberHeartOff: p.emberHeartOff,
+        emberWarmth: p.emberWarmth,
       },
     });
     super.draw(params as never);
@@ -360,6 +473,22 @@ export const MATTE_OVER = {
   blendAlphaOperation: "add",
   blendAlphaSrcFactor: "one",
   blendAlphaDstFactor: "one-minus-src-alpha",
+  depthWriteEnabled: false,
+  depthCompare: "always",
+} as const;
+
+/** Screen-blend light (the ember's heart): src·(1−dst) + dst — light that
+ *  SATURATES toward its own hue and can never sum past it. Twenty-five
+ *  moments at home warm the ember deeply; they cannot bloom white
+ *  (constitution rule 3, structurally). */
+export const SCREEN_LIGHT = {
+  blend: true,
+  blendColorOperation: "add",
+  blendColorSrcFactor: "one-minus-dst",
+  blendColorDstFactor: "one",
+  blendAlphaOperation: "add",
+  blendAlphaSrcFactor: "zero",
+  blendAlphaDstFactor: "one",
   depthWriteEnabled: false,
   depthCompare: "always",
 } as const;

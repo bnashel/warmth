@@ -8,6 +8,7 @@
 import { ScatterplotLayer, TextLayer } from "deck.gl";
 import {
   ADDITIVE_LIGHT,
+  SCREEN_LIGHT,
   MATTE_OVER,
   PIGMENT_STAIN,
   STREET_LIGHT,
@@ -15,6 +16,7 @@ import {
   type GlowDatum,
 } from "./GlowLayer";
 import { AuroraLayer, type AuroraDatum } from "./AuroraLayer";
+import { journalTestMode, journalTestPoints, JOURNAL_TEST_VERSION } from "./testJournal";
 import type { LivePoint } from "@/lib/momentsStore";
 import { GLOW, LAMP, TRAIL } from "@/components/Map/tune";
 
@@ -259,6 +261,26 @@ function cachedRemembered(data: LivePoint[], version: number): LivePoint[] {
   return ringCache.remembered;
 }
 
+/** Which private renderer draws the memory marks. Default = THE EMBER
+ *  (round 2, item 3); `?trail=splat` shows the old matte-gem for the
+ *  side-by-side judging (loser gets deleted once Ben + Eli decide). */
+function trailRenderer(): "ember" | "splat" {
+  if (typeof window !== "undefined") {
+    const p = new URLSearchParams(window.location.search).get("trail");
+    if (p === "splat" || p === "ember") return p;
+  }
+  return TRAIL.renderer;
+}
+
+/** The ember's forever-shape seed: a hash of the entry ID — stable across
+ *  sessions and zooms, unique even for two moments at the same cafe. */
+const getSeed = (d: GlowDatum) => {
+  const id = d.id ?? "";
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return (h % 100003) / 100003;
+};
+
 export function buildTrailLayers(
   data: LivePoint[],
   version: number,
@@ -272,6 +294,12 @@ export function buildTrailLayers(
    *  (screen px) — the screen shows the time-gap whisper. */
   onTapGap?: (gapMs: number, x: number, y: number) => void,
 ) {
+  // DEV ONLY (`?journal=test`): the dense judging set — ~60 moments over
+  // 3 months, home + work clusters + scatter. Never touches the store.
+  if (journalTestMode()) {
+    data = journalTestPoints();
+    version = JOURNAL_TEST_VERSION;
+  }
   if (fade < 0.01 || data.length === 0) return [];
 
   // THE CONSTELLATION VIEW: zoomed out, the journal gathers. One breathing
@@ -413,29 +441,70 @@ export function buildTrailLayers(
         }),
       );
     }
-    // THE MEMORY NODES: matte pigment gems (Eli's 2026-07-08 redesign) —
-    // solid hue with a sealing-wax rim and a pure-hue glint, the living-
-    // blot silhouette, zero white anywhere. Tappable.
-    layers.push(
-      new EmotionGlowLayer({
-        id: "journal-sparks",
-        ...shared,
-        pickable: true,
-        onClick: (info: { object?: LivePoint }) => {
-          if (info.object && onTapEntry) onTapEntry(info.object.id);
-          return true;
-        },
-        light: {
-          gain: TRAIL.gain * fade * night,
-          wobble: TRAIL.spark.wobble,
-          matte: 1,
-          matteGlint: TRAIL.node.glint,
-          stainEdge: TRAIL.node.edge,
-          stainRing: TRAIL.node.rim,
-        },
-        parameters: MATTE_OVER,
-      }),
-    );
+    // THE MEMORY MARKS. Default: THE EMBER (round 2, item 3) — an
+    // id-seeded sea-glass silhouette frozen forever, a matte body whose
+    // overlaps DEEPEN, and a dim additive heart so repeat places WARM.
+    // `?trail=splat`: the old matte-gem, kept only for the judging.
+    if (trailRenderer() === "ember") {
+      layers.push(
+        new EmotionGlowLayer({
+          id: "journal-ember-body",
+          ...shared,
+          getSeed,
+          pickable: true,
+          onClick: (info: { object?: LivePoint }) => {
+            if (info.object && onTapEntry) onTapEntry(info.object.id);
+            return true;
+          },
+          light: {
+            gain: TRAIL.ember.bodyGain * fade * night,
+            ember: 1,
+            emberEdge: TRAIL.ember.edge,
+            emberHeartR: TRAIL.ember.heartR,
+            emberHeartOff: TRAIL.ember.heartOff,
+            emberWarmth: TRAIL.ember.warmth,
+          },
+          parameters: MATTE_OVER,
+        }),
+        new EmotionGlowLayer({
+          id: "journal-ember-heart",
+          ...shared,
+          getSeed,
+          light: {
+            gain: TRAIL.ember.heartGain * fade * night,
+            ember: 2,
+            emberEdge: TRAIL.ember.edge,
+            emberHeartR: TRAIL.ember.heartR,
+            emberHeartOff: TRAIL.ember.heartOff,
+            emberWarmth: TRAIL.ember.warmth,
+          },
+          // SCREEN, not additive: stacked hearts saturate toward the warm
+          // hue and structurally cannot bloom white (rule 3).
+          parameters: SCREEN_LIGHT,
+        }),
+      );
+    } else {
+      layers.push(
+        new EmotionGlowLayer({
+          id: "journal-sparks",
+          ...shared,
+          pickable: true,
+          onClick: (info: { object?: LivePoint }) => {
+            if (info.object && onTapEntry) onTapEntry(info.object.id);
+            return true;
+          },
+          light: {
+            gain: TRAIL.gain * fade * night,
+            wobble: TRAIL.spark.wobble,
+            matte: 1,
+            matteGlint: TRAIL.node.glint,
+            stainEdge: TRAIL.node.edge,
+            stainRing: TRAIL.node.rim,
+          },
+          parameters: MATTE_OVER,
+        }),
+      );
+    }
     // WHERE IT BEGAN → NOW: two whispers that make the journey legible at
     // a cold glance — the oldest memory carries its date, the newest says
     // "now". Each speaks in its own entry's hue (no white in the journal).

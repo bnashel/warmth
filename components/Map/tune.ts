@@ -341,8 +341,30 @@ export const TRAIL = {
    *  `ring` deeper at the rim, and a `heart` faintly lighter at the center
    *  (water pushes pigment outward as it dries) so it never reads as a disc. */
   stain: { edge: 0.88, ring: 0.28, radiusScale: 0.85, gainBoost: 1.25, heart: 0.12 },
-  /** THE MEMORY NODE (2026-07-08 full redesign, Eli): a matte pigment
-   *  gem, not a point of light — solid hue at pigment depth with a
+  /** THE EMBER (round 2, item 3 — the agreed middle between candle and
+   *  ink). Primary private rendering: an id-seeded sea-glass silhouette
+   *  (2-4 gentle undulations, ±~18%, FROZEN forever — a memory has a
+   *  shape the way a pebble does) with a soft warm heart glowing slightly
+   *  off-center. Two passes: a matte body (overlaps DEEPEN) and a dim
+   *  additive heart (repeat places WARM). `?trail=splat` shows the old
+   *  matte-gem renderer for the side-by-side judging; the loser gets
+   *  deleted after Ben + Eli decide on phones. */
+  renderer: "ember" as "ember" | "splat",
+  ember: {
+    /** Body edge feather start (fraction of the shaped radius). */
+    edge: 0.8,
+    /** Heart falloff radius + off-center reach (fractions of the shape). */
+    heartR: 0.5,
+    heartOff: 0.22,
+    /** Heart hue lift toward warm candle-white on the additive pass. */
+    warmth: 0.35,
+    /** Body alpha gain and the dim additive heart gain — between the old
+     *  unlit stains and the too-bright candles. */
+    bodyGain: 0.95,
+    heartGain: 0.3,
+  },
+  /** THE MEMORY NODE (2026-07-08 redesign; now the `?trail=splat` judging
+   *  alternative): a matte pigment gem — solid hue at pigment depth with a
    *  darker rim (sealing-wax edge), a small pure-hue glint at the heart,
    *  and the living-blot silhouette. ZERO white anywhere in the node. */
   node: {
