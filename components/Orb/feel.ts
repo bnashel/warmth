@@ -43,7 +43,7 @@ export const GLOW = {
    *  Rest is quiet on purpose: the orb floats over the CITY, and its
    *  idle light must never fog the map (the brightness law) — the halo
    *  swells during the gesture, when drama is earned. */
-  haloAlpha: { rest: 0.07, max: 0.38 },
+  haloAlpha: { rest: 0.05, max: 0.38 },
   midAlpha: 0.92,
   /** Elevation: the floating shadow under the lamp (night + day) and the
    *  thin glass rim that separates it from the city below. */

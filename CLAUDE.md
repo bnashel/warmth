@@ -23,6 +23,19 @@ An ambient, beautiful live map of how a city feels. Emotion is rendered as glowi
 5. **One glow recipe everywhere:** tight luminous core, exponential falloff, zoom-aware radius. Any glow that renders as a structureless blur is a bug.
 6. **60fps always.** Animate transform and opacity only. A style choice that costs frames loses.
 
+## DO NOT REGRESS (hard-won looks; check before touching their files)
+- **The orb is an instrument, never map data** (round 2, item 6): ~72px
+  porcelain lamp — crisp edge, small bright core, tight contained halo,
+  floating shadow. The giant soft white bloom ("the cotton ball") must
+  never return; the orb must never occlude trail moments as a wash of
+  light. Files: components/Orb/Orb.tsx, GLOW in components/Orb/feel.ts.
+- **The never-white field ceiling**: pooled public feeling stays dusty
+  color, never white (FieldLayer lab.x cap + screen blends).
+- **The darkness budget** (round 2, item 1): at rest, most of the city is
+  night; feelings are luminous islands (FIELD.floor).
+- **The ember's forever-shape**: a journal mark's silhouette is seeded by
+  its id and never changes (pending Ben+Eli's ember-vs-splat pick).
+
 ## Never do this
 - Don't add libraries or dependencies without asking me first.
 - Don't refactor or "clean up" code I didn't ask you to touch.

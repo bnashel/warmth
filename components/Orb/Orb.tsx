@@ -44,23 +44,28 @@ export function Orb({
   const haloBg = useTransform(() => {
     const c = rgb.get();
     const a = haloAlpha.get() * glare;
+    // Item 6: the halo hugs the glass — dead by 70% of its (already tight)
+    // box, so at rest it reads as a whisper of light, never a bloom.
     return `radial-gradient(closest-side, rgba(${c},${a.toFixed(3)}) 0%, rgba(${c},${(
-      a * 0.4
-    ).toFixed(3)}) 48%, rgba(${c},0) 82%)`;
+      a * 0.35
+    ).toFixed(3)}) 42%, rgba(${c},0) 70%)`;
   });
   const midBg = useTransform(() => {
     const c = rgb.get();
-    // The ball itself: full-bodied to 82% of the radius, then a short
-    // 3–4px feather — a defined edge, an object you could pick up.
+    // The ball itself: full-bodied to 88% of the radius, then a ~3px
+    // feather — a PORCELAIN edge, an instrument you could pick up.
     return `radial-gradient(closest-side, rgba(${c},${GLOW.midAlpha}) 0%, rgba(${c},${(
-      GLOW.midAlpha * 0.94
-    ).toFixed(3)}) 66%, rgba(${c},${(GLOW.midAlpha * 0.82).toFixed(3)}) 84%, rgba(${c},0) 99%)`;
+      GLOW.midAlpha * 0.96
+    ).toFixed(3)}) 72%, rgba(${c},${(GLOW.midAlpha * 0.88).toFixed(3)}) 88%, rgba(${c},0) 97%)`;
   });
   const coreBg = useTransform(() => {
     const c = rgb.get();
+    // Crisp bright core, contained: the filament stops whitening by 16%
+    // and the interior settles to the body hue by 64% (item 6 — the wide
+    // white wash was the cotton ball).
     return `radial-gradient(closest-side, rgba(255,255,255,${(0.95 * coreWhite).toFixed(3)}) 0%, rgba(255,255,255,${(
-      0.55 * coreWhite
-    ).toFixed(3)}) ${GLOW.coreFrac * 100}%, rgba(${c},0.3) 52%, rgba(${c},0) 72%)`;
+      0.5 * coreWhite
+    ).toFixed(3)}) 16%, rgba(${c},0.26) 46%, rgba(${c},0) 64%)`;
   });
 
   return (
