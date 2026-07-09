@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import OneScreen from "@/components/Screen/OneScreen";
 import { AuthOverlay } from "@/components/Auth/AuthOverlay";
+import { AccountChip } from "@/components/Auth/AccountChip";
 import { initAuth, onAuthChange, isSignedIn, currentUserId, useSession } from "@/lib/auth";
 import { claimLocalJournal, hydrateJournalFromCloud } from "@/lib/journalSync";
 
@@ -69,6 +70,7 @@ export default function AppGate() {
       </AnimatePresence>
 
       <AnimatePresence>{!loading && !userId && <AuthOverlay key="wall" />}</AnimatePresence>
+      {!loading && userId && <AccountChip />}
     </>
   );
 }
