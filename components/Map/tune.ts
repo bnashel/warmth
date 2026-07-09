@@ -304,8 +304,13 @@ export const FIELD = {
    *  gaps at z12.5–13.5. It now holds full through the middle distance
    *  and settles higher, so the ground never falls out of the picture. */
   seedZoomFade: { from: 13.2, to: 14.8, floor: 0.38 },
-  /** Living tide: subtle brightness breath. */
-  breath: { periodMs: 2500, amp: 0.045 },
+  /** THE HELD BREATH: master multiplier on every flow clock (drift,
+   *  shimmer, weave, crawl, curtains, ripples). 1 = the old nervous
+   *  pace; 0.22 = alive only if you watch (Eli's pick, 2026-07-09). */
+  tempo: 0.22,
+  /** Living tide: subtle brightness breath — the one animation on the
+   *  unscaled clock. Amp cut for the held breath (was 0.045). */
+  breath: { periodMs: 2500, amp: 0.022 },
   /** Streetlight signature: the field multiplied onto the base map so
    *  streets inside a feeling catch its color. 0 kills it. */
   streetlightGain: 0.55,
@@ -481,15 +486,53 @@ export const ATMOSPHERE = {
 /* streak stretches the flow along the wind (0 round, 1 ribboned);     */
 /* band modulates brightness into slow luminous curtains (0 = off).    */
 /* ------------------------------------------------------------------ */
-export const SHAPES = {
-  /** THE WOVEN WASH: edges brushed out along the wind, alive but quiet.
-   *  warpAmp/drift cut 2026-07-08 (Eli: an emotion's LOCATION is a fact):
-   *  the old 0.105 warp visibly sloshed small pools to new positions —
-   *  now edges undulate in place and centers stay pinned to the data.
-   *  (The bloom/watercolor/ink/aurora exploration presets and the 07-08
-   *  ember/silk/pigment directions are retired — docs/later.md.) */
-  woven: { warpAmp: 0.045, scale: 11, drift: 0.01, streak: 0.35, band: 0.25 },
+/** THE HELD BREATH (Eli, 2026-07-09): one master tempo on every flow
+ *  clock — drift, shimmer, weave, crawl, curtains, ripples. The field is
+ *  nearly still; you sense it's alive only after a few seconds. (The 2.5s
+ *  breath heartbeat rides the unscaled clock at a whisper amp.) */
+// tempo lives in FIELD (FIELD.tempo) so the shader plumbing stays in one place.
+
+/* ------------------------------------------------------------------ */
+/* THE LOOKS — the 2026-07-09 bake-off (Eli: "the aesthetic isn't       */
+/* working; give me options"). Four genuinely different artistic        */
+/* directions, all geographic (warpM/cellM are METERS — the texture     */
+/* belongs to the city and zooms with it), all held-breath slow, all    */
+/* the same shader: switching is instant (?look= or the dev pill).      */
+/* Judged on phones; the winner becomes THE look, losers to later.md.   */
+/* ------------------------------------------------------------------ */
+export const LOOKS = {
+  /** STILL WATER — luminous pools that barely breathe. Depth and color
+   *  instead of motion: koi pond at night. */
+  "still-water": {
+    warpM: 240, cellM: 2400, drift: 0.003, streak: 0.1, band: 0,
+    shimmer: 0.1, weaveAmp: 0.25,
+    ripple: { amp: 0, rings: 0, speed: 0 },
+  },
+  /** LIVING WATER — Eli's instinct: one dark sheet over the whole city;
+   *  feeling disturbs it. Slow rings ride the density contours and
+   *  interfere where feelings meet. */
+  "living-water": {
+    warpM: 260, cellM: 2400, drift: 0.004, streak: 0.15, band: 0,
+    shimmer: 0.12, weaveAmp: 0.3,
+    ripple: { amp: 0.13, rings: 3.0, speed: 0.22 },
+  },
+  /** INK IN WATER — pigment curling and diffusing in a glass; motion you
+   *  only notice when you stare. Strong organic warp, near-zero drift. */
+  ink: {
+    warpM: 620, cellM: 1500, drift: 0.006, streak: 0.2, band: 0,
+    shimmer: 0.2, weaveAmp: 0.5,
+    ripple: { amp: 0, rings: 0, speed: 0 },
+  },
+  /** AURORA — curtains of light hanging over neighborhoods, swaying on
+   *  the wind axis. Vertical shimmer instead of blobs. */
+  aurora: {
+    warpM: 420, cellM: 3200, drift: 0.008, streak: 0.85, band: 0.55,
+    shimmer: 0.3, weaveAmp: 0.35,
+    ripple: { amp: 0, rings: 0, speed: 0 },
+  },
 } as const;
+export type LookName = keyof typeof LOOKS;
+export const DEFAULT_LOOK: LookName = "still-water";
 
 /* ------------------------------------------------------------------ */
 /* THE WOVEN WASH — the field's one identity (Eli's pick, 2026-07-08:  */
@@ -629,7 +672,9 @@ export const WEATHER = {
   snowNightLift: 0.06, // ink lifts a breath (snow-lit sky)
 
   /* -- wind: the flow follows the real air --------------------------- */
-  windWarp: 0.02, // + warp amplitude at full wind (trimmed 2026-07-08:
+  windWarpM: 110, // + warp amplitude at full wind, METERS (geographic flow)
+  windWarp: 0.02, // retired uv-space value (kept for the parked day refs)
+  // (trimmed 2026-07-08:
   // even at full storm, no feeling may visibly leave its place)
   windDrift: 0.06, // + drift speed at full wind
   windStreak: 0.35, // anisotropy along the real wind axis

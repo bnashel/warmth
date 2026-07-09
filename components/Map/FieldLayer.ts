@@ -19,7 +19,7 @@
 import mapboxgl, { type CustomLayerInterface, type Map as MapboxMap } from "mapbox-gl";
 import { EMOTION_HUES, EMOTIONS } from "@/lib/theme";
 import type { LivePoint } from "@/lib/momentsStore";
-import { CAMERA, FIELD, SHAPES, WEATHER, WOVEN } from "./tune";
+import { CAMERA, DEFAULT_LOOK, FIELD, LOOKS, WEATHER, WOVEN } from "./tune";
 
 /* ---------------- OKLab (Björn Ottosson, via components/Orb/oklch.ts) --- */
 
@@ -173,7 +173,11 @@ uniform int uMode;
 // THE SHAPE OF FEELING: domain-warp the field lookup so blooms stop being
 // circles. x=warp amplitude (uv), y=noise scale, z=drift speed,
 // w=streak (anisotropy along the flow axis).
-uniform vec4 uShape;
+uniform vec4 uFlow;       // warp (mercator units), 1/cell (mercator), drift, streak
+uniform float uFlowTime;  // the flow clock — uTimeSec × FIELD.tempo (held breath)
+uniform vec2 uMercInvDx;  // uv per mercator-x (inverse frame affine)
+uniform vec2 uMercInvDy;  // uv per mercator-y
+uniform vec4 uRipple;     // living-water: amp, rings, speed, 0
 uniform float uBand;   // aurora curtains: brightness modulation (0 = off)
 uniform float uAspect; // target width / height, so the flow isn't squashed
 // THE LIVING ATMOSPHERE (lib/atmosphere.ts, eased): the flow axis follows
@@ -250,23 +254,35 @@ vec3 linearToSrgb(vec3 c) {
 }
 
 void main() {
+  // THE PIXEL'S WORLD POSITION, first — every organic domain below (flow
+  // warp, weave, shimmer, crawl, curtains, grain) is anchored in MERCATOR
+  // space, so the texture belongs to the CITY: zooming scales it with the
+  // streets instead of sliding it under them (Eli: "zoom looks weird" —
+  // the old screen-space noise stayed put while the city moved).
+  vec2 merc = uMercOrigin + uMercDx * vUv.x + uMercDy * vUv.y;
+  // Geographic noise coords: flow cells are METERS, not screen fractions.
+  vec2 gq = (merc - uMercAnchor) * uFlow.y;
+  vec2 axis = normalize(uAxis);
+
   // Free-flowing edges: pull each lookup through slowly-drifting fbm warp.
-  // warpAmp 0 (bloom mode) short-circuits to the original circles.
+  // warp 0 (bloom mode) short-circuits to the original circles.
   vec2 uv = vUv;
-  if (uShape.x > 0.0) {
-    vec2 q = vec2(vUv.x * uAspect, vUv.y) * uShape.y;
-    // The flow axis IS the real wind (a gentle diagonal when calm).
-    vec2 axis = normalize(uAxis);
+  if (uFlow.x > 0.0) {
+    vec2 q = gq;
     // Streak stretches the noise domain along the axis (ribbons), and the
     // drift crawls the domain over time so the weather is alive, not stuck.
     vec2 along = axis * dot(q, axis);
-    q = mix(q, along, uShape.w * 0.72);
-    q += uTimeSec * uShape.z * vec2(1.0, -0.6);
+    q = mix(q, along, uFlow.w * 0.72);
+    q += uFlowTime * uFlow.z * vec2(1.0, -0.6);
     vec2 w = vec2(fbm(q), fbm(q + 31.416)) - 0.5;
     // Warp mostly across the axis when streaked — edges feather sideways.
     vec2 across = vec2(-axis.y, axis.x);
     vec2 wStreak = across * dot(w, across) * 1.8;
-    uv += mix(w, wStreak, uShape.w) * uShape.x;
+    // The warp offset is a GROUND distance (uFlow.x, mercator units) —
+    // converted to a texture offset through the frame's inverse affine,
+    // so its physical size is zoom-true.
+    vec2 dm = mix(w, wStreak, uFlow.w) * uFlow.x;
+    uv += uMercInvDx * dm.x + uMercInvDy * dm.y;
   }
   vec4 f0 = texture(uField0, uv);
   vec2 f1 = texture(uField1, uv).xy;
@@ -291,7 +307,7 @@ void main() {
   int top = 0;
   float topW = -1.0;
   // Screen-space noise domain shared by the woven-wash passes below.
-  vec2 nq = vec2(vUv.x * uAspect, vUv.y);
+  vec2 nq = gq; // every organic domain shares the geographic coords
 
   // THE GENUINE-OVERLAP GATE (Eli, 2026-07-08: colors interact ONLY where
   // feelings truly share ground in the data). Measured, not decorative:
@@ -325,7 +341,7 @@ void main() {
     // lone feeling perfectly still, so speed here only animates genuine
     // meetings (measured 2026-07-08: at 0.025 the interaction was lost
     // under the breath's noise floor).
-    float band = vnoise(nq * uWeave.y + float(i) * 17.31 + uTimeSec * 0.08);
+    float band = vnoise(nq * uWeave.y + float(i) * 17.31 + uFlowTime * 0.08);
     w *= 1.0 + uWeave.x * (band - 0.5) * 2.0 * overlap;
     lab += w * uHueLab[i];
     anchorChroma += w * length(uHueLab[i].yz);
@@ -350,10 +366,15 @@ void main() {
   // (not a discard) so the edge of an island is still a smooth exhale.
   b *= smoothstep(uFloor.x, uFloor.y, total);
 
-  // The TRUE pixel's world position (vUv, unwarped) — shared by the land
-  // mask and the close-zoom grain: the shore and the grain are facts of
-  // geography, never weather.
-  vec2 merc = uMercOrigin + uMercDx * vUv.x + uMercDy * vUv.y;
+  // LIVING WATER (bake-off look): the city wears one connected sheet of
+  // dark water; feeling disturbs it. Slow rings ride the CONTOURS of
+  // pooled density — so where two feelings' pools merge, their contours
+  // (and therefore their waves) genuinely interfere. Zero extra texture
+  // work: the wave phase IS the field.
+  if (uRipple.x > 0.0) {
+    float wave = sin(6.2831853 * (b * uRipple.y - uFlowTime * uRipple.z));
+    b *= 1.0 + uRipple.x * wave * smoothstep(0.03, 0.2, b);
+  }
 
   // THE LAND MASK — geography shapes the feeling: the field dies over
   // water so rivers and harbor stay pure void and every silhouette
@@ -371,9 +392,8 @@ void main() {
   // hue is a fact and holds still; only where two feelings truly share
   // ground does the color visibly flow between them.
   {
-    vec2 axis2 = normalize(uAxis);
-    float along = dot(nq, axis2);
-    float rot = (fbm(vec2(along * 5.0 - uTimeSec * 0.12, 4.7)) - 0.5) * 2.0 * uShimmer * overlap;
+    float along = dot(nq, axis);
+    float rot = (fbm(vec2(along * 5.0 - uFlowTime * 0.12, 4.7)) - 0.5) * 2.0 * uShimmer * overlap;
     float cr = cos(rot);
     float sr = sin(rot);
     lab.yz = mat2(cr, -sr, sr, cr) * lab.yz;
@@ -392,7 +412,7 @@ void main() {
   // smooth pre-tier b, so its lift is never stepped.
   float bSmooth = b;
   {
-    float crawl = (fbm(nq * 3.0 + uTimeSec * 0.01) - 0.5) * uTiers.w;
+    float crawl = (fbm(nq * 3.0 + uFlowTime * 0.01) - 0.5) * uTiers.w;
     float lv = clamp(b + crawl, 0.0, 1.0) * uTiers.x;
     float f = fract(lv);
     float soft = smoothstep(0.12, 0.88, f);
@@ -428,12 +448,12 @@ void main() {
   float phase = fract(lab.y * 3.7 + lab.z * 5.3);
   b *= 1.0 + uBreathAmp * sin(6.2831853 * (uTimeSec / uBreathPeriod + phase));
 
-  // Aurora curtains: slow luminous banding across the flow axis. Modulation
-  // only — never to zero, so the field's coverage is untouched.
+  // Aurora curtains: slow luminous banding across the flow axis — hanging
+  // in the CITY's space, swaying on the flow clock. Modulation only —
+  // never to zero, so the field's coverage is untouched.
   if (uBand > 0.0) {
-    vec2 axis = normalize(uAxis);
-    float across = dot(vec2(uv.x * uAspect, uv.y), vec2(-axis.y, axis.x));
-    float curtain = fbm(vec2(across * 9.0, uTimeSec * 0.05));
+    float across = dot(nq, vec2(-axis.y, axis.x));
+    float curtain = fbm(vec2(across * 2.2, uFlowTime * 0.05));
     b *= 1.0 + uBand * (curtain - 0.5) * 1.6;
   }
 
@@ -508,11 +528,19 @@ export class FieldLayer implements CustomLayerInterface {
    *  whole field (accumulation included) costs nothing. Set from MapStage. */
   fade = 1;
 
-  /** THE SHAPE OF FEELING — plain uniform values (the woven wash is the
-   *  one identity; the atmosphere drives these live). Set from MapStage. */
-  look: { warpAmp: number; scale: number; drift: number; streak: number; band: number } = {
-    ...SHAPES.woven,
-  };
+  /** THE SHAPE OF FEELING — plain uniform values, geographic units
+   *  (warpM/cellM are METERS: the texture belongs to the city). One of
+   *  the LOOKS presets (bake-off, 2026-07-09); atmosphere nudges live. */
+  look: {
+    warpM: number;
+    cellM: number;
+    drift: number;
+    streak: number;
+    band: number;
+    shimmer: number;
+    weaveAmp: number;
+    ripple: { amp: number; rings: number; speed: number };
+  } = structuredClone(LOOKS[DEFAULT_LOOK]);
 
   /** 0 = dark ink night (glow), 1 = light paper day (pigment). Set from
    *  MapStage every frame from the atmosphere; crossfades the two ways of
@@ -563,6 +591,7 @@ export class FieldLayer implements CustomLayerInterface {
    *  stable) + 1/cell in mercator units. Set once in onAdd. */
   private mercAnchor: [number, number] = [0, 0];
   private grainScale = 0;
+  private meterMerc = 1e-8; // meters → mercator units at the NYC anchor
 
   constructor() {
     EMOTIONS.forEach((e, i) => {
@@ -670,7 +699,8 @@ export class FieldLayer implements CustomLayerInterface {
       lat: CAMERA.initial.latitude,
     });
     this.mercAnchor = [anchor.x, anchor.y];
-    this.grainScale = 1 / (FIELD.grain.cellM * anchor.meterInMercatorCoordinateUnits());
+    this.meterMerc = anchor.meterInMercatorCoordinateUnits();
+    this.grainScale = 1 / (FIELD.grain.cellM * this.meterMerc);
     const img = new Image();
     img.onload = () => {
       if (!this.gl) return;
@@ -929,23 +959,44 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform1f(u("uTimeSec"), this.timeSec);
     gl.uniform1f(u("uBreathPeriod"), FIELD.breath.periodMs / 1000);
     gl.uniform1f(u("uBreathAmp"), FIELD.breath.amp);
-    gl.uniform2f(u("uWeave"), WOVEN.weave.amp, WOVEN.weave.scale);
-    gl.uniform1f(u("uShimmer"), WOVEN.shimmer);
+    const lk = this.look;
+    gl.uniform2f(u("uWeave"), lk.weaveAmp, WOVEN.weave.scale);
+    gl.uniform1f(u("uShimmer"), lk.shimmer);
     gl.uniform4f(u("uTiers"), WOVEN.tiers.count, WOVEN.tiers.rim, WOVEN.tiers.richen, WOVEN.tiers.crawl);
     gl.uniform1f(u("uTierKeep"), WOVEN.tiers.keep);
     gl.uniform2f(u("uOverlap"), WOVEN.overlap.from, WOVEN.overlap.to);
-    gl.uniform4f(u("uShape"), this.look.warpAmp, this.look.scale, this.look.drift, this.look.streak);
-    gl.uniform1f(u("uBand"), this.look.band);
+    // THE HELD BREATH: one master tempo on every flow clock (the 2.5s
+    // breath keeps its own quiet heartbeat on the unscaled clock).
+    gl.uniform1f(u("uFlowTime"), this.timeSec * FIELD.tempo);
+    gl.uniform4f(u("uRipple"), lk.ripple.amp, lk.ripple.rings, lk.ripple.speed, 0);
+    gl.uniform1f(u("uBand"), lk.band);
     gl.uniform1f(u("uAspect"), this.texW / Math.max(1, this.texH));
     const w = this.weather;
     gl.uniform2f(u("uAxis"), w.axisX, w.axisY);
-    // Screen → world (shared by the land mask and the close-zoom grain);
-    // both features gate off when the frame isn't derivable.
+    // Screen → world (shared by the land mask, the grain, and the FLOW —
+    // the whole organic domain is geographic now); features gate off when
+    // the frame isn't derivable.
     const mf = this.mercFrame;
     if (mf.ok) {
       gl.uniform2f(u("uMercOrigin"), mf.ox, mf.oy);
       gl.uniform2f(u("uMercDx"), mf.dxx, mf.dxy);
       gl.uniform2f(u("uMercDy"), mf.dyx, mf.dyy);
+      // Inverse frame affine (uv per mercator) + geographic flow units.
+      const det = mf.dxx * mf.dyy - mf.dyx * mf.dxy;
+      if (det !== 0) {
+        gl.uniform2f(u("uMercInvDx"), mf.dyy / det, -mf.dxy / det);
+        gl.uniform2f(u("uMercInvDy"), -mf.dyx / det, mf.dxx / det);
+      }
+      gl.uniform4f(
+        u("uFlow"),
+        lk.warpM * this.meterMerc,
+        1 / Math.max(1e-12, lk.cellM * this.meterMerc),
+        lk.drift,
+        lk.streak,
+      );
+    } else {
+      gl.uniform4f(u("uFlow"), 0, 1, 0, 0); // no frame: circles, never junk
+      gl.uniform4f(u("uRipple"), 0, 0, 0, 0);
     }
     // The coastline (off until the mask texture lands — never a blocker).
     const maskOn = this.maskReady && mf.ok;

@@ -118,6 +118,10 @@ void main(void) {
     vec2 hc = vec2(cos(p3), sin(p3)) * glow.emberHeartOff;
     float hd = length(unitPosition / (1.0 + undul) - hc) / glow.emberHeartR;
     float heart = exp(-hd * hd);
+    // The coal breathes: warmth swells and settles on its own seeded,
+    // slower clock — clearly alive, never blinking (Eli: private felt
+    // stale while public moved; now both live at the held-breath pace).
+    heart *= 1.0 + 0.12 * sin(6.2831853 * glow.timeSec / (glow.periodSec * 1.6) + p4);
 
     if (glow.ember > 1.5) {
       // HEART PASS (additive, deliberately dim): where life stacks embers
@@ -142,7 +146,7 @@ void main(void) {
     col = min(col, vFillColor.rgb * 0.95); // the hue itself is the ceiling
     float a = edge * (glow.peakBase + glow.peakPerIntensity * w) * glow.gain;
     a *= smoothstep(0.0, 0.12, w);
-    a *= 1.0 + 0.04 * s;                   // the quietest breath, light only
+    a *= 1.0 + 0.07 * s;                   // a quiet breath, light only
     a = clamp(a + (n0 - 0.5) * 0.006, 0.0, 0.88);
     fragColor = vec4(col * a, a);
     DECKGL_FILTER_COLOR(fragColor, geometry);

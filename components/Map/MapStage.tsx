@@ -9,7 +9,7 @@ import { MAPBOX_TOKEN } from "@/lib/map";
 import { momentsStore } from "@/lib/momentsStore";
 import { atmosphere } from "@/lib/atmosphere";
 import { setRainLevel } from "@/lib/sound";
-import { CAMERA, CHOREO, INK, LABELS, MOTION, PERF, SHAPES, SOLAR, WEATHER } from "./tune";
+import { CAMERA, CHOREO, DEFAULT_LOOK, INK, LABELS, LOOKS, MOTION, PERF, SOLAR, WEATHER, type LookName } from "./tune";
 import { buildStyle } from "./styles";
 import { applyAtmosphereInk } from "./solar";
 import { FieldLayer } from "./FieldLayer";
@@ -66,6 +66,26 @@ export default function MapStage({
   const dataVersion = useRef(-1);
   const loaded = useRef(false);
   const [rotated, setRotated] = useState(false);
+  // THE BAKE-OFF LOOK (2026-07-09): ?look=still-water|living-water|ink|aurora
+  // seeds it; the dev pill cycles it live. The winner will be hardwired.
+  const [lookName, setLookName] = useState<LookName>(() => {
+    if (typeof window !== "undefined") {
+      const p = new URLSearchParams(window.location.search).get("look");
+      if (p && p in LOOKS) return p as LookName;
+    }
+    return DEFAULT_LOOK;
+  });
+  const lookRef = useRef<LookName>(lookName);
+  useEffect(() => {
+    lookRef.current = lookName;
+    const field = fieldRef.current;
+    if (field) {
+      // Full preset swap (band/shimmer/weave/ripple/cellM don't ride the
+      // per-frame wind feed) — instant: same shader, new uniform values.
+      Object.assign(field.look, structuredClone(LOOKS[lookName]));
+      mapRef.current?.getMap().triggerRepaint();
+    }
+  }, [lookName]);
   // 0 = ink night, 1 = paper day (daylight mode) — refreshed on solar apply;
   // the field trades glow for pigment, labels trade white for graphite.
   const paperRef = useRef(0);
@@ -221,11 +241,13 @@ export default function MapStage({
       if (field) {
         field.fade = 1 - viewMix.current;
         field.paper = atmo.paper;
-        // The wind rides ON TOP of the woven wash's base shape.
+        // The wind rides ON TOP of the active look's base shape (bake-off:
+        // the look itself is swapped via ?look= / the dev pill).
+        const base = LOOKS[lookRef.current];
         const look = field.look;
-        look.warpAmp = SHAPES.woven.warpAmp + atmo.wind * WEATHER.windWarp;
-        look.drift = SHAPES.woven.drift + atmo.wind * WEATHER.windDrift;
-        look.streak = Math.min(1, SHAPES.woven.streak + atmo.wind * WEATHER.windStreak);
+        look.warpM = base.warpM + atmo.wind * WEATHER.windWarpM;
+        look.drift = base.drift + atmo.wind * WEATHER.windDrift;
+        look.streak = Math.min(1, base.streak + atmo.wind * WEATHER.windStreak);
         const w = field.weather;
         w.fog = atmo.fog;
         w.wet = rain;
@@ -347,6 +369,7 @@ export default function MapStage({
           // never take the whole screen down (design-review finding).
           try {
             const field = new FieldLayer();
+            Object.assign(field.look, structuredClone(LOOKS[lookRef.current]));
             map.addLayer(field);
             fieldRef.current = field;
           } catch (err) {
@@ -378,6 +401,7 @@ export default function MapStage({
               const fresh = new FieldLayer();
               fresh.fade = fieldRef.current?.fade ?? 1;
               fresh.paper = paperRef.current; // day must survive the restore too
+              Object.assign(fresh.look, structuredClone(LOOKS[lookRef.current]));
               map.addLayer(fresh, beforeId);
               fieldRef.current = fresh;
               dataVersion.current = -1; // force the tick to re-feed the data
@@ -412,6 +436,35 @@ export default function MapStage({
           }}
         />
       </Map>
+
+      {/* THE LOOK PILL — dev-only bake-off switcher (2026-07-09): taps
+          cycle the four looks live so Ben + Eli can judge on phones.
+          Dies in production; the winner gets hardwired. */}
+      {process.env.NODE_ENV !== "production" && (
+        <button
+          type="button"
+          onClick={() => {
+            const names = Object.keys(LOOKS) as LookName[];
+            setLookName(names[(names.indexOf(lookName) + 1) % names.length]);
+          }}
+          style={{
+            position: "absolute",
+            bottom: "max(env(safe-area-inset-bottom), 18px)",
+            right: 16,
+            padding: "6px 14px",
+            borderRadius: 999,
+            border: "1px solid rgba(233,236,244,0.14)",
+            background: "rgba(10,11,15,0.55)",
+            color: "rgba(233,236,244,0.6)",
+            fontSize: 11,
+            letterSpacing: "0.06em",
+            cursor: "pointer",
+            zIndex: 10,
+          }}
+        >
+          {lookName}
+        </button>
+      )}
 
       {/* Return-to-north — appears only while rotated, like Apple Maps. */}
       <button
