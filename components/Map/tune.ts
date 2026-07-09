@@ -287,8 +287,13 @@ export const FIELD = {
    *  gaps at z12.5–13.5. It now holds full through the middle distance
    *  and settles higher, so the ground never falls out of the picture. */
   seedZoomFade: { from: 13.2, to: 14.8, floor: 0.38 },
-  /** Living tide: subtle brightness breath. */
-  breath: { periodMs: 2500, amp: 0.045 },
+  /** Living tide: subtle brightness breath. Slowed 2026-07-09 (Eli's
+   *  final pass): 6.4s soft-clipped swell — a slow exhale, not a throb. */
+  breath: { periodMs: 6400, amp: 0.04 },
+  /** THE TONE CEILING (2026-07-09, the red-hot fix): HDR-style soft knee
+   *  on the resolve's peak channel — identity below kneeFrom, asymptote
+   *  at cap. Density now deepens color instead of running hot. */
+  tone: { kneeFrom: 0.58, cap: 0.8 },
   /** Streetlight signature: the field multiplied onto the base map so
    *  streets inside a feeling catch its color. 0 kills it. */
   streetlightGain: 0.55,
@@ -435,13 +440,16 @@ export const ATMOSPHERE = {
 /* band modulates brightness into slow luminous curtains (0 = off).    */
 /* ------------------------------------------------------------------ */
 export const SHAPES = {
-  /** THE WOVEN WASH: edges brushed out along the wind, alive but quiet.
+  /** THE WOVEN WASH: edges brushed out along the flow, alive but quiet.
    *  warpAmp/drift cut 2026-07-08 (Eli: an emotion's LOCATION is a fact):
-   *  the old 0.105 warp visibly sloshed small pools to new positions —
-   *  now edges undulate in place and centers stay pinned to the data.
-   *  (The bloom/watercolor/ink/aurora exploration presets and the 07-08
-   *  ember/silk/pigment directions are retired — docs/later.md.) */
-  woven: { warpAmp: 0.045, scale: 11, drift: 0.01, streak: 0.35, band: 0.25 },
+   *  edges undulate in place and centers stay pinned to the data.
+   *  RESHAPED 2026-07-09 (the germ fix): scale dropped 11 → 4.6 and the
+   *  warp now rides `swell` (one big octave) — a few slow sweeping waves
+   *  in the outline, ink-in-water, never a scalloped cell wall. `streak`
+   *  is now a STANDING baseline (wind adds on top in MapStage): every
+   *  silhouette is pulled gently along the flow axis — directional
+   *  asymmetry reads as intention, radial wobble read as biology. */
+  woven: { warpAmp: 0.058, scale: 4.6, drift: 0.01, streak: 0.32, band: 0.25 },
 } as const;
 
 /* ------------------------------------------------------------------ */

@@ -194,6 +194,7 @@ uniform float uShimmer;   // hue flow along the wind (max OKLab rotation)
 uniform vec4 uTiers;      // matte layers: count, rim, richen, crawl
 uniform float uTierKeep;  // tiering over the live wash beneath (0..1)
 uniform vec2 uOverlap;    // genuine-overlap gate: smoothstep from, to
+uniform vec2 uKnee;       // tone ceiling: knee start, hard asymptote
 // CLOSE-ZOOM GRAIN: geographic texture (mercator-anchored — meters, not
 // pixels) that resolves as you approach. amp arrives pre-gated by zoom.
 uniform vec2 uGrain;      // amp (zoom-gated), 1/cell in mercator units
@@ -220,6 +221,13 @@ float fbm(vec2 p) {
     a *= 0.5;
   }
   return s;
+}
+// SWELL — the edge-warp's own noise (2026-07-09, the germ fix): one big
+// smooth octave plus a whisper of a second. Three-octave fbm gave the
+// outline many small similarly-sized bumps — a cell membrane. A silhouette
+// should be a few slow sweeping waves: ink drifting, silk settling.
+float swell(vec2 p) {
+  return (vnoise(p) + 0.28 * vnoise(p * 2.6 + 13.1)) / 1.28;
 }
 
 vec3 oklabToLinear(vec3 lab) {
@@ -254,7 +262,7 @@ void main() {
     vec2 along = axis * dot(q, axis);
     q = mix(q, along, uShape.w * 0.72);
     q += uTimeSec * uShape.z * vec2(1.0, -0.6);
-    vec2 w = vec2(fbm(q), fbm(q + 31.416)) - 0.5;
+    vec2 w = vec2(swell(q), swell(q + 31.416)) - 0.5;
     // Warp mostly across the axis when streaked — edges feather sideways.
     vec2 across = vec2(-axis.y, axis.x);
     vec2 wStreak = across * dot(w, across) * 1.8;
@@ -395,9 +403,12 @@ void main() {
   // color must always still read as COLOR.
   lab.x = min(lab.x, 0.8);
 
-  // The living tide: a slow, subtle breath, phase-varied across hues.
+  // The living tide: a slow exhale, phase-varied across hues. The sine is
+  // soft-clipped (s − 0.22s³): flattened crests read as a breath held and
+  // released — fabric settling — where a pure sine read as a throb.
   float phase = fract(lab.y * 3.7 + lab.z * 5.3);
-  b *= 1.0 + uBreathAmp * sin(6.2831853 * (uTimeSec / uBreathPeriod + phase));
+  float bs = sin(6.2831853 * (uTimeSec / uBreathPeriod + phase));
+  b *= 1.0 + uBreathAmp * (bs - 0.22 * bs * bs * bs) * 1.28;
 
   // Aurora curtains: slow luminous banding across the flow axis. Modulation
   // only — never to zero, so the field's coverage is untouched.
@@ -430,7 +441,25 @@ void main() {
     return;
   }
 
-  vec3 color = linearToSrgb(oklabToLinear(lab)) * max(b, 0.0) * uGain;
+  // GAMUT (2026-07-09, the red-hot fix): richen + the chroma floor can
+  // push warm hues OUT of sRGB gamut; letting the framebuffer clip each
+  // channel skewed dense coral pools toward hot salmon (R saturating
+  // first). Normalizing the whole linear color instead preserves the
+  // chromaticity exactly — the color deepens, it never distorts.
+  vec3 lin = max(oklabToLinear(lab), 0.0);
+  lin /= max(1.0, max(lin.r, max(lin.g, lin.b)));
+  vec3 color = linearToSrgb(lin) * max(b, 0.0) * uGain;
+
+  // THE TONE CEILING — HDR-style soft knee on the peak CHANNEL (scalar
+  // scale = hue-preserving): identity below uKnee.x, asymptote at
+  // uKnee.y. Where many feelings stack, the additive sum now compresses
+  // into a richer, deeper color — warm at the densest point, never hot.
+  float m = max(color.r, max(color.g, color.b));
+  if (m > uKnee.x) {
+    float span = uKnee.y - uKnee.x;
+    color *= (uKnee.x + span * (1.0 - exp(-(m - uKnee.x) / span))) / m;
+  }
+
   // uMode 0: alpha 0 under mapbox's premultiplied blend == pure additive.
   // uMode 1: caller sets blendFunc(DST_COLOR, ONE) — color multiplies the
   //          base map, so streets inside the field catch its light.
@@ -894,6 +923,7 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform4f(u("uTiers"), WOVEN.tiers.count, WOVEN.tiers.rim, WOVEN.tiers.richen, WOVEN.tiers.crawl);
     gl.uniform1f(u("uTierKeep"), WOVEN.tiers.keep);
     gl.uniform2f(u("uOverlap"), WOVEN.overlap.from, WOVEN.overlap.to);
+    gl.uniform2f(u("uKnee"), FIELD.tone.kneeFrom, FIELD.tone.cap);
     gl.uniform4f(u("uShape"), this.look.warpAmp, this.look.scale, this.look.drift, this.look.streak);
     gl.uniform1f(u("uBand"), this.look.band);
     gl.uniform1f(u("uAspect"), this.texW / Math.max(1, this.texH));
