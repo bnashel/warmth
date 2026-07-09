@@ -13,7 +13,7 @@ The final five (2026-07-02: awe removed; reflective became gratitude;
 palette softened away from neon the same day).
 | Emotion | Hue |
 | --- | --- |
-| Joy | `#FACB66` dawn gold |
+| Joy | `#FFEE75` lemon sun (re-picked 2026-07-08) |
 | Energy | `#F79A6E` peach coral |
 | Love | `#F695BC` petal rose |
 | Gratitude | `#BCA8F5` lilac veil |

@@ -361,7 +361,9 @@ export const TRAIL = {
     /** Body alpha gain and the dim additive heart gain — between the old
      *  unlit stains and the too-bright candles. */
     bodyGain: 0.95,
-    heartGain: 0.3,
+    /** Trimmed 0.3→0.22 (design review): 25 stacked hearts read milky at
+     *  0.3 — deepen and warm, never wash pale. */
+    heartGain: 0.22,
   },
   /** THE MEMORY NODE (2026-07-08 redesign; now the `?trail=splat` judging
    *  alternative): a matte pigment gem — solid hue at pigment depth with a

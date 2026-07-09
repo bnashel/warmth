@@ -695,9 +695,12 @@ export function OrbFlow({
           ))}
       </AnimatePresence>
 
-      {/* One lowercase word — the only reading on screen. */}
+      {/* One lowercase word — the only reading on screen. While the
+          learning names ride the wheel dots (first 3 commits), the big
+          label yields during the WHEEL phase so the chosen emotion's name
+          never renders twice (design review); it returns for the bar. */}
       <AnimatePresence>
-        {label && (
+        {label && !(namesOn && phase === "wheel") && (
           <motion.span
             key={label}
             initial={{ opacity: 0 }}

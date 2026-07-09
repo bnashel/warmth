@@ -186,12 +186,34 @@ let ringCache: { version: number; data: LivePoint[]; remembered: LivePoint[] } |
  *                toggles it. (Not built until Ben chooses it.)
  * -------------------------------------------------------------------- */
 
-/** One smoothed polyline through ALL entries in time order — the same
- *  Catmull-Rom + adaptive tautness + gentle meander the aurora used, but
- *  a single multi-vertex path: no per-segment caps, so no beads. */
+/** One smoothed polyline through the journal's PLACES in first-visit
+ *  order — never through raw entries (review blocker: a real journal
+ *  ping-pongs home-work-home dozens of times, and an entry-ordered path
+ *  fanned into a radiating cable). Entries cluster to ~250m visit-places;
+ *  each place appears ONCE, so home-work is a single worn line. Then the
+ *  same Catmull-Rom + adaptive tautness + gentle meander, one multi-vertex
+ *  path: no per-segment caps, so no beads. */
 function threadVertices(data: LivePoint[]): [number, number][] {
-  const pts = [...data].sort((a, b) => a.createdAt - b.createdAt);
-  if (pts.length < 2) return [];
+  const byTime = [...data].sort((a, b) => a.createdAt - b.createdAt);
+  if (byTime.length < 2) return [];
+  // Cluster to visit-places (~250m cells), keeping first-visit order.
+  const CELL = 0.0025;
+  const places = new Map<string, { lng: number; lat: number; n: number }>();
+  for (const p of byTime) {
+    const key = `${Math.round(p.position[0] / CELL)}:${Math.round(p.position[1] / CELL)}`;
+    const c = places.get(key);
+    if (c) {
+      c.lng += p.position[0];
+      c.lat += p.position[1];
+      c.n++;
+    } else {
+      places.set(key, { lng: p.position[0], lat: p.position[1], n: 1 });
+    }
+  }
+  const pts = [...places.values()].map(
+    (c) => ({ position: [c.lng / c.n, c.lat / c.n] as [number, number] }),
+  );
+  if (pts.length < 2) return []; // one place: a journey needs two
   const T = TRAIL.thread;
   const P = (i: number) => pts[Math.min(pts.length - 1, Math.max(0, i))].position;
   const verts: [number, number][] = [[P(0)[0], P(0)[1]]];
