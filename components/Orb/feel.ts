@@ -165,10 +165,12 @@ export const BURST = {
   overshootScale: 1.15,
   /** Expanding ring: end scale, start opacity, duration, ease.
    *  opacityFrom must survive against the bright core — below ~0.5 it drowns. */
+  /** Ring pushed further + born brighter (round 2, item 5: the burst must
+   *  be unmistakable — the last build read nearly silent). */
   ring: {
-    scaleTo: 2.2,
-    opacityFrom: 0.65,
-    ms: 600,
+    scaleTo: 2.6,
+    opacityFrom: 0.78,
+    ms: 640,
     ease: [0.22, 1, 0.36, 1] as [number, number, number, number],
   },
   /** VARIABLE REWARD — jitter bounds. Wider = more chaos; too wide = broken. */
