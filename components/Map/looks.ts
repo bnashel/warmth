@@ -48,7 +48,15 @@ export type LookConfig = {
     overlapGate: 0 | 1;
     /** 1 = FELT EMOTIONS: per-emotion form + motion signatures. */
     felt: 0 | 1;
+    /** THE VEIL (07-10, "night air"): 1 = unbounded ambient field — soft
+     *  presence curve + heat-shimmer, no tiers, no silhouettes at all. */
+    veil: 0 | 1;
+    /** Kernel falloff exponent (accumulate pass). Low = long diffuse
+     *  skirts that merge into continuum; high = defined pools. */
+    kernelSoftness: number;
   };
+  /** Which private-journal rendering this look pairs with. */
+  journal: "thread" | "garden";
 };
 
 export type LookDef = {
@@ -74,6 +82,8 @@ const ERA_WIDE = {
   breathAmp: 0.045,
   breathShaped: 0 as const,
   toneKnee: 0 as const,
+  veil: 0 as const,
+  kernelSoftness: 2.5,
 };
 
 export const LOOKS: LookDef[] = [
@@ -84,7 +94,8 @@ export const LOOKS: LookDef[] = [
     note: "soft circular blooms, no tiers, no weave — reconstruction",
     config: {
       shape: { warpAmp: 0, scale: 8, drift: 0, streak: 0, band: 0, smoothWarp: 0 },
-      dials: { ...ERA_WIDE, tierKeep: 0, richen: 0, weaveAmp: 0, shimmer: 0, overlapGate: 0, felt: 0 },
+      dials: { ...ERA_WIDE, tierKeep: 0, richen: 0, weaveAmp: 0, shimmer: 0, overlapGate: 0, felt: 0, veil: 0, kernelSoftness: 2.5 },
+      journal: "thread",
     },
   },
   {
@@ -94,7 +105,8 @@ export const LOOKS: LookDef[] = [
     note: "blotted seeping edges, barely-moving weather — reconstruction",
     config: {
       shape: { warpAmp: 0.085, scale: 10, drift: 0.01, streak: 0, band: 0, smoothWarp: 0 },
-      dials: { ...ERA_WIDE, tierKeep: 0, richen: 0, weaveAmp: 0, shimmer: 0, overlapGate: 0, felt: 0 },
+      dials: { ...ERA_WIDE, tierKeep: 0, richen: 0, weaveAmp: 0, shimmer: 0, overlapGate: 0, felt: 0, veil: 0, kernelSoftness: 2.5 },
+      journal: "thread",
     },
   },
   {
@@ -104,7 +116,8 @@ export const LOOKS: LookDef[] = [
     note: "the silk+pigment merge: tiers, weave, shimmer (ungated)",
     config: {
       shape: { warpAmp: 0.105, scale: 9, drift: 0.035, streak: 0.5, band: 0.25, smoothWarp: 0 },
-      dials: { ...ERA_WIDE, tierKeep: 0.85, richen: 0.4, weaveAmp: 0.6, shimmer: 0.35, overlapGate: 0, felt: 0 },
+      dials: { ...ERA_WIDE, tierKeep: 0.85, richen: 0.4, weaveAmp: 0.6, shimmer: 0.35, overlapGate: 0, felt: 0, veil: 0, kernelSoftness: 2.5 },
+      journal: "thread",
     },
   },
   {
@@ -118,8 +131,9 @@ export const LOOKS: LookDef[] = [
         radiusM: 200, radiusPerIntensityM: 30, minRadiusPx: 38, washGain: 0.42,
         exposure: 1.2, gain: 1.15, heartLift: 0.09, dominance: 4.0,
         breathPeriodMs: 2500, breathAmp: 0.045, breathShaped: 0, toneKnee: 0,
-        tierKeep: 0.85, richen: 0.55, weaveAmp: 0.6, shimmer: 0.35, overlapGate: 1, felt: 0,
+        tierKeep: 0.85, richen: 0.55, weaveAmp: 0.6, shimmer: 0.35, overlapGate: 1, felt: 0, veil: 0, kernelSoftness: 2.5,
       },
+      journal: "thread",
     },
   },
   {
@@ -133,8 +147,9 @@ export const LOOKS: LookDef[] = [
         radiusM: 200, radiusPerIntensityM: 30, minRadiusPx: 38, washGain: 0.42,
         exposure: 1.2, gain: 1.15, heartLift: 0.09, dominance: 4.0,
         breathPeriodMs: 6400, breathAmp: 0.04, breathShaped: 1, toneKnee: 1,
-        tierKeep: 0.85, richen: 0.55, weaveAmp: 0.6, shimmer: 0.35, overlapGate: 1, felt: 0,
+        tierKeep: 0.85, richen: 0.55, weaveAmp: 0.6, shimmer: 0.35, overlapGate: 1, felt: 0, veil: 0, kernelSoftness: 2.5,
       },
+      journal: "thread",
     },
   },
   {
@@ -148,8 +163,41 @@ export const LOOKS: LookDef[] = [
         radiusM: 200, radiusPerIntensityM: 30, minRadiusPx: 38, washGain: 0.42,
         exposure: 1.2, gain: 1.15, heartLift: 0.09, dominance: 4.0,
         breathPeriodMs: 6400, breathAmp: 0.04, breathShaped: 1, toneKnee: 1,
-        tierKeep: 0.85, richen: 0.55, weaveAmp: 0.6, shimmer: 0.35, overlapGate: 1, felt: 1,
+        tierKeep: 0.85, richen: 0.55, weaveAmp: 0.6, shimmer: 0.35, overlapGate: 1, felt: 1, veil: 0, kernelSoftness: 2.5,
       },
+      journal: "thread",
+    },
+  },
+  {
+    id: "night-air",
+    name: "night air",
+    date: "07-10",
+    note: "FROM SCRATCH: an ambient field of feeling — light through night air, no bounded shapes at all. Pulse + overlap interaction kept; everything else rethought.",
+    config: {
+      shape: { warpAmp: 0.02, scale: 4.6, drift: 0.008, streak: 0.25, band: 0, smoothWarp: 1 },
+      dials: {
+        radiusM: 420, radiusPerIntensityM: 45, minRadiusPx: 64, washGain: 0.5,
+        exposure: 0.85, gain: 0.78, heartLift: 0.06, dominance: 4.0,
+        breathPeriodMs: 6400, breathAmp: 0.04, breathShaped: 1, toneKnee: 1,
+        tierKeep: 0, richen: 0.35, weaveAmp: 0.6, shimmer: 0.35, overlapGate: 1, felt: 1, veil: 1, kernelSoftness: 1.35,
+      },
+      journal: "thread",
+    },
+  },
+  {
+    id: "the-garden",
+    name: "the garden",
+    date: "07-10",
+    note: "FROM SCRATCH (journal): entries bloom with age into a garden you've grown — opening after a month looks like what you've built. Public side = night air.",
+    config: {
+      shape: { warpAmp: 0.02, scale: 4.6, drift: 0.008, streak: 0.25, band: 0, smoothWarp: 1 },
+      dials: {
+        radiusM: 420, radiusPerIntensityM: 45, minRadiusPx: 64, washGain: 0.5,
+        exposure: 0.85, gain: 0.78, heartLift: 0.06, dominance: 4.0,
+        breathPeriodMs: 6400, breathAmp: 0.04, breathShaped: 1, toneKnee: 1,
+        tierKeep: 0, richen: 0.35, weaveAmp: 0.6, shimmer: 0.35, overlapGate: 1, felt: 1, veil: 1, kernelSoftness: 1.35,
+      },
+      journal: "garden",
     },
   },
 ];

@@ -38,6 +38,7 @@ layout(std140) uniform glowUniforms {
   float tiers;
   float matte;
   float matteGlint;
+  float garden;
 } glow;
 `,
   uniformTypes: {
@@ -60,6 +61,7 @@ layout(std140) uniform glowUniforms {
     tiers: "f32" as const,
     matte: "f32" as const,
     matteGlint: "f32" as const,
+    garden: "f32" as const,
   },
 };
 
@@ -75,6 +77,7 @@ precision highp float;
 in vec4 vFillColor;
 in vec2 unitPosition;
 in float vPhase;
+in vec4 vGarden; // growth, petal count/255, memory, seed (garden mode)
 out vec4 fragColor;
 
 void main(void) {
@@ -89,6 +92,39 @@ void main(void) {
   // Radius breathes but never leaves the quad: full size only at s = 1.
   float breathe = (1.0 + glow.radiusAmp * s) / (1.0 + glow.radiusAmp);
   float rr = r / breathe;
+
+  // THE GARDEN (2026-07-10, the journal that grows): an entry is a BLOOM
+  // that matures with age — a near-round bud when fresh, opening into
+  // petals with visible growth rings as weeks pass; attaching a memory
+  // adds a ring. Same matte pigment language as the gems; the GROWTH is
+  // the design: a month-old journal looks like something you've built.
+  if (glow.garden > 0.5) {
+    float grow = vGarden.x;
+    float petals = max(3.0, floor(vGarden.y * 255.0 + 0.5));
+    float seedPh = vGarden.w * 6.2831853;
+    float theta = atan(unitPosition.y, unitPosition.x);
+    // Petals deepen as the bloom matures; a slow sway keeps it alive.
+    float depth = 0.06 + 0.3 * grow;
+    float edgeR = 1.0 - depth * (0.5 + 0.5 * cos(petals * theta + seedPh + glow.timeSec * 0.03));
+    float rg = rr / max(edgeR, 0.25);
+    if (rg >= 1.0) discard;
+    float n0 = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+    // Growth rings, written outward by time; the memory ring rides along.
+    float rings = 1.0 + floor(grow * 3.0 + vGarden.z + 0.001);
+    float ringWave = 0.5 + 0.5 * cos(rg * rings * 4.6 - 1.2);
+    float edge = smoothstep(1.0, 0.88, rg);
+    float tone = (0.5 + 0.34 * w) * (0.86 + 0.14 * ringWave);
+    vec3 col = vFillColor.rgb * tone;
+    col += vFillColor.rgb * 0.45 * exp(-pow(rg / 0.16, 2.0)) * (0.5 + 0.5 * grow);
+    col = min(col, vFillColor.rgb * 0.96); // nothing brighter than the hue
+    float a = edge * (glow.peakBase + glow.peakPerIntensity * w) * glow.gain * (0.8 + 0.2 * grow);
+    a *= smoothstep(0.0, 0.12, w);
+    a *= 1.0 + 0.04 * s;
+    a = clamp(a + (n0 - 0.5) * 0.006, 0.0, 0.92);
+    fragColor = vec4(col * a, a);
+    DECKGL_FILTER_COLOR(fragColor, geometry);
+    return;
+  }
 
   // FREE-FORM (wobble > 0 — the journal): the silhouette stops being a
   // circle. Three angular harmonics, phase-hashed per point and drifting
@@ -237,6 +273,9 @@ type LightParams = {
   matte: number;
   /** Heart glint strength for the matte gem. */
   matteGlint: number;
+  /** 1 = THE GARDEN (2026-07-10): entries as blooms that mature with age
+   *  — growth data arrives per-instance via getLineColor. */
+  garden: number;
 };
 
 type EmotionGlowLayerProps = ScatterplotLayerProps<GlowDatum> & {
@@ -261,9 +300,12 @@ export class EmotionGlowLayer extends ScatterplotLayer<
     // stock) vertex shader — hue or intensity alone would sync clusters.
     shaders.inject = {
       ...shaders.inject,
-      "vs:#decl": "out float vPhase;\n",
+      "vs:#decl": "out float vPhase;\nout vec4 vGarden;\n",
+      // vGarden rides the otherwise-unused line-color attribute: growth,
+      // petal count/255, has-memory, per-entry seed (garden mode only).
       "vs:#main-end":
-        "vPhase = fract(sin(dot(instancePositions.xy, vec2(12.9898, 78.233))) * 43758.5453);\n",
+        "vPhase = fract(sin(dot(instancePositions.xy, vec2(12.9898, 78.233))) * 43758.5453);\n" +
+        "vGarden = instanceLineColors;\n",
     };
     return shaders;
   }
@@ -289,6 +331,7 @@ export class EmotionGlowLayer extends ScatterplotLayer<
       tiers: 0,
       matte: 0,
       matteGlint: 0,
+      garden: 0,
       ...light,
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -314,6 +357,7 @@ export class EmotionGlowLayer extends ScatterplotLayer<
         tiers: p.tiers,
         matte: p.matte,
         matteGlint: p.matteGlint,
+        garden: p.garden,
       },
     });
     super.draw(params as never);

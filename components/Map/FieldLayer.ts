@@ -200,6 +200,7 @@ uniform vec2 uKnee;       // tone ceiling: knee start, hard asymptote
 uniform float uSmoothWarp; // 1 = swell (few sweeping waves), 0 = 3-oct fbm
 uniform float uBreathShaped; // 1 = soft-clipped exhale, 0 = plain sine
 uniform float uFeltOn;    // 1 = per-emotion form + motion signatures
+uniform float uVeil;      // 1 = NIGHT AIR: unbounded ambient presence
 uniform vec4 uEmoMotion[${NE}]; // period(s), amp, skew, crisp
 uniform vec4 uEmoFx[${NE}];     // flicker, rise, warpMul, scaleMul
 // CLOSE-ZOOM GRAIN: geographic texture (mercator-anchored — meters, not
@@ -394,6 +395,17 @@ void main() {
   // Pooled feeling → light through a filmic knee: more feeling = brighter,
   // asymptotically — never white. The low end is linear: the long fade.
   float b = 1.0 - exp(-uExposure * total);
+
+  // THE VEIL (07-10, "night air"): emotion as ATMOSPHERE, not object.
+  // A gamma above 1 stretches the low end into a long continuous fade —
+  // there is no radius where presence "ends", only air that gradually
+  // stops being warm. Plus heat-shimmer: fine geographic air-movement in
+  // the body of the light, the way warmth reads over a street at night.
+  if (uVeil > 0.5) {
+    b = pow(max(b, 0.0), 1.35);
+    float air = fbm((merc - uMercAnchor) * uGrain.y * 0.8 + uTimeSec * vec2(0.014, -0.009));
+    b *= 1.0 + 0.11 * (air - 0.5) * 2.0 * smoothstep(0.02, 0.18, b);
+  }
 
   // THE LAND MASK — geography shapes the feeling: the field dies over
   // water so rivers and harbor stay pure void and every silhouette
@@ -913,8 +925,10 @@ export class FieldLayer implements CustomLayerInterface {
     );
     gl.uniform1f(
       gl.getUniformLocation(this.accumProgram, "uSoftness"),
-      // One softness in every sky (constitution rule 2).
-      FIELD.kernelSoftness,
+      // One softness in every sky (constitution rule 2) — but the GALLERY
+      // may choose it: "night air" runs long diffuse skirts (1.35), the
+      // pool looks run defined hearts (2.5).
+      currentLook().config.dials.kernelSoftness,
     );
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE);
@@ -1021,6 +1035,7 @@ export class FieldLayer implements CustomLayerInterface {
     else gl.uniform2f(u("uKnee"), 9.0, 9.5);
     gl.uniform1f(u("uSmoothWarp"), lk.shape.smoothWarp);
     gl.uniform1f(u("uFeltOn"), d.felt);
+    gl.uniform1f(u("uVeil"), d.veil);
     gl.uniform4fv(u("uEmoMotion"), this.emoMotion);
     gl.uniform4fv(u("uEmoFx"), this.emoFx);
     gl.uniform4f(u("uShape"), this.look.warpAmp, this.look.scale, this.look.drift, this.look.streak);

@@ -15,6 +15,34 @@ import {
   type GlowDatum,
 } from "./GlowLayer";
 import { AuroraLayer, type AuroraDatum } from "./AuroraLayer";
+import { currentLook } from "@/components/Map/lookState";
+
+/* ---- THE GARDEN (2026-07-10): growth data per entry ------------------ */
+
+/** Deterministic 0..1 hash of an entry id — each bloom unique forever. */
+function idSeed(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+  return ((h >>> 0) % 997) / 997;
+}
+
+/** How far a bloom has opened: age saturates over matureDays; attaching
+ *  a memory pushes it onward. 0 = fresh bud, 1 = fully open. */
+function bloomGrowth(p: LivePoint): number {
+  const g = TRAIL.garden;
+  const ageDays = (Date.now() - p.createdAt) / 86_400_000;
+  return Math.min(1, ageDays / g.matureDays + (p.hasMemory ? g.memoryBoost : 0));
+}
+
+/** vGarden attribute: growth, petal count, has-memory, per-entry seed. */
+function gardenData(p: LivePoint): [number, number, number, number] {
+  return [
+    Math.round(bloomGrowth(p) * 255),
+    TRAIL.garden.petals[p.emotion] ?? 6,
+    p.hasMemory ? 255 : 0,
+    Math.round(idSeed(p.id) * 255),
+  ];
+}
 import type { LivePoint } from "@/lib/momentsStore";
 import { GLOW, LAMP, TRAIL } from "@/components/Map/tune";
 
@@ -278,6 +306,7 @@ export function buildTrailLayers(
   // point per cell, sized by how many moments it holds; tap to descend.
   if (zoom < TRAIL.spark.cluster.belowZoom && data.length > 1) {
     const clusters = cachedClusters(data, version, zoom);
+    const world = currentLook().config.journal;
     return [
       new EmotionGlowLayer({
         id: "journal-constellations",
@@ -285,7 +314,22 @@ export function buildTrailLayers(
         getPosition: (d: GlowDatum) => d.position,
         getRadius: getClusterRadius as unknown as (d: GlowDatum) => number,
         getFillColor,
-        updateTriggers: { getRadius: version, getFillColor: version },
+        // Garden world-view: a returned-to place is a THICKET — its bloom
+        // grows with how many moments it holds.
+        ...(world === "garden"
+          ? {
+              getLineColor: (d: GlowDatum) => {
+                const c = d as unknown as SparkCluster;
+                return [
+                  Math.round(Math.min(1, c.count / 8) * 255),
+                  7,
+                  0,
+                  Math.round(((c.position[0] * 7919) % 1 + 1) % 1 * 255),
+                ] as [number, number, number, number];
+              },
+              updateTriggers: { getRadius: version, getFillColor: version, getLineColor: version },
+            }
+          : { updateTriggers: { getRadius: version, getFillColor: version } }),
         radiusUnits: "pixels" as const,
         stroked: false,
         filled: true,
@@ -298,16 +342,19 @@ export function buildTrailLayers(
         timeSec,
         radiusScale: 1,
         radiusMaxPixels: TRAIL.spark.cluster.maxRadiusPx,
-        // Constellations are MATTE GEMS like every memory node (Eli's
-        // 2026-07-08 redesign) — solid pigment, free silhouette, no white.
-        light: {
-          gain: TRAIL.gain * fade,
-          wobble: TRAIL.spark.wobble,
-          matte: 1,
-          matteGlint: TRAIL.node.glint,
-          stainEdge: TRAIL.node.edge,
-          stainRing: TRAIL.node.rim,
-        },
+        // Constellations wear the era's node language: matte gems in the
+        // thread looks, maturing thicket-blooms in the garden.
+        light:
+          world === "garden"
+            ? { gain: TRAIL.gain * fade, garden: 1 }
+            : {
+                gain: TRAIL.gain * fade,
+                wobble: TRAIL.spark.wobble,
+                matte: 1,
+                matteGlint: TRAIL.node.glint,
+                stainEdge: TRAIL.node.edge,
+                stainRing: TRAIL.node.rim,
+              },
         parameters: MATTE_OVER,
       }),
       new TextLayer<SparkCluster>({
@@ -381,10 +428,13 @@ export function buildTrailLayers(
     );
   }
   if (night > 0.01) {
+    // Which journal this look renders (THE GALLERY, 2026-07-10): the
+    // aurora-thread era, or THE GARDEN — blooms that mature with use.
+    const journalKind = currentLook().config.journal;
     // THE AURORA: the journey between the memories — flowing curtains of
     // light, drawn first so every node sits above its own history. Tap a
     // curtain to learn how far apart its two moments were.
-    if (data.length > 1) {
+    if (journalKind === "thread" && data.length > 1) {
       layers.push(
         new AuroraLayer({
           id: "journal-aurora",
@@ -413,26 +463,42 @@ export function buildTrailLayers(
         }),
       );
     }
-    // THE MEMORY NODES: matte pigment gems (Eli's 2026-07-08 redesign) —
-    // solid hue with a sealing-wax rim and a pure-hue glint, the living-
-    // blot silhouette, zero white anywhere. Tappable.
+    // THE MEMORY NODES. Thread era: matte pigment gems. GARDEN (07-10,
+    // from scratch): each entry a BLOOM that matures with age — bud →
+    // open petals → growth rings; size grows too. Both tappable.
     layers.push(
       new EmotionGlowLayer({
         id: "journal-sparks",
         ...shared,
+        ...(journalKind === "garden"
+          ? {
+              getRadius: (d: GlowDatum) =>
+                getTrailRadius(d) *
+                (TRAIL.garden.sizeMin + TRAIL.garden.sizeSpan * bloomGrowth(d as LivePoint)),
+              getLineColor: (d: GlowDatum) => gardenData(d as LivePoint),
+              updateTriggers: {
+                getRadius: [version, "garden"],
+                getFillColor: version,
+                getLineColor: version,
+              },
+            }
+          : {}),
         pickable: true,
         onClick: (info: { object?: LivePoint }) => {
           if (info.object && onTapEntry) onTapEntry(info.object.id);
           return true;
         },
-        light: {
-          gain: TRAIL.gain * fade * night,
-          wobble: TRAIL.spark.wobble,
-          matte: 1,
-          matteGlint: TRAIL.node.glint,
-          stainEdge: TRAIL.node.edge,
-          stainRing: TRAIL.node.rim,
-        },
+        light:
+          journalKind === "garden"
+            ? { gain: TRAIL.gain * fade * night, garden: 1 }
+            : {
+                gain: TRAIL.gain * fade * night,
+                wobble: TRAIL.spark.wobble,
+                matte: 1,
+                matteGlint: TRAIL.node.glint,
+                stainEdge: TRAIL.node.edge,
+                stainRing: TRAIL.node.rim,
+              },
         parameters: MATTE_OVER,
       }),
     );

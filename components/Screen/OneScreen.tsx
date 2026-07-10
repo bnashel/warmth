@@ -20,6 +20,7 @@ import { atmosphere } from "@/lib/atmosphere";
 import { WeatherPreview } from "@/components/Lab/WeatherPreview";
 import { MemoryCard } from "@/components/Trail/MemoryCard";
 import { LookGallery, galleryEnabled } from "@/components/Lab/LookGallery";
+import { currentLook, onLookChange } from "@/components/Map/lookState";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
 
@@ -120,6 +121,10 @@ export default function OneScreen() {
     const id = window.setTimeout(() => setGalleryOn(galleryEnabled()), 0);
     return () => window.clearTimeout(id);
   }, []);
+  // The caption follows the live look (the garden reads differently) —
+  // a tiny tick keeps this component honest when the gallery switches.
+  const [, setLookTick] = useState(0);
+  useEffect(() => onLookChange(() => setLookTick((t) => t + 1)), []);
   // Learning mode: the first 3 commits name every picker dot (persisted —
   // storage can be blocked; never worth throwing over).
   const [commitCount, setCommitCount] = useState(() => {
@@ -443,7 +448,9 @@ export default function OneScreen() {
               pointerEvents: "none",
             }}
           >
-            {VIEWS.find((v) => v.key === view)!.caption}
+            {view === "private" && currentLook().config.journal === "garden"
+              ? "your journal — a garden grown from every feeling"
+              : VIEWS.find((v) => v.key === view)!.caption}
           </motion.p>
         </AnimatePresence>
       </div>

@@ -360,6 +360,20 @@ export const TRAIL = {
     /** The far past dims to this fraction (newest span = 1). */
     oldDim: 0.4,
   },
+  /** THE GARDEN (2026-07-10, from-scratch journal): entries are blooms
+   *  that MATURE — a bud when fresh, opening petals and growth rings as
+   *  weeks pass, a ring added when a memory attaches. matureDays = how
+   *  long a bloom takes to fully open; petals carry each emotion's felt
+   *  character (calm broad+few, energy many+sharp). Growth is the design:
+   *  the month-old journal visibly out-blooms the week-old one. */
+  garden: {
+    matureDays: 21,
+    memoryBoost: 0.15,
+    petals: { calm: 4, love: 5, gratitude: 6, joy: 8, energy: 10 } as Record<string, number>,
+    /** Blooms grow in size too: radius × (min + span·growth). */
+    sizeMin: 0.55,
+    sizeSpan: 0.45,
+  },
   /** THE JOURNAL EXTRAS (2026-07-07): the candle keeps the LAMP's core and
    *  falloff — but its SILHOUETTE is free-form (Eli: "less circular").
    *  These are only what a journal adds: the living-blot wobble, memory

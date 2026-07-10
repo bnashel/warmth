@@ -9,7 +9,7 @@ import { MAPBOX_TOKEN } from "@/lib/map";
 import { momentsStore } from "@/lib/momentsStore";
 import { atmosphere } from "@/lib/atmosphere";
 import { setRainLevel } from "@/lib/sound";
-import { CAMERA, CHOREO, INK, LABELS, MOTION, PERF, SHAPES, SOLAR, WEATHER } from "./tune";
+import { CAMERA, CHOREO, INK, LABELS, MOTION, PERF, SOLAR, WEATHER } from "./tune";
 import { currentLook, onLookChange } from "./lookState";
 import { buildStyle } from "./styles";
 import { applyAtmosphereInk } from "./solar";
@@ -147,12 +147,14 @@ export default function MapStage({
   useEffect(() => {
     onGapTapRef.current = onGapTap;
   }, [onGapTap]);
-  // THE GALLERY: a look switch changes geometry dials (kernel radii,
-  // felt footprints) — force the next tick to re-feed the field's data.
+  // THE GALLERY: a look switch is a DISSOLVE, never a pop (constitution
+  // rule 4): the field breathes down over ~180ms, swaps dials + kernel
+  // buffers at the bottom, and breathes back. Driven by the rAF tick.
+  const lookSwap = useRef<{ start: number; swapped: boolean } | null>(null);
   useEffect(
     () =>
       onLookChange(() => {
-        dataVersion.current = -1;
+        lookSwap.current = { start: performance.now(), swapped: false };
       }),
     [],
   );
@@ -236,8 +238,27 @@ export default function MapStage({
       // cloud/rain/snow never bend or dim the emotion itself.
       const rain = atmo.wetKind === "rain" ? atmo.wet : 0;
       const snow = atmo.wetKind === "snow" ? atmo.wet : 0;
+      // The gallery dissolve: breathe down (180ms), swap at the trough,
+      // breathe back (220ms). ease = smoothstep on both slopes.
+      let lookDim = 1;
+      const swap = lookSwap.current;
+      if (swap) {
+        const tDown = (now - swap.start) / 180;
+        if (tDown < 1) {
+          lookDim = 1 - tDown;
+        } else if (!swap.swapped) {
+          swap.swapped = true;
+          dataVersion.current = -1; // re-feed kernels while invisible
+          lookDim = 0;
+        } else {
+          const tUp = (now - swap.start - 180) / 220;
+          lookDim = Math.min(1, tUp);
+          if (tUp >= 1) lookSwap.current = null;
+        }
+        lookDim = lookDim * lookDim * (3 - 2 * lookDim);
+      }
       if (field) {
-        field.fade = 1 - viewMix.current;
+        field.fade = (1 - viewMix.current) * lookDim;
         field.paper = atmo.paper;
         // The wind rides ON TOP of the woven wash's base shape.
         const look = field.look;
@@ -273,7 +294,14 @@ export default function MapStage({
       // Rest-throttle — bypassed while moving, blooming, crossfading, or
       // precipitating (falling drops need full rate; only while it rains).
       const precipitating = atmo.wet > 0.03;
-      if (!map.isMoving() && !arriving && !fading && !precipitating && now - lastPush < PERF.restFrameMs)
+      if (
+        !map.isMoving() &&
+        !arriving &&
+        !fading &&
+        !precipitating &&
+        !lookSwap.current && // the gallery dissolve needs full rate
+        now - lastPush < PERF.restFrameMs
+      )
         return;
       lastPush = now;
 

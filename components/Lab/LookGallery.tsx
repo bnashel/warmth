@@ -12,6 +12,8 @@
  * Shown in dev builds, or anywhere with ?looks=1. Never in the product.
  */
 import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { SPRING } from "@/lib/theme";
 import { LOOKS } from "@/components/Map/looks";
 import { currentLook, favoriteId, onLookChange, setFavorite, setLook } from "@/components/Map/lookState";
 
@@ -44,8 +46,13 @@ export function LookGallery() {
         fontFamily: "Inter, system-ui, sans-serif",
       }}
     >
+      <AnimatePresence>
       {open && (
-        <div
+        <motion.div
+          initial={{ opacity: 0, y: 8, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 6, scale: 0.99 }}
+          transition={SPRING.settle}
           style={{
             display: "flex",
             flexDirection: "column",
@@ -101,8 +108,9 @@ export function LookGallery() {
               </button>
             </div>
           ))}
-        </div>
+        </motion.div>
       )}
+      </AnimatePresence>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
