@@ -151,6 +151,11 @@ void main() {
 
 const RESOLVE_FS = /* glsl */ `#version 300 es
 precision highp float;
+// The world-anchor calibration span: the mercator width of a 1280-css-px
+// screen at z12.5 — the frame the dials were tuned in. All world-anchored
+// texture domains (warp, weave, tiers, curtains) divide through this, so
+// dial numbers keep their tuned meaning at every zoom on every device.
+#define WORLD_SPAN ${(1280 / (512 * Math.pow(2, 12.5))).toExponential(8)}
 in vec2 vUv;
 uniform sampler2D uField0;
 uniform sampler2D uField1;
@@ -164,11 +169,26 @@ uniform float uBreathPeriod;
 uniform float uBreathAmp;
 uniform int uMode;
 // THE SHAPE OF FEELING: domain-warp the field lookup so blooms stop being
-// circles. x=warp amplitude (uv), y=noise scale, z=drift speed,
+// circles. x=warp amplitude, y=noise scale, z=drift speed,
 // w=streak (anisotropy along the flow axis).
 uniform vec4 uShape;
 uniform float uBand;   // aurora curtains: brightness modulation (0 = off)
-uniform float uAspect; // target width / height, so the flow isn't squashed
+// MERCATOR → SCREEN-UV (07-10, the zoom fix): every texture domain below
+// (edge warp, weave threads, tier crawl, shimmer, curtains) is anchored in
+// WORLD space — the same law the close-zoom grain already obeyed. The old
+// screen-anchored domains re-rolled every silhouette as the camera moved:
+// zooming made the whole field boil, and the screen-fraction warp
+// amplitude grew past whole kernels up close, tearing blobs into
+// crescents. Amplitudes/scales are calibrated at WORLD_SPAN (a 1280px
+// screen at z12.5), so the tuned dials keep their meaning — zoom now
+// simply magnifies the silhouette, like leaning into a painting.
+uniform vec2 uM2UvX;   // d(uv)/d(mercator), row 1 — inverse screen affine
+uniform vec2 uM2UvY;   // row 2 (both zero when the frame isn't derivable)
+// The screen's own mercator width this frame: warp amplitude follows the
+// LARGER of the world calibration and the screen fraction — the same
+// px-floor-vs-meters law the kernels themselves obey, so the wide view
+// keeps its living wobble while the close view stays a stable fact.
+uniform float uPxSpan;
 // THE LIVING ATMOSPHERE (lib/atmosphere.ts, eased): the flow axis follows
 // the real wind — the field's own living motion. CONSTITUTION RULE 2: the
 // sky may not grade the emotion's light; cloud/wet/snow no longer reach
@@ -201,6 +221,12 @@ uniform float uSmoothWarp; // 1 = swell (few sweeping waves), 0 = 3-oct fbm
 uniform float uBreathShaped; // 1 = soft-clipped exhale, 0 = plain sine
 uniform float uFeltOn;    // 1 = per-emotion form + motion signatures
 uniform float uVeil;      // 1 = NIGHT AIR: unbounded ambient presence
+// NIGHT WEATHER (07-10): the city must not breathe like a metronome.
+// breathVary makes each area's rhythm wander (a bounded rubato) and its
+// depth wax/wane over minutes; meld lets genuinely-overlapping feelings
+// soften each other's dominance so their colors truly interpenetrate.
+uniform float uBreathVary;
+uniform float uMeld;
 uniform vec4 uEmoMotion[${NE}]; // period(s), amp, skew, crisp
 uniform vec4 uEmoFx[${NE}];     // flicker, rise, warpMul, scaleMul
 // CLOSE-ZOOM GRAIN: geographic texture (mercator-anchored — meters, not
@@ -272,22 +298,30 @@ void main() {
     // One cheap unwarped pre-tap finds the local majority.
     float wm = 1.0;
     float sm = 1.0;
-    if (uFeltOn > 0.5) {
-      vec4 t0 = texture(uField0, vUv);
-      vec2 t1 = texture(uField1, vUv).xy;
-      float tI[${NE}];
-      ${["t0.x", "t0.y", "t0.z", "t0.w", "t1.x", "t1.y", "t1.z", "t1.w"]
-        .slice(0, NE)
-        .map((src, i) => `tI[${i}] = ${src};`)
-        .join(" ")}
-      int d = 0;
-      float dw = -1.0;
-      for (int i = 0; i < ${NE}; i++) if (tI[i] > dw) { dw = tI[i]; d = i; }
-      if (dw > 0.001) { wm = uEmoFx[d].z; sm = uEmoFx[d].w; }
+    // One cheap unwarped pre-tap: the local majority picks the felt edge
+    // language, and the local POOLED weight anchors bright interiors
+    // below — only edge skirts ride the full warp.
+    vec4 t0 = texture(uField0, vUv);
+    vec2 t1 = texture(uField1, vUv).xy;
+    float tI[${NE}];
+    ${["t0.x", "t0.y", "t0.z", "t0.w", "t1.x", "t1.y", "t1.z", "t1.w"]
+      .slice(0, NE)
+      .map((src, i) => `tI[${i}] = ${src};`)
+      .join(" ")}
+    int dTop = 0;
+    float dw = -1.0;
+    float tSum = 0.0;
+    for (int i = 0; i < ${NE}; i++) {
+      tSum += tI[i];
+      if (tI[i] > dw) { dw = tI[i]; dTop = i; }
     }
-    vec2 q = vec2(vUv.x * uAspect, vUv.y) * uShape.y * sm;
-    // The flow axis IS the real wind (a gentle diagonal when calm).
-    vec2 axis = normalize(uAxis);
+    if (uFeltOn > 0.5 && dw > 0.001) { wm = uEmoFx[dTop].z; sm = uEmoFx[dTop].w; }
+    // WORLD-ANCHORED (07-10): the warp is a fact of the geography — its
+    // noise lives in mercator space, so a silhouette magnifies under zoom
+    // instead of re-rolling, and its amplitude is a fixed ground distance.
+    vec2 q = (merc - uMercAnchor) * (uShape.y * sm / WORLD_SPAN);
+    // The flow axis IS the real wind (mercator y runs opposite screen y).
+    vec2 axis = normalize(vec2(uAxis.x, -uAxis.y));
     // Streak stretches the noise domain along the axis (ribbons), and the
     // drift crawls the domain over time so the weather is alive, not stuck.
     vec2 along = axis * dot(q, axis);
@@ -299,7 +333,16 @@ void main() {
     // Warp mostly across the axis when streaked — edges feather sideways.
     vec2 across = vec2(-axis.y, axis.x);
     vec2 wStreak = across * dot(w, across) * 1.8;
-    uv += mix(w, wStreak, uShape.w) * uShape.x * wm;
+    // Amplitude: screen-proportional at the wide view (where kernels sit
+    // on their px floors), a fixed ground distance up close (where they
+    // are meter-true) — max() of the two spans, like the kernels.
+    vec2 dm = mix(w, wStreak, uShape.w) * (uShape.x * wm * max(WORLD_SPAN, uPxSpan));
+    // THE ANCHOR HOLD (the torn-crescent fix): where feeling pools deep,
+    // the lookup barely moves — a bright heart can never be displaced
+    // onto empty ground and read as a black bite. The thin outer skirt
+    // keeps the full living undulation.
+    dm *= 1.0 - 0.82 * smoothstep(0.07, 0.55, 1.0 - exp(-uExposure * tSum));
+    uv += vec2(dot(uM2UvX, dm), dot(uM2UvY, dm));
   }
   vec4 f0 = texture(uField0, uv);
   vec2 f1 = texture(uField1, uv).xy;
@@ -316,16 +359,30 @@ void main() {
   // one feeling never beat in lockstep. Positions never move.
   if (uFeltOn > 0.5) {
     float ph = vnoise((merc - uMercAnchor) * uGrain.y * 0.06) * 0.9;
+    // NIGHT WEATHER: no metronome. rub is a bounded phase wander (a few-
+    // kilometer rubato — each area's rhythm quickens and lags, never
+    // diverging); wax lets the breath's DEPTH drift over minutes at
+    // borough scale, so some places breathe deep while others nearly
+    // still, and the pattern itself slowly migrates. Brightness only —
+    // positions stay facts.
+    float rub = 0.0;
+    float wax = 1.0;
+    if (uBreathVary > 0.0) {
+      vec2 gq = (merc - uMercAnchor) * uGrain.y;
+      rub = (vnoise(gq * 0.045 + uTimeSec * vec2(0.021, -0.013)) - 0.5) * 1.7 * uBreathVary;
+      wax = 1.0 + uBreathVary * 0.85 *
+        (vnoise(gq * 0.028 + uTimeSec * vec2(0.007, 0.0045) + 41.7) - 0.5) * 2.0;
+    }
     for (int i = 0; i < ${NE}; i++) {
       vec4 m = uEmoMotion[i];
       if (m.x < 0.1) continue;
-      float x = 6.2831853 * (uTimeSec / m.x + ph + float(i) * 0.37);
+      float x = 6.2831853 * (uTimeSec / m.x + ph + rub + float(i) * 0.37);
       // skew: phase-warped sine — quick swell, slow settle (buoyant joy).
       float s = sin(x - m.z * sin(x));
       // crisp: tanh sharpening — energy pulses brisk and defined.
       float cr = max(m.w, 0.001);
       s = tanh(cr * s) / tanh(cr);
-      float env = 1.0 + m.y * s;
+      float env = 1.0 + m.y * wax * s;
       // flicker: fine, fast, tiny — candlelight for gratitude.
       if (uEmoFx[i].x > 0.0) {
         env += uEmoFx[i].x *
@@ -349,8 +406,9 @@ void main() {
   float anchorChroma = 0.0;
   int top = 0;
   float topW = -1.0;
-  // Screen-space noise domain shared by the woven-wash passes below.
-  vec2 nq = vec2(vUv.x * uAspect, vUv.y);
+  // World-anchored noise domain shared by the woven-wash passes below
+  // (units: reference screen-widths — see the zoom fix note at uM2UvX).
+  vec2 nq = (merc - uMercAnchor) / WORLD_SPAN;
 
   // THE GENUINE-OVERLAP GATE (Eli, 2026-07-08: colors interact ONLY where
   // feelings truly share ground in the data). Measured, not decorative:
@@ -365,8 +423,13 @@ void main() {
   }
   float overlap = smoothstep(uOverlap.x, uOverlap.y, top2 / max(top1, 1e-5));
 
+  // THE MELD (07-10): where feelings genuinely share ground, dominance
+  // itself relaxes — the meeting is a real interpenetration of color, not
+  // one hue snapping over the other. Lone blobs are untouched (overlap 0).
+  float domP = uDominance * (1.0 - uMeld * overlap);
+
   for (int i = 0; i < ${NE}; i++) {
-    float w = pow(I[i], uDominance);
+    float w = pow(I[i], domP);
     // THE WEAVE (from silk): where feelings GENUINELY meet, threads of
     // each interleave through the front — per-emotion bands of slow noise
     // tilt the local vote, so neighbors meld as woven strands, never a
@@ -423,7 +486,7 @@ void main() {
   // hue is a fact and holds still; only where two feelings truly share
   // ground does the color visibly flow between them.
   {
-    vec2 axis2 = normalize(uAxis);
+    vec2 axis2 = normalize(vec2(uAxis.x, -uAxis.y));
     float along = dot(nq, axis2);
     float rot = (fbm(vec2(along * 5.0 - uTimeSec * 0.12, 4.7)) - 0.5) * 2.0 * uShimmer * overlap;
     float cr = cos(rot);
@@ -494,8 +557,8 @@ void main() {
   // Aurora curtains: slow luminous banding across the flow axis. Modulation
   // only — never to zero, so the field's coverage is untouched.
   if (uBand > 0.0) {
-    vec2 axis = normalize(uAxis);
-    float across = dot(vec2(uv.x * uAspect, uv.y), vec2(-axis.y, axis.x));
+    vec2 axisB = normalize(vec2(uAxis.x, -uAxis.y));
+    float across = dot(nq, vec2(-axisB.y, axisB.x));
     float curtain = fbm(vec2(across * 9.0, uTimeSec * 0.05));
     b *= 1.0 + uBand * (curtain - 0.5) * 1.6;
   }
@@ -1028,7 +1091,14 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform4f(u("uTiers"), WOVEN.tiers.count, WOVEN.tiers.rim, d.richen, WOVEN.tiers.crawl);
     gl.uniform1f(u("uTierKeep"), d.tierKeep);
     // Gate off = the pre-07-08 ungated flow (smoothstep saturates at 1).
-    if (d.overlapGate) gl.uniform2f(u("uOverlap"), WOVEN.overlap.from, WOVEN.overlap.to);
+    // A look may open the gate earlier (night weather: interaction reads
+    // where feelings merely lean into each other, not only dead-center).
+    if (d.overlapGate)
+      gl.uniform2f(
+        u("uOverlap"),
+        d.overlapFrom ?? WOVEN.overlap.from,
+        d.overlapTo ?? WOVEN.overlap.to,
+      );
     else gl.uniform2f(u("uOverlap"), -2.0, -1.0);
     // Knee off = the pre-07-09 raw output (start above any real value).
     if (d.toneKnee) gl.uniform2f(u("uKnee"), FIELD.tone.kneeFrom, FIELD.tone.cap);
@@ -1036,20 +1106,35 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform1f(u("uSmoothWarp"), lk.shape.smoothWarp);
     gl.uniform1f(u("uFeltOn"), d.felt);
     gl.uniform1f(u("uVeil"), d.veil);
+    gl.uniform1f(u("uBreathVary"), d.breathVary ?? 0);
+    gl.uniform1f(u("uMeld"), d.meld ?? 0);
     gl.uniform4fv(u("uEmoMotion"), this.emoMotion);
     gl.uniform4fv(u("uEmoFx"), this.emoFx);
     gl.uniform4f(u("uShape"), this.look.warpAmp, this.look.scale, this.look.drift, this.look.streak);
     gl.uniform1f(u("uBand"), this.look.band);
-    gl.uniform1f(u("uAspect"), this.texW / Math.max(1, this.texH));
     const w = this.weather;
     gl.uniform2f(u("uAxis"), w.axisX, w.axisY);
-    // Screen → world (shared by the land mask and the close-zoom grain);
-    // both features gate off when the frame isn't derivable.
+    // Screen → world (shared by the land mask, the grain, and every
+    // world-anchored texture domain); features gate off when the frame
+    // isn't derivable. The inverse (world → screen-uv) carries the edge
+    // warp's mercator displacement back into the texture lookup.
     const mf = this.mercFrame;
     if (mf.ok) {
       gl.uniform2f(u("uMercOrigin"), mf.ox, mf.oy);
       gl.uniform2f(u("uMercDx"), mf.dxx, mf.dxy);
       gl.uniform2f(u("uMercDy"), mf.dyx, mf.dyy);
+      const det = mf.dxx * mf.dyy - mf.dyx * mf.dxy;
+      if (Math.abs(det) > 1e-20) {
+        gl.uniform2f(u("uM2UvX"), mf.dyy / det, -mf.dyx / det);
+        gl.uniform2f(u("uM2UvY"), -mf.dxy / det, mf.dxx / det);
+      } else {
+        gl.uniform2f(u("uM2UvX"), 0, 0);
+        gl.uniform2f(u("uM2UvY"), 0, 0);
+      }
+    } else {
+      // No frame → no warp this frame (a rare transient; never garbage).
+      gl.uniform2f(u("uM2UvX"), 0, 0);
+      gl.uniform2f(u("uM2UvY"), 0, 0);
     }
     // The coastline (off until the mask texture lands — never a blocker).
     const maskOn = this.maskReady && mf.ok;
@@ -1061,9 +1146,12 @@ export class FieldLayer implements CustomLayerInterface {
       gl.uniform4f(u("uMaskRect"), ...this.maskRect);
       gl.uniform1f(u("uWaterAtten"), FIELD.landMask.waterAtten);
     }
+    // The screen's mercator width (warp amplitude's px-floor law).
+    const zNow = this.map?.getZoom() ?? 0;
+    const cssW = this.map?.getContainer().clientWidth ?? 1280;
+    gl.uniform1f(u("uPxSpan"), cssW / (512 * Math.pow(2, zNow)));
     // Close-zoom grain: amp fades in as the camera commits to a place.
     const gz = FIELD.grain.zoomIn;
-    const zNow = this.map?.getZoom() ?? 0;
     const gt = Math.min(1, Math.max(0, (zNow - gz.from) / (gz.to - gz.from)));
     const grainAmp = mf.ok ? FIELD.grain.amp * gt * gt * (3 - 2 * gt) : 0;
     gl.uniform2f(u("uGrain"), grainAmp, this.grainScale);

@@ -10,6 +10,9 @@
  * Historical entries are reconstructions from git history: the dials are
  * faithful; shader-structural details that no longer exist (e.g. the old
  * pre-gamut-fix channel clipping) can't be resurrected and are noted.
+ * Likewise the 07-10 zoom fix (noise domains world-anchored so zooming
+ * magnifies a silhouette instead of re-rolling it) applies to every look:
+ * the old screen-anchored boil was a bug, not a style.
  */
 
 export type LookConfig = {
@@ -54,6 +57,15 @@ export type LookConfig = {
     /** Kernel falloff exponent (accumulate pass). Low = long diffuse
      *  skirts that merge into continuum; high = defined pools. */
     kernelSoftness: number;
+    /** NIGHT WEATHER (07-10) — all optional; absent = the older behavior.
+     *  breathVary: 0..1 — each area's breath wanders in rhythm and
+     *  waxes/wanes in depth (no metronome). meld: 0..1 — at genuine
+     *  overlap, dominance relaxes so colors truly interpenetrate.
+     *  overlapFrom/To: per-look gate range (open the interaction earlier). */
+    breathVary?: number;
+    meld?: number;
+    overlapFrom?: number;
+    overlapTo?: number;
   };
   /** Which private-journal rendering this look pairs with. */
   journal: "thread" | "garden";
@@ -196,6 +208,23 @@ export const LOOKS: LookDef[] = [
         exposure: 0.85, gain: 0.78, heartLift: 0.06, dominance: 4.0,
         breathPeriodMs: 6400, breathAmp: 0.04, breathShaped: 1, toneKnee: 1,
         tierKeep: 0, richen: 0.35, weaveAmp: 0.6, shimmer: 0.35, overlapGate: 1, felt: 1, veil: 1, kernelSoftness: 1.35,
+      },
+      journal: "garden",
+    },
+  },
+  {
+    id: "night-weather",
+    name: "night weather",
+    date: "07-10",
+    note: "the felt city, un-metronomed: every area breathes in its own drifting rhythm, overlapping feelings genuinely interpenetrate (meld + earlier gate), and silhouettes run freer — bigger slower swells leaning with the flow, never cellular. Journal = the garden.",
+    config: {
+      shape: { warpAmp: 0.052, scale: 3.8, drift: 0.012, streak: 0.4, band: 0.25, smoothWarp: 1 },
+      dials: {
+        radiusM: 200, radiusPerIntensityM: 30, minRadiusPx: 38, washGain: 0.42,
+        exposure: 1.2, gain: 1.15, heartLift: 0.09, dominance: 4.0,
+        breathPeriodMs: 6400, breathAmp: 0.04, breathShaped: 1, toneKnee: 1,
+        tierKeep: 0.85, richen: 0.55, weaveAmp: 0.85, shimmer: 0.5, overlapGate: 1, felt: 1, veil: 0, kernelSoftness: 2.5,
+        breathVary: 1, meld: 0.4, overlapFrom: 0.08, overlapTo: 0.38,
       },
       journal: "garden",
     },

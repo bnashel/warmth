@@ -71,6 +71,17 @@ export default function MapStage({
   const dataVersion = useRef(-1);
   const loaded = useRef(false);
   const [rotated, setRotated] = useState(false);
+  // RECENTER (Eli, 2026-07-10): Apple-Maps-style chip, top-right — appears
+  // once you've wandered from the home view, one tap glides you back.
+  // "Home" is the SETTLED opening camera, not the raw constant: mapbox
+  // clamps the requested zoom up on viewports where z10.8 would leak past
+  // maxBounds, and the chip must compare against what the map can reach.
+  const [away, setAway] = useState(false);
+  const homeRef = useRef<{ lng: number; lat: number; zoom: number }>({
+    lng: CAMERA.initial.longitude,
+    lat: CAMERA.initial.latitude,
+    zoom: CAMERA.initial.zoom,
+  });
   // 0 = ink night, 1 = paper day (daylight mode) — refreshed on solar apply;
   // the field trades glow for pigment, labels trade white for graphite.
   const paperRef = useRef(0);
@@ -451,12 +462,28 @@ export default function MapStage({
               console.error("warmth: precip layer failed to restore", err);
             }
           });
+          // The settled opening camera IS home (constraints already applied).
+          const hc = map.getCenter();
+          homeRef.current = { lng: hc.lng, lat: hc.lat, zoom: map.getZoom() };
           // Lab-only hook so the screenshot/perf harness can set exact cameras.
           (window as unknown as { __warmthMap?: typeof map }).__warmthMap = map;
           loaded.current = true;
           onMapReady?.(map);
         }}
-        onMove={(e) => setRotated(Math.abs(e.viewState.bearing) > 0.5)}
+        onMove={(e) => {
+          const v = e.viewState;
+          setRotated(Math.abs(v.bearing) > 0.5);
+          // "Away" = meaningfully off the home shot in zoom, place, or
+          // heading — generous thresholds so the chip never nags over a
+          // small nudge, but always offers the way home from a real trip.
+          const home = homeRef.current;
+          setAway(
+            Math.abs(v.zoom - home.zoom) > 0.6 ||
+              Math.abs(v.longitude - home.lng) > 0.045 ||
+              Math.abs(v.latitude - home.lat) > 0.035 ||
+              Math.abs(v.bearing) > 0.5,
+          );
+        }}
       >
         <DeckOverlay
           onReady={(o) => {
@@ -490,6 +517,61 @@ export default function MapStage({
         }}
       >
         N
+      </button>
+
+      {/* Recenter — home view, one tap. Appears only once you've wandered
+          (Apple Maps' recenter affordance, meaning "the default city shot"
+          here). Sits below the north chip so the two never collide. */}
+      <button
+        type="button"
+        aria-label="Return to the city view"
+        title="Return to the city view"
+        onClick={() => {
+          const map = mapRef.current?.getMap();
+          if (!map) return;
+          map.flyTo({
+            center: [CAMERA.initial.longitude, CAMERA.initial.latitude],
+            zoom: CAMERA.initial.zoom,
+            bearing: 0,
+            duration: 1600,
+            essential: true,
+          });
+          // Wherever the flight actually settles (bounds may clamp the
+          // request) becomes the home reference, so the chip fades out.
+          map.once("moveend", () => {
+            const c = map.getCenter();
+            homeRef.current = { lng: c.lng, lat: c.lat, zoom: map.getZoom() };
+            setAway(false);
+          });
+        }}
+        style={{
+          position: "absolute",
+          top: "calc(max(env(safe-area-inset-top), 20px) + 44px)",
+          right: 16,
+          width: 34,
+          height: 34,
+          borderRadius: "50%",
+          border: "1px solid rgba(233,236,244,0.14)",
+          background: "rgba(10,11,15,0.55)",
+          color: "rgba(233,236,244,0.6)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "pointer",
+          zIndex: 10,
+          opacity: away ? 1 : 0,
+          pointerEvents: away ? "auto" : "none",
+          transition: "opacity 300ms ease",
+        }}
+      >
+        {/* The Apple recenter arrow, quieted to the chip's ink. */}
+        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M12 3.2 L19.6 20.4 L12 16.2 L4.4 20.4 Z"
+            fill="currentColor"
+            fillOpacity="0.85"
+          />
+        </svg>
       </button>
     </>
   );

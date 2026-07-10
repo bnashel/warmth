@@ -103,9 +103,18 @@ void main(void) {
     float petals = max(3.0, floor(vGarden.y * 255.0 + 0.5));
     float seedPh = vGarden.w * 6.2831853;
     float theta = atan(unitPosition.y, unitPosition.x);
-    // Petals deepen as the bloom matures; a slow sway keeps it alive.
-    float depth = 0.06 + 0.3 * grow;
-    float edgeR = 1.0 - depth * (0.5 + 0.5 * cos(petals * theta + seedPh + glow.timeSec * 0.03));
+    // THE SILK BLOOM (07-10, the public germ fix at diary scale): the old
+    // cos(petals·θ) rosette was radially-symmetric scallops — a burr, the
+    // exact biological read banned from the public field. The emotion's
+    // petal count now sets HOW MANY slow waves ride the edge (calm 2 …
+    // energy 4 — integer, so the silhouette closes), and a strong 1θ term
+    // makes every bloom LEAN — directional, like a flower toward light.
+    float waves = clamp(floor(petals * 0.4 + 0.5), 2.0, 4.0);
+    float lb = 0.38 * sin(theta + seedPh + glow.timeSec * 0.021)
+             + 0.62 * sin(waves * theta + seedPh * 1.7 + glow.timeSec * 0.033);
+    // Waves deepen as the bloom matures; a slow sway keeps it alive.
+    float depth = 0.05 + 0.26 * grow;
+    float edgeR = 1.0 - depth * (0.5 + 0.5 * lb);
     float rg = rr / max(edgeR, 0.25);
     if (rg >= 1.0) discard;
     float n0 = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
@@ -127,16 +136,18 @@ void main(void) {
   }
 
   // FREE-FORM (wobble > 0 — the journal): the silhouette stops being a
-  // circle. Three angular harmonics, phase-hashed per point and drifting
-  // very slowly, dent the radius INWARD only — every mark a unique, living
-  // blot that still fits its quad and keeps the lamp's core/falloff law.
+  // circle. RESHAPED 07-10 (the public germ fix, at diary scale): the old
+  // 3θ/5θ/8θ harmonics gave every mark many small similar bumps — a cell
+  // wall. Now: one 1θ LEAN (the mark reaches to a side — directional,
+  // intentional) plus two large slow waves, drifting at exhale speed.
+  // Every mark still unique (phase-hashed), inward-only, quad-safe.
   if (glow.wobble > 0.0) {
     float theta = atan(unitPosition.y, unitPosition.x);
     float ph = vPhase * 6.2831853;
     float lobes =
-        0.50 * sin(3.0 * theta + ph + glow.timeSec * 0.11)
-      + 0.35 * sin(5.0 * theta - ph * 1.7 + glow.timeSec * 0.07)
-      + 0.15 * sin(8.0 * theta + ph * 2.3 - glow.timeSec * 0.05);
+        0.32 * sin(theta + ph * 0.9 + glow.timeSec * 0.021)
+      + 0.46 * sin(2.0 * theta + ph + glow.timeSec * 0.05)
+      + 0.22 * sin(3.0 * theta - ph * 1.7 + glow.timeSec * 0.033);
     float shrink = 1.0 - glow.wobble * (0.5 + 0.5 * lobes);
     rr = rr / max(shrink, 0.35);
   }

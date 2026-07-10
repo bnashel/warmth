@@ -532,8 +532,11 @@ export const FELT: Record<
   love: { period: 7.2, amp: 0.07, skew: 0, crisp: 0, flicker: 0, rise: 0, radiusMul: 1.18, warpMul: 0.8, scaleMul: 0.55 },
   /** Candlelight: near-still, a gentle fine inner flicker, quiet glow. */
   gratitude: { period: 8.5, amp: 0.028, skew: 0, flicker: 0.06, crisp: 0, rise: 0, radiusMul: 0.95, warpMul: 0.6, scaleMul: 0.8 },
-  /** Alert and direct: fastest, crisp-edged pulse, tighter, finer edges. */
-  energy: { period: 2.7, amp: 0.09, skew: 0, crisp: 2.4, flicker: 0, rise: 0, radiusMul: 0.85, warpMul: 1.2, scaleMul: 1.7 },
+  /** Alert and direct: fastest, crisp-edged pulse, tighter footprint.
+   *  warp/scale trimmed 2026-07-10: at 1.2/1.7 the extra edge business on
+   *  a small tight kernel tore it into slivers (the flame shapes) — the
+   *  emotion's identity lives in its speed and crispness, not a torn edge. */
+  energy: { period: 2.7, amp: 0.09, skew: 0, crisp: 2.4, flicker: 0, rise: 0, radiusMul: 0.85, warpMul: 0.85, scaleMul: 1.35 },
 };
 
 /* ------------------------------------------------------------------ */
