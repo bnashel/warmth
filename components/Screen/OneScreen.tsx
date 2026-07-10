@@ -18,6 +18,7 @@ import { fetchPublicField, subscribePublicField, markSelfCommit } from "@/lib/pu
 import { CAMERA, CHOREO, MOTION } from "@/components/Map/tune";
 import { OrbFlow } from "@/components/Orb/OrbFlow";
 import { atmosphere } from "@/lib/atmosphere";
+import { inkWeight } from "@/components/Map/solar";
 import { WeatherPreview } from "@/components/Lab/WeatherPreview";
 import { MemoryCard } from "@/components/Trail/MemoryCard";
 
@@ -128,7 +129,9 @@ export default function OneScreen() {
   const [paper, setPaper] = useState(0);
   useEffect(() => {
     // Quantized so React only re-renders when the ink meaningfully moves.
-    const update = () => setPaper(Math.round(atmosphere.current.paper * 40) / 40);
+    // inkWeight: paper world reads the SUN (bone noon -> slate midnight);
+    // night world reads the material scalar as before.
+    const update = () => setPaper(Math.round(inkWeight(atmosphere.current) * 40) / 40);
     update();
     const iv = window.setInterval(update, 2_000);
     document.addEventListener("visibilitychange", update);
@@ -162,7 +165,15 @@ export default function OneScreen() {
         if (!cancelled) momentsStore.seedAmbient(m);
       });
 
-    void fetchPublicField().then((cells) => {
+    // JUDGING PARAM (?field=seed, dev only): the bake-off needs the rich
+    // seeded field on both worlds even though the real DB has data now —
+    // a handful of real cells reads as an empty city in a style judgment.
+    const forceSeed =
+      process.env.NODE_ENV !== "production" &&
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("field") === "seed";
+
+    void (forceSeed ? Promise.resolve([]) : fetchPublicField()).then((cells) => {
       if (cancelled) return;
       if (cells.length > 0) {
         momentsStore.ingestPublicField(cells);

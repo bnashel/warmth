@@ -1,6 +1,7 @@
 "use client";
 
 import { ATMOSPHERE } from "./tune";
+import { worldFromUrl } from "./solar";
 
 /* Colorless film grain (feTurbulence desaturated to zero — the one law holds
  * even for noise). A static 160px tile, composited once; costs no frames. */
@@ -15,6 +16,10 @@ const GRAIN_URI = `url("data:image/svg+xml,${encodeURIComponent(
  * All single composited layers — zero per-frame cost.
  */
 export function Atmosphere() {
+  // THE PAPER WORLD: the same two layers become the sheet's MATERIAL —
+  // dark fibers pressed INTO the paper (multiply, never white noise
+  // floating above) and a warm vignette like light falling off a desk.
+  const paper = worldFromUrl() === "paper";
   return (
     <>
       <div
@@ -24,7 +29,9 @@ export function Atmosphere() {
           inset: 0,
           pointerEvents: "none",
           zIndex: 5,
-          background: `radial-gradient(140% 100% at 50% 44%, rgba(0,0,0,0) 52%, rgba(3,4,7,${ATMOSPHERE.vignette}) 100%)`,
+          background: paper
+            ? `radial-gradient(140% 100% at 50% 44%, rgba(0,0,0,0) 55%, rgba(58,50,38,${ATMOSPHERE.paper.vignette}) 100%)`
+            : `radial-gradient(140% 100% at 50% 44%, rgba(0,0,0,0) 52%, rgba(3,4,7,${ATMOSPHERE.vignette}) 100%)`,
         }}
       />
       <div
@@ -36,7 +43,8 @@ export function Atmosphere() {
           zIndex: 5,
           backgroundImage: GRAIN_URI,
           backgroundRepeat: "repeat",
-          opacity: ATMOSPHERE.grain,
+          opacity: paper ? ATMOSPHERE.paper.grain : ATMOSPHERE.grain,
+          mixBlendMode: paper ? "multiply" : "normal",
         }}
       />
       <style>{`

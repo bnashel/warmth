@@ -485,6 +485,9 @@ export const ATMOSPHERE = {
   vignette: 0.42,
   /** Film grain opacity (0 = off). Static tile, masks gradient banding. */
   grain: 0.05,
+  /** THE PAPER WORLD material: the grain becomes the sheet's TOOTH (dark
+   *  fibers, multiply blend) and the vignette warms — desk light, not void. */
+  paper: { grain: 0.14, vignette: 0.3 },
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -600,6 +603,14 @@ export const SOLAR = {
   /** …and dawn/dusk: a gentle warm tint riding the ember ramp — a breath
    *  of amber in the charcoal, never the paper-transition brown. */
   nightEmber: { bg: "#191412", water: "#0B0808", park: "#1E1813", building: "#211A14", road: "#D8CCBC" },
+  /** THE PAPER WORLD sky trio (?world=paper): the sheet itself follows the
+   *  sun — gradeInk blends paperNight → paperNoon by `light`, warmed by
+   *  paperDusk on the ember. paperNight.bg stays ≥ ~0x40 luminance: the
+   *  pigment multiply needs a light-enough ground; the slate-hours
+   *  luminance pass carries the rest. */
+  paperNoon: { bg: "#EAE3D3", water: "#C2C8C6", park: "#E0DCC6", building: "#DFD7C4", road: "#2E2B25" },
+  paperDusk: { bg: "#C9B2AE", water: "#9E979E", park: "#BFAC9E", building: "#C2ABA4", road: "#382B26" },
+  paperNight: { bg: "#42464F", water: "#2F323A", park: "#3E4340", building: "#464B55", road: "#14161B" },
   /** Master dial: 0 kills the effect entirely, 1 = full. */
   strength: 1,
   /** Sun elevation (deg) across which night becomes day. Starts at civil
@@ -796,4 +807,29 @@ export const INK = {
   roadWidth: { highway: 2.2, avenue: 1.35, local: 0.7, service: 0.45, ramp: 0.6, tunnel: 1.0 }, // px at fade-in end
 } as const;
 
-export type CandidatePalette = typeof INK;
+/** Widened from `typeof INK` (whose `as const` literals would reject any
+ *  second palette): same SHAPE, free values — the paper world needs it. */
+type Widen<T> = T extends string
+  ? string
+  : T extends number
+    ? number
+    : { readonly [K in keyof T]: Widen<T[K]> };
+export type CandidatePalette = Widen<typeof INK>;
+
+/** THE PAPER WORLD base sheet (?world=paper — style candidate, 2026-07-10).
+ *  Warm bone, real ink streets (a pen, not a UI line), watercolor-gray
+ *  water, dry-sage parks. Road presence rides dayRoadBoost/Widen at the
+ *  forced paper=1, so the ink network has mass all day. */
+export const PAPER: CandidatePalette = {
+  bg: "#EAE3D3", // warm bone — good sketchbook paper, never office-gray
+  water: "#C2C8C6", // a wash the brush left, never GPS blue
+  park: "#E0DCC6", // dry sage, barely there
+  building: "#DFD7C4", // settled mass, one step below the sheet
+  buildingAlpha: 0.5,
+  plateBase: 0, // the sheet is gapless bone; no plates
+  boundary: "rgba(44,41,36,0.09)", // hand-drawn ink seams
+  boundaryWidth: 1.0,
+  road: "#2E2B25", // real ink, warm-black
+  roadAlpha: { ...INK.roadAlpha },
+  roadWidth: { ...INK.roadWidth },
+};

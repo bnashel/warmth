@@ -22,7 +22,7 @@
  */
 import * as SunCalc from "suncalc";
 import { CAMERA, SOLAR, WEATHER } from "@/components/Map/tune";
-import { dayModeEnabled, solarDate } from "@/components/Map/solar";
+import { dayModeEnabled, solarDate, worldFromUrl } from "@/components/Map/solar";
 import { sunElevationDeg } from "./sun";
 
 export type WetKind = "rain" | "snow";
@@ -211,11 +211,16 @@ class AtmosphereEngine {
       smoothstep(SOLAR.emberRamp.rise.from, SOLAR.emberRamp.rise.to, elev) *
       (1 - smoothstep(SOLAR.emberRamp.fade.from, SOLAR.emberRamp.fade.to, elev)) *
       SOLAR.strength;
-    // Always-night (constitution rule 1): paper stays 0 so every pigment
-    // path sleeps; the parked day (SOLAR.dayMode / ?daylight=1) restores it.
-    this.sunPaper = dayModeEnabled()
-      ? smoothstep(SOLAR.paperRamp.from, SOLAR.paperRamp.to, elev) * SOLAR.strength
-      : 0;
+    // THE MATERIAL SCALAR. Paper world: the material is CONSTANT (1) — the
+    // sky moves the sheet's TONE via gradeInk, never the material. Night
+    // world: 0 so every pigment path sleeps (constitution rule 1); the
+    // parked day (SOLAR.dayMode / ?daylight=1) ramps it with the sun.
+    this.sunPaper =
+      worldFromUrl() === "paper"
+        ? 1
+        : dayModeEnabled()
+          ? smoothstep(SOLAR.paperRamp.from, SOLAR.paperRamp.to, elev) * SOLAR.strength
+          : 0;
     // The moon (suncalc): illuminated fraction while it's up, fading in
     // across its first ~10° of altitude so moonrise never steps.
     const mp = SunCalc.getMoonPosition(date, CAMERA.initial.latitude, CAMERA.initial.longitude);

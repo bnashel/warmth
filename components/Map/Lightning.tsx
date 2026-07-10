@@ -16,6 +16,7 @@ import { useEffect, useRef } from "react";
 import { atmosphere } from "@/lib/atmosphere";
 import { thunderRumble } from "@/lib/sound";
 import { WEATHER } from "./tune";
+import { inkWeight } from "./solar";
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
@@ -41,7 +42,7 @@ export function Lightning() {
       const a = atmosphere.current;
       const alpha =
         WEATHER.lightning.flashAlphaNight +
-        (WEATHER.lightning.flashAlphaDay - WEATHER.lightning.flashAlphaNight) * a.paper;
+        (WEATHER.lightning.flashAlphaDay - WEATHER.lightning.flashAlphaNight) * inkWeight(a);
       // The bolt lives somewhere along the top of the city, never centered.
       const x = rand(15, 85);
       el.style.background = `radial-gradient(120% 90% at ${x.toFixed(0)}% -10%, rgba(224,232,255,${alpha.toFixed(3)}) 0%, rgba(224,232,255,${(alpha * 0.5).toFixed(3)}) 45%, rgba(224,232,255,0) 75%)`;

@@ -9,9 +9,9 @@ import { MAPBOX_TOKEN } from "@/lib/map";
 import { momentsStore } from "@/lib/momentsStore";
 import { atmosphere } from "@/lib/atmosphere";
 import { setRainLevel } from "@/lib/sound";
-import { CAMERA, CHOREO, DEFAULT_LOOK, FIELD, INK, LABELS, LOOKS, MOTION, PERF, SOLAR, WEATHER, type LookName } from "./tune";
+import { CAMERA, CHOREO, DEFAULT_LOOK, FIELD, INK, LABELS, LOOKS, MOTION, PAPER, PERF, SOLAR, WEATHER, type LookName } from "./tune";
 import { buildStyle } from "./styles";
-import { applyAtmosphereInk } from "./solar";
+import { applyAtmosphereInk, inkWeight, worldFromUrl } from "./solar";
 import { FieldLayer } from "./FieldLayer";
 import { PrecipLayer } from "./PrecipLayer";
 import { buildLabelLayers, loadLabels } from "./neighborhoods";
@@ -160,7 +160,14 @@ export default function MapStage({
     onEntryTapRef.current = onEntryTap;
   }, [onEntryTap]);
 
-  const style = useMemo(() => buildStyle(INK, "ink-and-glow"), []);
+  // THE WORLD: chosen at load (?world=paper) — bone sheet or ink night.
+  const style = useMemo(
+    () =>
+      worldFromUrl() === "paper"
+        ? buildStyle(PAPER, "paper")
+        : buildStyle(INK, "ink-and-glow"),
+    [],
+  );
   // DPR cap: 3× phones render near-identically at 2× on a dark map, for
   // 2.25× less fill — Ben's lag report, honored. Mapbox v3 sizes its canvas
   // through window.devicePixelRatio (its constructor option is vestigial),
@@ -261,7 +268,7 @@ export default function MapStage({
         precip.wet = atmo.wet;
         precip.snow = snow > rain ? 1 : 0;
         precip.windX = atmo.axisX * atmo.wind;
-        precip.paper = atmo.paper;
+        precip.paper = inkWeight(atmo); // graphite by day, pale on slate
       }
 
       // Rain patter follows the wet (snow is a hush — silent by design).
@@ -318,14 +325,14 @@ export default function MapStage({
       const labelsStale =
         !labelCache.current ||
         Math.abs(labelCache.current.zoom - zoom) > 0.02 ||
-        Math.abs(labelCache.current.paper - atmo.paper) > 0.04 ||
+        Math.abs(labelCache.current.paper - inkWeight(atmo)) > 0.04 ||
         labelCache.current.dimsKey !== dimsKey;
       if (labelsStale) {
         labelCache.current = {
           zoom,
           paper: atmo.paper,
           dimsKey,
-          layers: buildLabelLayers(labelData.current, zoom, atmo.paper, boroughDims),
+          layers: buildLabelLayers(labelData.current, zoom, inkWeight(atmo), boroughDims),
         };
       }
       // Trail dots breathe via a time uniform, so while visible they re-set
@@ -477,6 +484,35 @@ export default function MapStage({
           }}
         >
           {lookName}
+        </button>
+      )}
+
+      {/* THE WORLD PILL — dev-only (2026-07-10): night vs paper candidate.
+          The world is chosen at LOAD, so the toggle reloads with ?world=. */}
+      {process.env.NODE_ENV !== "production" && (
+        <button
+          type="button"
+          onClick={() => {
+            const u = new URL(window.location.href);
+            u.searchParams.set("world", worldFromUrl() === "paper" ? "night" : "paper");
+            window.location.href = u.toString();
+          }}
+          style={{
+            position: "absolute",
+            bottom: "max(env(safe-area-inset-bottom), 18px)",
+            right: 130,
+            padding: "6px 14px",
+            borderRadius: 999,
+            border: "1px solid rgba(233,236,244,0.14)",
+            background: "rgba(10,11,15,0.55)",
+            color: "rgba(233,236,244,0.6)",
+            fontSize: 11,
+            letterSpacing: "0.06em",
+            cursor: "pointer",
+            zIndex: 10,
+          }}
+        >
+          {worldFromUrl() === "paper" ? "world: paper" : "world: night"}
         </button>
       )}
 

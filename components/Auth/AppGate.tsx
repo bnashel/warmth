@@ -20,6 +20,14 @@ import { claimLocalJournal, hydrateJournalFromCloud } from "@/lib/journalSync";
  */
 export default function AppGate() {
   const { userId, loading } = useSession();
+  // DEV WALL BYPASS (?wall=off, never in production): the bake-off judging
+  // runs on signed-out phones over LAN, and the visual harness drives a
+  // signed-out browser — both need the city without a session. Cloud
+  // writes stay safely no-op without one; nothing else changes.
+  const wallOff =
+    process.env.NODE_ENV !== "production" &&
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("wall") === "off";
 
   // Start the auth engine early (idempotent). useSession also triggers this,
   // but calling here means the session resolves even before first paint.
@@ -52,7 +60,7 @@ export default function AppGate() {
       {/* While the first session check is resolving, a calm veil — no
           auth-then-app flash. */}
       <AnimatePresence>
-        {loading && (
+        {!wallOff && loading && (
           <motion.div
             key="veil"
             initial={{ opacity: 1 }}
@@ -69,7 +77,9 @@ export default function AppGate() {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>{!loading && !userId && <AuthOverlay key="wall" />}</AnimatePresence>
+      <AnimatePresence>
+        {!wallOff && !loading && !userId && <AuthOverlay key="wall" />}
+      </AnimatePresence>
       {!loading && userId && <AccountChip />}
     </>
   );

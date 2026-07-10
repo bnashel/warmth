@@ -11,7 +11,7 @@
  */
 import type { ExpressionSpecification, Map as MapboxMap } from "mapbox-gl";
 import type { AtmosphereState } from "@/lib/atmosphere";
-import { INK, JOURNEY, SOLAR, WEATHER } from "./tune";
+import { INK, JOURNEY, PAPER, SOLAR, WEATHER } from "./tune";
 import { roadOpacityExpr, roadWidthExpr } from "./styles";
 
 type InkKey = "bg" | "water" | "park" | "building" | "road";
@@ -77,6 +77,36 @@ export function dayModeEnabled(): boolean {
 }
 
 /**
+ * THE PAPER WORLD (style candidate, 2026-07-10 — Ben's pinboard): the city
+ * as a sheet of bone paper, feelings as watercolor pigment, the sheet's
+ * tone following the real sky. Chosen at page LOAD via ?world=paper (no
+ * runtime style swap); judged against the night build before any pivot.
+ * The night world must stay pixel-identical while this exists.
+ */
+export type WorldName = "night" | "paper";
+let worldCache: WorldName | null = null;
+export function worldFromUrl(): WorldName {
+  if (worldCache) return worldCache;
+  if (
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("world") === "paper"
+  ) {
+    return (worldCache = "paper");
+  }
+  return (worldCache = "night");
+}
+
+/**
+ * Chrome ink weight: "how light is the ground under this text/orb?"
+ * Night world: the paper scalar (0 in product; ramps under ?daylight).
+ * Paper world: the SUN — bone noon wants graphite ink, slate midnight
+ * wants pale bone ink. One scalar for labels, loose text, orb, precip.
+ */
+export function inkWeight(a: AtmosphereState): number {
+  return worldFromUrl() === "paper" ? a.light : a.paper;
+}
+
+/**
  * Now — unless the lab set a preview hour. `?solarHour=17.5` seeds it;
  * `window.__warmthSolarHour = 6` steers it live (dev preview + harness).
  */
@@ -108,18 +138,23 @@ function gradeInk(a: AtmosphereState): Record<InkKey, Rgb> {
   // warm charcoal, never the paper — and the canvas READS as night at any
   // hour, so night-only graces (sky-glow, moonlight, snow-lit lift) stay.
   const dayMode = dayModeEnabled();
-  const dayInk = dayMode ? SOLAR.day : SOLAR.nightDay;
-  const emberInk = dayMode ? SOLAR.ember : SOLAR.nightEmber;
-  const lightGround = dayMode ? a.light : 0; // terms that assume a LIGHT ground
-  const nightW = dayMode ? 1 - a.light : 1; // how "night" the canvas reads
-  const mist = hexToRgb(a.paper > 0.5 ? WEATHER.fogMist.day : WEATHER.fogMist.night);
+  // THE PAPER WORLD: the sheet's tone follows the sun — slate midnight →
+  // bone noon, warmed through the mauve dusk. Same grading machinery,
+  // third palette source.
+  const paperWorld = worldFromUrl() === "paper";
+  const baseInk = paperWorld ? SOLAR.paperNight : NIGHT;
+  const dayInk = paperWorld ? SOLAR.paperNoon : dayMode ? SOLAR.day : SOLAR.nightDay;
+  const emberInk = paperWorld ? SOLAR.paperDusk : dayMode ? SOLAR.ember : SOLAR.nightEmber;
+  const lightGround = dayMode || paperWorld ? a.light : 0; // terms that assume a LIGHT ground
+  const nightW = dayMode || paperWorld ? 1 - a.light : 1; // how "night" the canvas reads
+  const mist = hexToRgb(inkWeight(a) > 0.5 ? WEATHER.fogMist.day : WEATHER.fogMist.night);
   const glow = hexToRgb(WEATHER.skyGlow.color);
   const moonInk = hexToRgb(WEATHER.moonLift.color);
   const out = {} as Record<InkKey, Rgb>;
 
   for (const k of INK_KEYS) {
     // The sun's blend: midnight ink → the day tone, warmed toward the ember.
-    let c = hexToRgb(NIGHT[k]);
+    let c = hexToRgb(baseInk[k]);
     if (a.light > 0) c = lerpRgb(c, hexToRgb(dayInk[k]), a.light);
     if (a.ember > 0) c = lerpRgb(c, hexToRgb(emberInk[k]), a.ember);
 
@@ -180,10 +215,14 @@ export function atmosphereInk(a: AtmosphereState): Record<InkKey, string> {
  * above the ground. The zoom blend rides the buildings' own fade ramp.
  */
 function parkNear(ink: Record<InkKey, Rgb>): Rgb {
+  // Built-land blend uses the ACTIVE palette's constants — the paper
+  // sheet has different mass alpha and no plates (hardcoding INK here
+  // made street-zoom parks wrong on bone).
+  const pal = worldFromUrl() === "paper" ? PAPER : INK;
   const effLand = lerpRgb(
-    lerpRgb(ink.bg, ink.building, INK.buildingAlpha),
+    lerpRgb(ink.bg, ink.building, pal.buildingAlpha),
     [233, 236, 244],
-    INK.plateBase,
+    pal.plateBase,
   );
   const clamp255 = (x: number) => Math.min(255, Math.max(0, x));
   return [

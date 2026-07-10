@@ -18,6 +18,12 @@ export function AccountChip() {
   const [email, setEmail] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [open, setOpen] = useState(false);
+  const [stats, setStats] = useState<{
+    entries: number;
+    thisWeek: number;
+    most: Emotion | null;
+    since: string | null;
+  }>({ entries: 0, thisWeek: 0, most: null, since: null });
 
   useEffect(() => {
     void supabase?.auth.getSession().then(({ data }) => {
@@ -28,18 +34,28 @@ export function AccountChip() {
 
   if (!email) return null;
 
-  const own = momentsStore.ownPoints;
-  const weekAgo = Date.now() - 7 * 24 * 3600_000;
-  const thisWeek = own.filter((p) => p.createdAt > weekAgo).length;
-  const counts = new Map<Emotion, number>();
-  for (const p of own) counts.set(p.emotion, (counts.get(p.emotion) ?? 0) + 1);
-  const most = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
-  const since = own.length
-    ? new Date(Math.min(...own.map((p) => p.createdAt))).toLocaleDateString(undefined, {
-        month: "long",
-        day: "numeric",
-      })
-    : null;
+  // Stats are snapshotted when the card OPENS (render must stay pure —
+  // Date.now() and the live store don't belong mid-render).
+  const openCard = () => {
+    const own = momentsStore.ownPoints;
+    const weekAgo = Date.now() - 7 * 24 * 3600_000;
+    const counts = new Map<Emotion, number>();
+    for (const p of own) counts.set(p.emotion, (counts.get(p.emotion) ?? 0) + 1);
+    const most = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    setStats({
+      entries: own.length,
+      thisWeek: own.filter((p) => p.createdAt > weekAgo).length,
+      most: most ? most[0] : null,
+      since: own.length
+        ? new Date(Math.min(...own.map((p) => p.createdAt))).toLocaleDateString(undefined, {
+            month: "long",
+            day: "numeric",
+          })
+        : null,
+    });
+    setOpen(true);
+  };
+  const { entries, thisWeek, most, since } = stats;
 
   const saveName = () => {
     const display_name = name.trim();
@@ -101,9 +117,9 @@ export function AccountChip() {
               {email.toLowerCase()}
             </p>
             <div style={{ display: "flex", gap: 12 }}>
-              {stat("entries", String(own.length))}
+              {stat("entries", String(entries))}
               {stat("this week", String(thisWeek))}
-              {most && stat("most felt", most[0], EMOTION_HUES[most[0]])}
+              {most && stat("most felt", most, EMOTION_HUES[most])}
             </div>
             {since && (
               <p style={{ margin: "16px 0 0", fontSize: 12, color: "rgba(233,236,244,0.4)" }}>
@@ -136,7 +152,7 @@ export function AccountChip() {
         animate={{ opacity: 1, y: 0 }}
         transition={SPRING.settle}
         whileTap={{ scale: 0.94 }}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => (open ? setOpen(false) : openCard())}
         style={{
           width: 34,
           height: 34,
