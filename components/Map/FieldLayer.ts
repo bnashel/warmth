@@ -19,7 +19,8 @@
 import mapboxgl, { type CustomLayerInterface, type Map as MapboxMap } from "mapbox-gl";
 import { EMOTION_HUES, EMOTIONS } from "@/lib/theme";
 import type { LivePoint } from "@/lib/momentsStore";
-import { CAMERA, DEFAULT_LOOK, FIELD, LOOKS, WEATHER, WOVEN } from "./tune";
+import { CAMERA, DEFAULT_LOOK, FIELD, LOOKS, PIGMENT, WEATHER, WOVEN } from "./tune";
+import { worldFromUrl } from "./solar";
 
 /* ---------------- OKLab (Björn Ottosson, via components/Orb/oklch.ts) --- */
 
@@ -217,6 +218,10 @@ uniform vec2 uOverlap;    // genuine-overlap gate: smoothstep from, to
 // CLOSE-ZOOM GRAIN: geographic texture (mercator-anchored — meters, not
 // pixels) that resolves as you approach. amp arrives pre-gated by zoom.
 uniform vec2 uGrain;      // amp (zoom-gated), 1/cell in mercator units
+// THE PAPER WORLD pigment (all zero/inert in the night world):
+uniform vec4 uPig;        // OKLab L, chroma push, stain cap, stain slope
+uniform vec2 uGranP;      // granulation amp (zoom-gated), 1/cell (mercator)
+uniform vec4 uGranEdge;   // wet-edge band: in.from, in.to, out.from, out.to
 uniform vec2 uMercAnchor; // fixed NYC anchor — keeps fbm args small/stable
 out vec4 fragColor;
 
@@ -505,11 +510,18 @@ void main() {
   // uGain carries paperness × fade as stain strength. Pigment is the same
   // OKLab hue, dropped to pigment depth so it reads saturated on white.
   if (uMode == 2) {
-    // Pigment depth is capped on purpose: heavily-pooled spots must read as
-    // deeper watercolor, never a bruise — but the wash must still carry the
-    // city's feeling at a glance (design-review: stain to .58, pigment L .64).
-    vec3 pig = linearToSrgb(oklabToLinear(vec3(0.64, lab.y * 1.35, lab.z * 1.35)));
-    float stain = min(0.58, max(b, 0.0) * 0.8) * uGain;
+    // THE PAPER WORLD's pigment (uPig: L, chroma, cap, slope — tune.ts
+    // PIGMENT). Depth is capped on purpose: heavily-pooled spots read as
+    // deeper watercolor, never a bruise.
+    // GRANULATION: real watercolor granules — the same mercator-anchored
+    // fbm trick as uGrain above, finer cells (uGranP.y), loudest at the
+    // wash's WET EDGE (the band where b passes from skirt to body) and
+    // rising as you approach (uGranP.x rides the grain zoom smoothstep).
+    float gp = fbm((merc - uMercAnchor) * uGranP.y);
+    float wetEdge = smoothstep(uGranEdge.x, uGranEdge.y, b) * (1.0 - smoothstep(uGranEdge.z, uGranEdge.w, b));
+    float gran = 1.0 + uGranP.x * (gp - 0.5) * 2.0 * mix(0.3, 1.0, wetEdge);
+    vec3 pig = linearToSrgb(oklabToLinear(vec3(uPig.x, lab.y * uPig.y, lab.z * uPig.y)));
+    float stain = min(uPig.z, max(b, 0.0) * uPig.w * gran) * uGain;
     fragColor = vec4(mix(vec3(1.0), pig, stain), 1.0);
     return;
   }
@@ -581,6 +593,11 @@ export class FieldLayer implements CustomLayerInterface {
    *  MapStage every frame from the atmosphere; crossfades the two ways of
    *  painting. */
   paper = 0;
+
+  /** THE PAPER WORLD: the sun (0..1) — drives the slate-hours pigment
+   *  luminance; set from MapStage each tick. */
+  sunLight = 0;
+  private paperWorld = worldFromUrl() === "paper";
 
 
   /** THE LIVING ATMOSPHERE — plain fields mutated in place from MapStage
@@ -1106,6 +1123,19 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform2f(u("uGrain"), grainAmp, this.grainScale);
     gl.uniform2f(u("uMercAnchor"), this.mercAnchor[0], this.mercAnchor[1]);
     gl.uniform3f(u("uHeart"), FIELD.heart.from, FIELD.heart.to, FIELD.heart.lift);
+    // THE PAPER WORLD pigment: granulation rides the SAME zoom smoothstep
+    // as the grain (the block-by-block soak on approach comes free); the
+    // whole group is inert unless the pigment pass runs (paper > 0.01).
+    const gAmp = PIGMENT.gran.amp * (1 + (PIGMENT.gran.zoomBoost - 1) * gt * gt * (3 - 2 * gt));
+    gl.uniform4f(u("uPig"), PIGMENT.L, PIGMENT.chroma, PIGMENT.cap, PIGMENT.slope);
+    gl.uniform2f(u("uGranP"), mf.ok ? gAmp : 0, 1 / (PIGMENT.gran.cellM * this.meterMerc));
+    gl.uniform4f(
+      u("uGranEdge"),
+      PIGMENT.gran.edgeIn[0],
+      PIGMENT.gran.edgeIn[1],
+      PIGMENT.gran.edgeOut[0],
+      PIGMENT.gran.edgeOut[1],
+    );
   }
 
   render(gl: WebGL2RenderingContext) {
@@ -1138,6 +1168,18 @@ export class FieldLayer implements CustomLayerInterface {
       gl.uniform1f(u("uGain"), this.paper * this.fade);
       gl.blendFunc(gl.ZERO, gl.SRC_COLOR);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+      // SLATE HOURS (paper world only): on the deep-slate sheet the
+      // multiply alone goes mute — the pigments pick up a faint
+      // luminance, crossfaded by how deep the night is. Screen blend:
+      // asymptotic toward white, never reaching it (rule 3 holds).
+      const slate = this.paperWorld ? 1 - this.sunLight : 0;
+      if (slate > 0.01) {
+        gl.uniform1i(u("uMode"), 0);
+        gl.uniform1f(u("uGain"), FIELD.gain * this.fade * PIGMENT.slateLum * slate);
+        gl.blendFunc(gl.ONE_MINUS_DST_COLOR, gl.ONE);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
     }
 
     // Pass 1 — streetlight: field × base map (dst is the pure ink city).

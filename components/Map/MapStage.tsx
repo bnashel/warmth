@@ -249,6 +249,7 @@ export default function MapStage({
       if (field) {
         field.fade = 1 - viewMix.current;
         field.paper = atmo.paper;
+        field.sunLight = atmo.light; // paper world: slate-hours pigment luminance
         // The wind rides ON TOP of the active look's base shape (bake-off:
         // the look itself is swapped via ?look= / the dev pill).
         const base = LOOKS[lookRef.current];

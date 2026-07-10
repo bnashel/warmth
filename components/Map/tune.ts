@@ -555,6 +555,42 @@ export const DEFAULT_LOOK: LookName = "still-water";
 /* into translucent tiers with a breath of edge-darkening at every     */
 /* contour (tiers) — depth from stacked layers, matte, never glassy.   */
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* THE PAPER WORLD's PIGMENT (?world=paper) — feelings soak the sheet: */
+/* saturation instead of luminance, watercolor physics throughout.     */
+/* All inert in the night world (the pigment pass never runs there).   */
+/* ------------------------------------------------------------------ */
+export const PIGMENT = {
+  /** Pigment color: OKLab L + chroma push. L below the old 0.64 and
+   *  chroma above 1.35 = wetter, fresher pigment (the old values sent
+   *  joy's lemon toward olive on bone). */
+  L: 0.6,
+  chroma: 1.5,
+  /** Stain ceiling + slope (was 0.58/0.8 literals): emotionally loud,
+   *  never neon, never a bruise. */
+  cap: 0.66,
+  slope: 0.9,
+  /** GRANULATION: watercolor granules in mercator METERS — pigment
+   *  settling into the sheet's tooth, loudest at a wash's wet edge
+   *  (the b-band below), rising as you approach (rides the grain zoom
+   *  smoothstep ×zoomBoost). */
+  gran: {
+    amp: 0.38,
+    cellM: 90,
+    edgeIn: [0.03, 0.14] as const,
+    edgeOut: [0.4, 0.7] as const,
+    zoomBoost: 1.8,
+  },
+  /** SLATE LUMINANCE: at slate hours the pigments pick up faint light —
+   *  a screen-blend whisper crossfaded by (1 − sun). Ink under moonlight. */
+  slateLum: 0.2,
+  /** THE INK DROP (commit 3): a commit blooms as spreading pigment.
+   *  own = ring strength for YOUR commit; fill = the blot behind the
+   *  front; rim = the darker wet edge pooling ahead of it; labPull =
+   *  how hard the drop drags local hue toward its feeling. */
+  drop: { own: 2.4, ringStain: 1.6, fill: 0.5, rim: 0.45, labPull: 0.6 },
+} as const;
+
 export const WOVEN = {
   /** Thread interleave at emotion fronts: amp = how far a thread can
    *  tilt the local vote; scale = threads across the screen width. */
