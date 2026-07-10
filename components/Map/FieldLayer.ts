@@ -183,6 +183,7 @@ uniform vec4 uRipple;     // living-water: amp, rings, speed, 0
 // z = age 0..1, w = gain. Hue rides along so a ring crossing dark land
 // still carries its feeling's color.
 uniform int uArrN;
+uniform vec4 uDrop;      // ink drop: fill gain (0=night), rim gain, spare, labPull
 uniform vec4 uArr[8];
 uniform vec3 uArrLab[8];
 uniform vec2 uArrShape;   // span (mercator), 1/width (mercator)
@@ -311,17 +312,29 @@ void main() {
   // Arrival rings first: they must live even over land the darkness
   // budget keeps night — a raindrop is visible on still water.
   float ringSum = 0.0;
+  float ringFill = 0.0;
+  float ringRim = 0.0;
   vec3 ringLab = vec3(0.0);
   for (int i = 0; i < 8; i++) {
     if (i >= uArrN) break;
     vec4 rp = uArr[i];
     float front = rp.z * uArrShape.x;
     float dw = (length(merc - rp.xy) - front) * uArrShape.y;
-    float ring = exp(-dw * dw) * (1.0 - rp.z) * (1.0 - rp.z) * rp.w;
+    float fade2 = (1.0 - rp.z) * (1.0 - rp.z);
+    float ring = exp(-dw * dw) * fade2 * rp.w;
     ringSum += ring;
     ringLab += ring * uArrLab[i];
+    // THE INK DROP (pigment world only — uDrop zeroed at night): a filled
+    // blot spreading BEHIND the front, drying as it ages, and a darker wet
+    // rim pooling just ahead of it. Real watercolor arrival physics.
+    if (uDrop.x > 0.0) {
+      float fill = (1.0 - smoothstep(-1.5, 0.5, dw)) * fade2 * rp.w;
+      ringFill += fill;
+      ringRim += exp(-pow(dw - 0.9, 2.0) * 2.2) * fade2 * rp.w;
+      ringLab += fill * uDrop.w * uArrLab[i];
+    }
   }
-  if (total < 0.002 && ringSum < 0.004) discard;
+  if (total < 0.002 && ringSum + ringFill < 0.004) discard;
 
   // THE MUD RULE: hues mix by dominance share (I^p), never sum. Any local
   // majority snaps the area to its hue and fronts blend over a narrow band.
@@ -482,9 +495,10 @@ void main() {
 
   // THE PULSE OF ARRIVAL lands on top: the ring adds its light and pulls
   // the local hue toward its feeling's color while it passes.
-  if (ringSum > 0.0005) {
-    b += ringSum;
-    lab = mix(lab, ringLab / max(ringSum, 1e-4), clamp(ringSum / (ringSum + max(b - ringSum, 0.02)), 0.0, 0.85));
+  if (ringSum + ringFill > 0.0005) {
+    float ringW = ringSum + uDrop.x * ringFill;
+    b += ringW;
+    lab = mix(lab, ringLab / max(ringSum + uDrop.w * ringFill, 1e-4), clamp(ringW / (ringW + max(b - ringW, 0.02)), 0.0, 0.85));
     lab.x = min(lab.x, 0.8);
   }
 
@@ -521,7 +535,9 @@ void main() {
     float wetEdge = smoothstep(uGranEdge.x, uGranEdge.y, b) * (1.0 - smoothstep(uGranEdge.z, uGranEdge.w, b));
     float gran = 1.0 + uGranP.x * (gp - 0.5) * 2.0 * mix(0.3, 1.0, wetEdge);
     vec3 pig = linearToSrgb(oklabToLinear(vec3(uPig.x, lab.y * uPig.y, lab.z * uPig.y)));
-    float stain = min(uPig.z, max(b, 0.0) * uPig.w * gran) * uGain;
+    // The wet rim pools DEEPER than the standing cap (pigment gathers at
+    // the drop's edge), hard-clamped well short of a bruise.
+    float stain = min(min(uPig.z, max(b, 0.0) * uPig.w * gran) + uDrop.y * ringRim, 0.85) * uGain;
     fragColor = vec4(mix(vec3(1.0), pig, stain), 1.0);
     return;
   }
@@ -646,19 +662,19 @@ export class FieldLayer implements CustomLayerInterface {
   private meterMerc = 1e-8; // meters → mercator units at the NYC anchor
   /** THE PULSE OF ARRIVAL — live rings (≤8): real commits auto-ripple on
    *  new-id detection; the ambient city re-pulses via addRippleLngLat. */
-  private ripples: { x: number; y: number; start: number; ch: number }[] = [];
+  private ripples: { x: number; y: number; start: number; ch: number; s: number }[] = [];
   private knownIds = new Set<string>();
 
   get ripplesActive(): boolean {
     return this.ripples.length > 0;
   }
 
-  addRippleLngLat(lng: number, lat: number, emotion: string) {
+  addRippleLngLat(lng: number, lat: number, emotion: string, strength = 1) {
     const mc = mapboxgl.MercatorCoordinate.fromLngLat({ lng, lat });
     const now = performance.now();
     this.ripples = this.ripples.filter((r) => now - r.start < FIELD.ripple.lifeMs);
     if (this.ripples.length >= 8) this.ripples.shift();
-    this.ripples.push({ x: mc.x, y: mc.y, start: now, ch: CHANNEL[emotion] ?? 0 });
+    this.ripples.push({ x: mc.x, y: mc.y, start: now, ch: CHANNEL[emotion] ?? 0, s: strength });
     this.map?.triggerRepaint();
   }
 
@@ -720,7 +736,14 @@ export class FieldLayer implements CustomLayerInterface {
       if (!this.knownIds.has(p.id)) {
         this.knownIds.add(p.id);
         if (!p.seed && performance.now() - p.born < 600) {
-          this.addRippleLngLat(p.position[0], p.position[1], p.emotion);
+          // In the paper world a real commit is THE INK DROP — it hits
+          // the sheet harder than any ambient pulse.
+          this.addRippleLngLat(
+            p.position[0],
+            p.position[1],
+            p.emotion,
+            this.paperWorld ? PIGMENT.drop.own : 1,
+          );
         }
       }
     }
@@ -1062,7 +1085,7 @@ export class FieldLayer implements CustomLayerInterface {
         arr[i * 4] = r.x;
         arr[i * 4 + 1] = r.y;
         arr[i * 4 + 2] = (nowR - r.start) / FIELD.ripple.lifeMs;
-        arr[i * 4 + 3] = FIELD.ripple.gain;
+        arr[i * 4 + 3] = FIELD.ripple.gain * r.s;
         labArr[i * 3] = this.hueLab[r.ch * 3];
         labArr[i * 3 + 1] = this.hueLab[r.ch * 3 + 1];
         labArr[i * 3 + 2] = this.hueLab[r.ch * 3 + 2];
@@ -1074,6 +1097,14 @@ export class FieldLayer implements CustomLayerInterface {
       u("uArrShape"),
       FIELD.ripple.spanM * this.meterMerc,
       1 / (FIELD.ripple.widthM * this.meterMerc),
+    );
+    // THE INK DROP dials — all zero in the night world (bit-identical path).
+    gl.uniform4f(
+      u("uDrop"),
+      this.paperWorld ? PIGMENT.drop.fill : 0,
+      this.paperWorld ? PIGMENT.drop.rim : 0,
+      0,
+      this.paperWorld ? PIGMENT.drop.labPull : 0,
     );
     gl.uniform4f(u("uRipple"), lk.ripple.amp, lk.ripple.rings, lk.ripple.speed, 0);
     gl.uniform1f(u("uBand"), lk.band);

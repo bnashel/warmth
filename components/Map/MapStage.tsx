@@ -447,6 +447,9 @@ export default function MapStage({
           });
           // Lab-only hook so the screenshot/perf harness can set exact cameras.
           (window as unknown as { __warmthMap?: typeof map }).__warmthMap = map;
+          // Harness hook: the ink drop is testable without driving the orb.
+          (window as unknown as { __warmthField?: FieldLayer | null }).__warmthField =
+            fieldRef.current;
           loaded.current = true;
           onMapReady?.(map);
         }}
