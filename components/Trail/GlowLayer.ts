@@ -123,6 +123,24 @@ void main(void) {
     // stale while public moved; now both live at the held-breath pace).
     heart *= 1.0 + 0.12 * sin(6.2831853 * glow.timeSec / (glow.periodSec * 1.6) + p4);
 
+    // PIGMENT EMBER (the paper world's journal): the same forever-shape
+    // silhouette, SOAKED into the sheet instead of lit. The watercolor
+    // wash runs on the undulated radius; the heart INVERTS into deeper
+    // pooled pigment — a memory soaks in. PIGMENT_STAIN blend-min keeps
+    // repeat places deepening, never bruising.
+    if (glow.pigment > 0.0) {
+      vec3 pigE = mix(vFillColor.rgb, vFillColor.rgb * vFillColor.rgb, 0.65);
+      float washE = smoothstep(1.0, glow.stainEdge, rE);
+      float poolE = 1.0 + glow.stainRing * smoothstep(glow.stainEdge * 0.55, glow.stainEdge, rE)
+                  + glow.stainHeart * heart;
+      float sE = (glow.peakBase + glow.peakPerIntensity * w) * glow.gain * washE * poolE;
+      sE *= smoothstep(0.0, 0.12, w);
+      float stainE = 0.9 * (1.0 - exp(-max(sE, 0.0) / 0.5)) * glow.pigment;
+      fragColor = vec4(mix(vec3(1.0), pigE, stainE), 1.0);
+      DECKGL_FILTER_COLOR(fragColor, geometry);
+      return;
+    }
+
     if (glow.ember > 1.5) {
       // HEART PASS (additive, deliberately dim): where life stacks embers
       // at one place — home, work — the repeats WARM instead of smearing.

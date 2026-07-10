@@ -351,6 +351,7 @@ export default function MapStage({
               // Tap a constellation: descend toward its sparks.
               (lngLat) =>
                 map.easeTo({ center: lngLat, zoom: Math.min(zoom + 2.4, 14), duration: 900 }),
+              inkWeight(atmo), // threads + cues ink themselves by the ground
             )
           : [];
         // Trail first: labels stay readable above your dots.

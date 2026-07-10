@@ -354,7 +354,10 @@ export const TRAIL = {
    *  short hand-soft feather (0.74 read as blur — Eli), pigment pooling
    *  `ring` deeper at the rim, and a `heart` faintly lighter at the center
    *  (water pushes pigment outward as it dries) so it never reads as a disc. */
-  stain: { edge: 0.88, ring: 0.28, radiusScale: 0.85, gainBoost: 1.25, heart: 0.12 },
+  stain: { edge: 0.88, ring: 0.28, radiusScale: 0.85, gainBoost: 1.25, heart: 0.12,
+    /** PIGMENT EMBER (paper world): the heart pools DEEPER, not lighter —
+     *  a memory soaks in. */
+    heartPool: 0.3 },
   /** THE EMBER (round 2, item 3 — the agreed middle between candle and
    *  ink). Primary private rendering: an id-seeded sea-glass silhouette
    *  (2-4 gentle undulations, ±~18%, FROZEN forever — a memory has a

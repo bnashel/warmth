@@ -316,6 +316,9 @@ export function buildTrailLayers(
   paper = 0,
   onTapEntry?: (id: string) => void,
   onTapCluster?: (lngLat: [number, number]) => void,
+  /** Chrome ink weight (inkWeight upstream): 0 = pale ink on dark ground,
+   *  1 = graphite on light ground. Threads + cues follow it. */
+  ink = 0,
 ) {
   // DEV ONLY (`?journal=test`): the dense judging set — ~60 moments over
   // 3 months, home + work clusters + scatter. Never touches the store.
@@ -408,6 +411,10 @@ export function buildTrailLayers(
     radiusMaxPixels: TRAIL.maxRadiusPx,
   };
   const night = 1 - paper;
+  // Threads and cues live in BOTH worlds; their ink follows the ground.
+  const cueStrength = Math.max(night, paper);
+  const inkMix = (a: number, b: number) => Math.round(a + (b - a) * ink);
+  const threadColor: [number, number, number] = [inkMix(233, 52), inkMix(236, 58), inkMix(244, 70)];
   const layers = [];
   // Stains BEFORE glow (same pass order as the field): through twilight the
   // glow must add on top of the stained paper, never be darkened by it.
@@ -416,35 +423,51 @@ export function buildTrailLayers(
       new EmotionGlowLayer({
         id: "trail-stains",
         ...shared,
-        // Pigment pools, light spills: the stain is a flat wash with a
-        // defined edge and a pooled rim (see GlowLayer's pigment path) on
-        // a smaller quad — a diary mark, not an out-of-focus glow.
+        // THE PIGMENT EMBER (paper world): the forever-shape silhouette
+        // soaked into the sheet — wash on the undulated radius, heart as
+        // DEEPER pooled pigment. Tappable: the journal opens from a stain
+        // (the old flat stains never were — round-4 fix).
+        getSeed,
+        pickable: true,
+        onClick: (info: { object?: LivePoint }) => {
+          if (info.object && onTapEntry) onTapEntry(info.object.id);
+          return true;
+        },
         radiusScale: shared.radiusScale * TRAIL.stain.radiusScale,
         light: {
           gain: TRAIL.gain * TRAIL.stain.gainBoost * fade,
           pigment: paper,
+          ember: 1,
+          emberEdge: TRAIL.ember.edge,
+          emberHeartR: TRAIL.ember.heartR,
+          emberHeartOff: TRAIL.ember.heartOff,
           stainEdge: TRAIL.stain.edge,
           stainRing: TRAIL.stain.ring,
-          stainHeart: TRAIL.stain.heart,
+          stainHeart: TRAIL.stain.heartPool,
         },
         parameters: PIGMENT_STAIN,
       }),
     );
   }
-  if (night > 0.01) {
+  {
     // THE THREAD (item 4): one continuous quiet path through time,
     // revealed on entering the private view, then gone. Drawn first so
-    // every mark sits above its own history.
+    // every mark sits above its own history. Graphite on paper, pale on
+    // ink — and a touch MORE present on paper (thin lines vanish on bone).
     const reveal = threadReveal(fade, timeSec);
     if (data.length > 1 && reveal > 0.01) {
-      const alpha = Math.round(255 * TRAIL.thread.alpha * reveal * fade * night);
+      // Graphite on bone carries FAR more contrast than pale-on-ink at the
+      // same alpha — the paper thread runs quieter, not louder.
+      const alpha = Math.round(
+        255 * TRAIL.thread.alpha * reveal * fade * cueStrength * (1 - 0.35 * ink),
+      );
       layers.push(
         new PathLayer({
           id: "journal-thread",
           data: [{ path: cachedThread(data, version) }],
           getPath: (d: { path: [number, number][] }) => d.path,
-          getColor: [233, 236, 244, alpha] as [number, number, number, number],
-          updateTriggers: { getColor: [version, alpha] },
+          getColor: [...threadColor, alpha] as [number, number, number, number],
+          updateTriggers: { getColor: [version, alpha, Math.round(ink * 32)] },
           widthUnits: "pixels" as const,
           getWidth: TRAIL.thread.widthPx,
           widthMinPixels: 1.5,
@@ -455,11 +478,10 @@ export function buildTrailLayers(
         }),
       );
     }
-    // THE MEMORY MARKS. Default: THE EMBER (round 2, item 3) — an
-    // id-seeded sea-glass silhouette frozen forever, a matte body whose
-    // overlaps DEEPEN, and a dim additive heart so repeat places WARM.
+    // THE MEMORY MARKS (night worlds only — on paper the pigment-ember
+    // stains above ARE the marks). Default: THE EMBER (round 2, item 3).
     // `?trail=splat`: the old matte-gem, kept only for the judging.
-    if (trailRenderer() === "ember") {
+    if (night > 0.01 && trailRenderer() === "ember") {
       layers.push(
         new EmotionGlowLayer({
           id: "journal-ember-body",
@@ -497,7 +519,7 @@ export function buildTrailLayers(
           parameters: SCREEN_LIGHT,
         }),
       );
-    } else {
+    } else if (night > 0.01) {
       layers.push(
         new EmotionGlowLayer({
           id: "journal-sparks",
@@ -531,11 +553,11 @@ export function buildTrailLayers(
           getPosition: (d) => d.position,
           getText: () => "now",
           getSize: 11,
-          getColor: (d) => [d.hue[0], d.hue[1], d.hue[2], Math.round(190 * fade * night)],
+          getColor: (d) => [d.hue[0], d.hue[1], d.hue[2], Math.round(190 * fade * cueStrength)],
           getPixelOffset: (d: LivePoint) => [0, -(getTrailRadius(d) + 14)] as [number, number],
           updateTriggers: {
             getText: version,
-            getColor: [version, Math.round(fade * night * 32)],
+            getColor: [version, Math.round(fade * cueStrength * 32)],
             getPixelOffset: version,
           },
           fontFamily: "Inter, system-ui, sans-serif",
