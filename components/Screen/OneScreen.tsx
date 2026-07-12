@@ -1,5 +1,6 @@
 "use client";
 
+import { devUnlocked } from "@/lib/dev";
 import { useEffect, useRef, useState } from "react";
 import { Inter } from "next/font/google";
 import { AnimatePresence, motion, useMotionValue, useTransform } from "framer-motion";
@@ -169,7 +170,7 @@ export default function OneScreen() {
     // seeded field on both worlds even though the real DB has data now —
     // a handful of real cells reads as an empty city in a style judgment.
     const forceSeed =
-      process.env.NODE_ENV !== "production" &&
+      devUnlocked() &&
       typeof window !== "undefined" &&
       new URLSearchParams(window.location.search).get("field") === "seed";
 

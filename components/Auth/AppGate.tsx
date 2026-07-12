@@ -1,5 +1,6 @@
 "use client";
 
+import { devUnlocked } from "@/lib/dev";
 import { useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import OneScreen from "@/components/Screen/OneScreen";
@@ -25,7 +26,7 @@ export default function AppGate() {
   // signed-out browser — both need the city without a session. Cloud
   // writes stay safely no-op without one; nothing else changes.
   const wallOff =
-    process.env.NODE_ENV !== "production" &&
+    devUnlocked() &&
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("wall") === "off";
 

@@ -10,12 +10,13 @@
  * code paths of its own, and the whole component renders null in production
  * (same gate as /lab and /maplab), so it never ships.
  */
+import { devUnlocked } from "@/lib/dev";
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { SPRING } from "@/lib/theme";
 import { atmosphere, type AtmosphereOverride } from "@/lib/atmosphere";
 
-const DEV = process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_LABS === "1";
+const DEV = devUnlocked() || process.env.NEXT_PUBLIC_LABS === "1";
 
 /** Sun presets (NYC summer): hour of day for window.__warmthSolarHour. */
 const TIMES: { key: string; label: string; hour: number | null }[] = [

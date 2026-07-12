@@ -1,5 +1,6 @@
 "use client";
 
+import { devUnlocked } from "@/lib/dev";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Map, useControl } from "react-map-gl/mapbox";
 import { MapboxOverlay } from "@deck.gl/mapbox";
@@ -466,7 +467,7 @@ export default function MapStage({
       {/* THE LOOK PILL — dev-only bake-off switcher (2026-07-09): taps
           cycle the four looks live so Ben + Eli can judge on phones.
           Dies in production; the winner gets hardwired. */}
-      {process.env.NODE_ENV !== "production" && (
+      {devUnlocked() && (
         <button
           type="button"
           onClick={() => {
@@ -494,7 +495,7 @@ export default function MapStage({
 
       {/* THE WORLD PILL — dev-only (2026-07-10): night vs paper candidate.
           The world is chosen at LOAD, so the toggle reloads with ?world=. */}
-      {process.env.NODE_ENV !== "production" && (
+      {devUnlocked() && (
         <button
           type="button"
           onClick={() => {
