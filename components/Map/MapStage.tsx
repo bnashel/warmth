@@ -1,6 +1,5 @@
 "use client";
 
-import { devUnlocked } from "@/lib/dev";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Map, useControl } from "react-map-gl/mapbox";
 import { MapboxOverlay } from "@deck.gl/mapbox";
@@ -10,10 +9,12 @@ import { MAPBOX_TOKEN } from "@/lib/map";
 import { momentsStore } from "@/lib/momentsStore";
 import { atmosphere } from "@/lib/atmosphere";
 import { setRainLevel } from "@/lib/sound";
-import { CAMERA, CHOREO, DEFAULT_LOOK, FIELD, INK, LABELS, LOOKS, MOTION, PAPER, PERF, SOLAR, WEATHER, type LookName } from "./tune";
+import { CAMERA, CHOREO, FIELD, INK, LABELS, LOOKS, MOTION, PAPER, PERF, SOLAR, WEATHER } from "./tune";
 import { buildStyle } from "./styles";
-import { applyAtmosphereInk, inkWeight, worldFromUrl } from "./solar";
+import { applyAtmosphereInk, inkWeight, setWorld, worldFromUrl } from "./solar";
 import { FieldLayer } from "./FieldLayer";
+import { GalleryFieldLayer } from "./GalleryFieldLayer";
+import { currentLook, onLookChange } from "./lookState";
 import { PrecipLayer } from "./PrecipLayer";
 import { buildLabelLayers, loadLabels } from "./neighborhoods";
 import { buildTrailLayers } from "@/components/Trail/glow";
@@ -45,6 +46,7 @@ export default function MapStage({
   view = "public",
   onMapReady,
   onEntryTap,
+  onGapTap,
 }: {
   /** public = the field (everyone); private = your journal (sparks, only you). */
   view?: "public" | "private";
@@ -52,10 +54,13 @@ export default function MapStage({
   onMapReady?: (map: MapboxMap) => void;
   /** Private view: a spark was tapped — the screen opens its memory. */
   onEntryTap?: (id: string) => void;
+  /** Private view (thread looks): an aurora connection was tapped — the
+   *  screen whispers the time between its two memories (gapMs, x, y). */
+  onGapTap?: (gapMs: number, x: number, y: number) => void;
 }) {
   const mapRef = useRef<MapRef | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
-  const fieldRef = useRef<FieldLayer | null>(null);
+  const fieldRef = useRef<FieldLayer | GalleryFieldLayer | null>(null);
   const precipRef = useRef<PrecipLayer | null>(null);
   const labelData = useRef<Awaited<ReturnType<typeof loadLabels>>>([]);
   const labelCache = useRef<{
@@ -67,27 +72,81 @@ export default function MapStage({
   const dataVersion = useRef(-1);
   const loaded = useRef(false);
   const [rotated, setRotated] = useState(false);
-  // THE BAKE-OFF LOOK (2026-07-09): ?look=still-water|living-water|ink|aurora
-  // seeds it; the dev pill cycles it live. The winner will be hardwired.
-  const [lookName, setLookName] = useState<LookName>(() => {
-    if (typeof window !== "undefined") {
-      const p = new URLSearchParams(window.location.search).get("look");
-      if (p && p in LOOKS) return p as LookName;
-    }
-    return DEFAULT_LOOK;
-  });
-  const lookRef = useRef<LookName>(lookName);
   const nextPulse = useRef(0);
-  useEffect(() => {
-    lookRef.current = lookName;
-    const field = fieldRef.current;
-    if (field) {
-      // Full preset swap (band/shimmer/weave/ripple/cellM don't ride the
-      // per-frame wind feed) — instant: same shader, new uniform values.
-      Object.assign(field.look, structuredClone(LOOKS[lookName]));
-      mapRef.current?.getMap().triggerRepaint();
+  // RECENTER (Eli, 07-10): Apple-Maps-style chip — appears once you've
+  // wandered from the SETTLED home view (bounds may clamp the request).
+  const [away, setAway] = useState(false);
+  const homeRef = useRef<{ lng: number; lat: number; zoom: number }>({
+    lng: CAMERA.initial.longitude,
+    lat: CAMERA.initial.latitude,
+    zoom: CAMERA.initial.zoom,
+  });
+  // THE ONE GALLERY (merge, 07-13): every look from both trunks lives in
+  // looks.ts; a switch is a DISSOLVE (rule: nothing pops) — breathe down
+  // ~180ms, swap engine/world/dials at the trough, breathe back.
+  const lookSwap = useRef<{ start: number; swapped: boolean } | null>(null);
+  useEffect(
+    () =>
+      onLookChange(() => {
+        lookSwap.current = { start: performance.now(), swapped: false };
+      }),
+    [],
+  );
+  /** Mount the engine the CURRENT look wants (pond = Ben's, gallery =
+   *  Eli's). A fresh instance every swap: cheap at the dissolve trough,
+   *  and Ben's pigment path re-reads the world on construction. */
+  const mountField = (map: MapboxMap, beforeId?: string) => {
+    try {
+      // Self-healing: custom layers never appear in getStyle().layers, so
+      // existence must be asked directly — a stale field is removed first.
+      if (map.getLayer("emotion-field")) map.removeLayer("emotion-field");
+      const lk = currentLook();
+      const field = lk.engine === "pond" ? new FieldLayer() : new GalleryFieldLayer();
+      if (field instanceof FieldLayer) {
+        Object.assign(field.look, structuredClone(LOOKS[lk.pond ?? "still-water"]));
+        field.paper = atmosphere.current.paper; // day must survive the swap
+      }
+      field.fade = fieldRef.current?.fade ?? 1;
+      // The field sits under the falling weather (and deck's labels).
+      map.addLayer(field, beforeId ?? (map.getLayer("precip") ? "precip" : undefined));
+      fieldRef.current = field;
+      dataVersion.current = -1; // tick re-feeds kernels next frame
+    } catch (err) {
+      console.error("warmth: field engine failed to start", err);
     }
-  }, [lookName]);
+  };
+  /** The trough of the dissolve: re-stand the field — and, when the look
+   *  crosses worlds (night ↔ paper), rebuild the base style live. */
+  const applyLookSwap = (map: MapboxMap) => {
+    const want = currentLook().world ?? "night";
+    if (want !== worldFromUrl()) {
+      setWorld(want);
+      fieldRef.current = null; // the style swap drops the custom layers
+      precipRef.current = null;
+      labelCache.current = null;
+      // diff:false forces a FULL style load — diffing can silently skip
+      // the style.load event and strand the custom layers (review find).
+      map.setStyle(
+        buildStyle(want === "paper" ? PAPER : INK, want === "paper" ? "paper" : "ink-and-glow"),
+        { diff: false } as Parameters<MapboxMap["setStyle"]>[1],
+      );
+      map.once("style.load", () => {
+        mountField(map);
+        try {
+          if (!map.getLayer("precip")) {
+            const p = new PrecipLayer();
+            map.addLayer(p);
+            precipRef.current = p;
+          }
+        } catch (err) {
+          console.error("warmth: precip failed to restart", err);
+        }
+        applyAtmosphereInk(map, atmosphere.current);
+      });
+    } else {
+      mountField(map); // self-removes the old engine, lands under precip
+    }
+  };
   // 0 = ink night, 1 = paper day (daylight mode) — refreshed on solar apply;
   // the field trades glow for pigment, labels trade white for graphite.
   const paperRef = useRef(0);
@@ -160,6 +219,10 @@ export default function MapStage({
   useEffect(() => {
     onEntryTapRef.current = onEntryTap;
   }, [onEntryTap]);
+  const onGapTapRef = useRef(onGapTap);
+  useEffect(() => {
+    onGapTapRef.current = onGapTap;
+  }, [onGapTap]);
 
   // THE WORLD: chosen at load (?world=paper) — bone sheet or ink night.
   const style = useMemo(
@@ -247,22 +310,58 @@ export default function MapStage({
       // cloud/rain/snow never bend or dim the emotion itself.
       const rain = atmo.wetKind === "rain" ? atmo.wet : 0;
       const snow = atmo.wetKind === "snow" ? atmo.wet : 0;
+      // The gallery dissolve: breathe down (180ms), swap at the trough
+      // (engine, dials, and — if the look crosses — the whole world),
+      // breathe back (220ms). ease = smoothstep on both slopes.
+      let lookDim = 1;
+      const swap = lookSwap.current;
+      if (swap) {
+        const tDown = (now - swap.start) / 180;
+        if (tDown < 1) {
+          lookDim = 1 - tDown;
+        } else if (!swap.swapped) {
+          swap.swapped = true;
+          applyLookSwap(map);
+          lookDim = 0;
+        } else {
+          const tUp = (now - swap.start - 180) / 220;
+          lookDim = Math.min(1, tUp);
+          if (tUp >= 1) lookSwap.current = null;
+        }
+        lookDim = lookDim * lookDim * (3 - 2 * lookDim);
+      }
       if (field) {
-        field.fade = 1 - viewMix.current;
+        field.fade = (1 - viewMix.current) * lookDim;
         field.paper = atmo.paper;
-        field.sunLight = atmo.light; // paper world: slate-hours pigment luminance
-        // The wind rides ON TOP of the active look's base shape (bake-off:
-        // the look itself is swapped via ?look= / the dev pill).
-        const base = LOOKS[lookRef.current];
-        const look = field.look;
-        look.warpM = base.warpM + atmo.wind * WEATHER.windWarpM;
-        look.drift = base.drift + atmo.wind * WEATHER.windDrift;
-        look.streak = Math.min(1, base.streak + atmo.wind * WEATHER.windStreak);
-        const w = field.weather;
-        w.fog = atmo.fog;
-        w.wet = rain;
-        w.axisX = atmo.axisX;
-        w.axisY = atmo.axisY;
+        if (field instanceof FieldLayer) {
+          // BEN'S ENGINE: pond presets in meters; wind nudges live.
+          field.sunLight = atmo.light; // paper world: slate-hours pigment
+          const base = LOOKS[currentLook().pond ?? "still-water"];
+          const look = field.look;
+          look.warpM = base.warpM + atmo.wind * WEATHER.windWarpM;
+          look.drift = base.drift + atmo.wind * WEATHER.windDrift;
+          look.streak = Math.min(1, base.streak + atmo.wind * WEATHER.windStreak);
+          const w = field.weather;
+          w.fog = atmo.fog;
+          w.wet = rain;
+          w.axisX = atmo.axisX;
+          w.axisY = atmo.axisY;
+        } else {
+          // ELI'S ENGINE: the look's shape baseline + the wind's living
+          // motion on top (galleryTune froze the old wind constants).
+          const shape = currentLook().config.shape;
+          const look = field.look;
+          look.warpAmp = shape.warpAmp + atmo.wind * 0.02;
+          look.scale = shape.scale;
+          look.band = shape.band;
+          look.drift = shape.drift + atmo.wind * WEATHER.windDrift;
+          look.streak = Math.min(1, shape.streak + atmo.wind * WEATHER.windStreak);
+          const w = field.weather;
+          w.fog = atmo.fog;
+          w.wet = rain;
+          w.axisX = atmo.axisX;
+          w.axisY = atmo.axisY;
+        }
       }
       // …and to the falling weather (it rains on both views alike).
       const precip = precipRef.current;
@@ -284,7 +383,7 @@ export default function MapStage({
       // THE PULSE OF ARRIVAL, ambient half: until realtime brings real
       // strangers, the seeded city re-pulses one point every so often —
       // a raindrop somewhere, the map visibly being felt in. Public only.
-      if (field && now > nextPulse.current) {
+      if (field instanceof FieldLayer && now > nextPulse.current) {
         nextPulse.current =
           now + (FIELD.ripple.everyS[0] + Math.random() * (FIELD.ripple.everyS[1] - FIELD.ripple.everyS[0])) * 1000;
         if (viewMix.current < 0.5 && momentsStore.points.length > 0) {
@@ -293,9 +392,17 @@ export default function MapStage({
           if (pick) field.addRippleLngLat(pick.position[0], pick.position[1], pick.emotion);
         }
       }
-      const rippling = field?.ripplesActive ?? false;
+      const rippling = field instanceof FieldLayer ? field.ripplesActive : false;
       const precipitating = atmo.wet > 0.03;
-      if (!map.isMoving() && !arriving && !fading && !precipitating && !rippling && now - lastPush < PERF.restFrameMs)
+      if (
+        !map.isMoving() &&
+        !arriving &&
+        !fading &&
+        !precipitating &&
+        !rippling &&
+        !lookSwap.current && // the gallery dissolve needs full rate
+        now - lastPush < PERF.restFrameMs
+      )
         return;
       lastPush = now;
 
@@ -353,6 +460,7 @@ export default function MapStage({
               (lngLat) =>
                 map.easeTo({ center: lngLat, zoom: Math.min(zoom + 2.4, 14), duration: 900 }),
               inkWeight(atmo), // threads + cues ink themselves by the ground
+              (gapMs, x, y) => onGapTapRef.current?.(gapMs, x, y),
             )
           : [];
         // Trail first: labels stay readable above your dots.
@@ -391,14 +499,7 @@ export default function MapStage({
           // A shader-compile failure (seen once: driver returned a null
           // info log) must degrade to a city without weather — it must
           // never take the whole screen down (design-review finding).
-          try {
-            const field = new FieldLayer();
-            Object.assign(field.look, structuredClone(LOOKS[lookRef.current]));
-            map.addLayer(field);
-            fieldRef.current = field;
-          } catch (err) {
-            console.error("warmth: field layer failed to start", err);
-          }
+          mountField(map);
           // Falling weather, above the field (still under the deck labels).
           try {
             const precip = new PrecipLayer();
@@ -417,21 +518,7 @@ export default function MapStage({
           // the field stays dead forever after restore (review finding).
           map.on("webglcontextrestored", () => {
             // Re-add in place (below the labels), not on top of the stack.
-            const layers = map.getStyle()?.layers ?? [];
-            const at = layers.findIndex((l) => l.id === "emotion-field");
-            const beforeId = at >= 0 && at + 1 < layers.length ? layers[at + 1].id : undefined;
-            if (at >= 0) map.removeLayer("emotion-field");
-            try {
-              const fresh = new FieldLayer();
-              fresh.fade = fieldRef.current?.fade ?? 1;
-              fresh.paper = paperRef.current; // day must survive the restore too
-              Object.assign(fresh.look, structuredClone(LOOKS[lookRef.current]));
-              map.addLayer(fresh, beforeId);
-              fieldRef.current = fresh;
-              dataVersion.current = -1; // force the tick to re-feed the data
-            } catch (err) {
-              console.error("warmth: field layer failed to restore", err);
-            }
+            mountField(map); // self-removes; the ACTIVE engine, whichever it is
             // The falling weather needs the same resurrection — re-added in
             // place, or it would land on top of the deck labels (review).
             try {
@@ -447,15 +534,30 @@ export default function MapStage({
               console.error("warmth: precip layer failed to restore", err);
             }
           });
+          // The settled opening camera IS home (constraints already applied).
+          const hc = map.getCenter();
+          homeRef.current = { lng: hc.lng, lat: hc.lat, zoom: map.getZoom() };
           // Lab-only hook so the screenshot/perf harness can set exact cameras.
           (window as unknown as { __warmthMap?: typeof map }).__warmthMap = map;
           // Harness hook: the ink drop is testable without driving the orb.
-          (window as unknown as { __warmthField?: FieldLayer | null }).__warmthField =
+          (window as unknown as { __warmthField?: FieldLayer | GalleryFieldLayer | null }).__warmthField =
             fieldRef.current;
           loaded.current = true;
           onMapReady?.(map);
         }}
-        onMove={(e) => setRotated(Math.abs(e.viewState.bearing) > 0.5)}
+        onMove={(e) => {
+          const v = e.viewState;
+          setRotated(Math.abs(v.bearing) > 0.5);
+          // "Away" = meaningfully off the settled home shot — generous
+          // thresholds so the chip never nags over a small nudge.
+          const home = homeRef.current;
+          setAway(
+            Math.abs(v.zoom - home.zoom) > 0.6 ||
+              Math.abs(v.longitude - home.lng) > 0.045 ||
+              Math.abs(v.latitude - home.lat) > 0.035 ||
+              Math.abs(v.bearing) > 0.5,
+          );
+        }}
       >
         <DeckOverlay
           onReady={(o) => {
@@ -464,63 +566,10 @@ export default function MapStage({
         />
       </Map>
 
-      {/* THE LOOK PILL — dev-only bake-off switcher (2026-07-09): taps
-          cycle the four looks live so Ben + Eli can judge on phones.
-          Dies in production; the winner gets hardwired. */}
-      {devUnlocked() && (
-        <button
-          type="button"
-          onClick={() => {
-            const names = Object.keys(LOOKS) as LookName[];
-            setLookName(names[(names.indexOf(lookName) + 1) % names.length]);
-          }}
-          style={{
-            position: "absolute",
-            bottom: "max(env(safe-area-inset-bottom), 18px)",
-            right: 16,
-            padding: "6px 14px",
-            borderRadius: 999,
-            border: "1px solid rgba(233,236,244,0.14)",
-            background: "rgba(10,11,15,0.55)",
-            color: "rgba(233,236,244,0.6)",
-            fontSize: 11,
-            letterSpacing: "0.06em",
-            cursor: "pointer",
-            zIndex: 10,
-          }}
-        >
-          {lookName}
-        </button>
-      )}
-
-      {/* THE WORLD PILL — dev-only (2026-07-10): night vs paper candidate.
-          The world is chosen at LOAD, so the toggle reloads with ?world=. */}
-      {devUnlocked() && (
-        <button
-          type="button"
-          onClick={() => {
-            const u = new URL(window.location.href);
-            u.searchParams.set("world", worldFromUrl() === "paper" ? "night" : "paper");
-            window.location.href = u.toString();
-          }}
-          style={{
-            position: "absolute",
-            bottom: "max(env(safe-area-inset-bottom), 18px)",
-            right: 130,
-            padding: "6px 14px",
-            borderRadius: 999,
-            border: "1px solid rgba(233,236,244,0.14)",
-            background: "rgba(10,11,15,0.55)",
-            color: "rgba(233,236,244,0.6)",
-            fontSize: 11,
-            letterSpacing: "0.06em",
-            cursor: "pointer",
-            zIndex: 10,
-          }}
-        >
-          {worldFromUrl() === "paper" ? "world: paper" : "world: night"}
-        </button>
-      )}
+      {/* The bake-off look pill and the world pill are RETIRED (07-13):
+          THE ONE GALLERY in OneScreen now lists every look from both
+          trunks — Ben's four pond looks and the paper world included —
+          and switches them live, no reload. */}
 
       {/* Return-to-north — appears only while rotated, like Apple Maps. */}
       <button
@@ -547,6 +596,54 @@ export default function MapStage({
         }}
       >
         N
+      </button>
+
+      {/* Recenter — home view, one tap (Eli, 07-10). Appears only once
+          you've wandered; sits below the north chip. */}
+      <button
+        type="button"
+        aria-label="Return to the city view"
+        title="Return to the city view"
+        onClick={() => {
+          const map = mapRef.current?.getMap();
+          if (!map) return;
+          map.flyTo({
+            center: [CAMERA.initial.longitude, CAMERA.initial.latitude],
+            zoom: CAMERA.initial.zoom,
+            bearing: 0,
+            duration: 1600,
+            essential: true,
+          });
+          // Wherever the flight settles (bounds may clamp) becomes home.
+          map.once("moveend", () => {
+            const c = map.getCenter();
+            homeRef.current = { lng: c.lng, lat: c.lat, zoom: map.getZoom() };
+            setAway(false);
+          });
+        }}
+        style={{
+          position: "absolute",
+          top: "calc(max(env(safe-area-inset-top), 20px) + 44px)",
+          right: 16,
+          width: 34,
+          height: 34,
+          borderRadius: "50%",
+          border: "1px solid rgba(233,236,244,0.14)",
+          background: "rgba(10,11,15,0.55)",
+          color: "rgba(233,236,244,0.6)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "pointer",
+          zIndex: 10,
+          opacity: away ? 1 : 0,
+          pointerEvents: away ? "auto" : "none",
+          transition: "opacity 300ms ease",
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3.2 L19.6 20.4 L12 16.2 L4.4 20.4 Z" fill="currentColor" fillOpacity="0.85" />
+        </svg>
       </button>
     </>
   );

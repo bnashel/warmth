@@ -1,5 +1,12 @@
 /**
- * components/Map/FieldLayer.ts — THE FIELD.
+ * components/Map/GalleryFieldLayer.ts — THE FIELD, gallery engine.
+ *
+ * Eli's night-pass field machinery, whole and untouched by the merge:
+ * THE VERSION GALLERY reads every dial through lookState, FELT gives
+ * each emotion its own form + motion, the veil is night air, and the
+ * 07-10 zoom fix world-anchors every texture domain. Ben's pond/paper
+ * engine lives in FieldLayer.ts; MapStage mounts exactly one of the
+ * two per look. (one-world merge, 2026-07-13)
  *
  * Emotion as standing weather over the city: a continuous field, never
  * points. A Mapbox custom layer (raw WebGL2 in the map's own context):
@@ -19,8 +26,9 @@
 import mapboxgl, { type CustomLayerInterface, type Map as MapboxMap } from "mapbox-gl";
 import { EMOTION_HUES, EMOTIONS } from "@/lib/theme";
 import type { LivePoint } from "@/lib/momentsStore";
-import { CAMERA, DEFAULT_LOOK, FIELD, LOOKS, PIGMENT, WEATHER, WOVEN } from "./tune";
-import { worldFromUrl } from "./solar";
+import { CAMERA, WEATHER } from "./tune";
+import { FELT, FIELD, SHAPES, WOVEN } from "./galleryTune";
+import { currentLook } from "./lookState";
 
 /* ---------------- OKLab (Björn Ottosson, via components/Orb/oklch.ts) --- */
 
@@ -132,13 +140,7 @@ void main() {
          + texture(uSrc, vUv + vec2(-off.x,  off.y)).rgb
          + texture(uSrc, vUv + vec2( off.x, -off.y)).rgb
          + texture(uSrc, vUv + vec2(-off.x, -off.y)).rgb;
-  c *= 0.25;
-  // Soft luminance knee (round 2, item 2a): the old hard subtract cut a
-  // clean iso-contour ring into every bloom at exactly the threshold.
-  if (uThreshold > 0.0) {
-    float l = dot(c, vec3(0.299, 0.587, 0.114));
-    c *= smoothstep(uThreshold * 0.55, uThreshold * 1.65, l);
-  }
+  c = max(vec3(0.0), c * 0.25 - vec3(uThreshold));
   fragColor = vec4(c, 1.0);
 }
 `;
@@ -157,13 +159,16 @@ void main() {
 
 const RESOLVE_FS = /* glsl */ `#version 300 es
 precision highp float;
+// The world-anchor calibration span: the mercator width of a 1280-css-px
+// screen at z12.5 — the frame the dials were tuned in. All world-anchored
+// texture domains (warp, weave, tiers, curtains) divide through this, so
+// dial numbers keep their tuned meaning at every zoom on every device.
+#define WORLD_SPAN ${(1280 / (512 * Math.pow(2, 12.5))).toExponential(8)}
 in vec2 vUv;
 uniform sampler2D uField0;
 uniform sampler2D uField1;
 uniform vec3 uHueLab[${NE}];
 uniform float uExposure;
-uniform vec2 uFloor;   // darkness budget: pooled-total smoothstep (from, to)
-uniform vec3 uDomLow;  // low-density dominance: (power, rampFrom, rampTo)
 uniform float uDominance;
 uniform float uChromaFloor;
 uniform float uGain;
@@ -172,24 +177,26 @@ uniform float uBreathPeriod;
 uniform float uBreathAmp;
 uniform int uMode;
 // THE SHAPE OF FEELING: domain-warp the field lookup so blooms stop being
-// circles. x=warp amplitude (uv), y=noise scale, z=drift speed,
+// circles. x=warp amplitude, y=noise scale, z=drift speed,
 // w=streak (anisotropy along the flow axis).
-uniform vec4 uFlow;       // warp (mercator units), 1/cell (mercator), drift, streak
-uniform float uFlowTime;  // the flow clock — uTimeSec × FIELD.tempo (held breath)
-uniform vec2 uMercInvDx;  // uv per mercator-x (inverse frame affine)
-uniform vec2 uMercInvDy;  // uv per mercator-y
-uniform vec4 uRipple;     // living-water: amp, rings, speed, 0
-// THE PULSE OF ARRIVAL — up to 8 live rings: xy = mercator center,
-// z = age 0..1, w = gain. Hue rides along so a ring crossing dark land
-// still carries its feeling's color.
-uniform int uArrN;
-uniform vec4 uDrop;      // ink drop: fill gain (0=night), rim gain, spare, labPull
-uniform vec4 uArr[8];
-uniform vec3 uArrLab[8];
-uniform vec2 uArrShape;   // span (mercator), 1/width (mercator)
-uniform vec3 uBreathVar;  // 1/cell (mercator), amp, base period s
+uniform vec4 uShape;
 uniform float uBand;   // aurora curtains: brightness modulation (0 = off)
-uniform float uAspect; // target width / height, so the flow isn't squashed
+// MERCATOR → SCREEN-UV (07-10, the zoom fix): every texture domain below
+// (edge warp, weave threads, tier crawl, shimmer, curtains) is anchored in
+// WORLD space — the same law the close-zoom grain already obeyed. The old
+// screen-anchored domains re-rolled every silhouette as the camera moved:
+// zooming made the whole field boil, and the screen-fraction warp
+// amplitude grew past whole kernels up close, tearing blobs into
+// crescents. Amplitudes/scales are calibrated at WORLD_SPAN (a 1280px
+// screen at z12.5), so the tuned dials keep their meaning — zoom now
+// simply magnifies the silhouette, like leaning into a painting.
+uniform vec2 uM2UvX;   // d(uv)/d(mercator), row 1 — inverse screen affine
+uniform vec2 uM2UvY;   // row 2 (both zero when the frame isn't derivable)
+// The screen's own mercator width this frame: warp amplitude follows the
+// LARGER of the world calibration and the screen fraction — the same
+// px-floor-vs-meters law the kernels themselves obey, so the wide view
+// keeps its living wobble while the close view stays a stable fact.
+uniform float uPxSpan;
 // THE LIVING ATMOSPHERE (lib/atmosphere.ts, eased): the flow axis follows
 // the real wind — the field's own living motion. CONSTITUTION RULE 2: the
 // sky may not grade the emotion's light; cloud/wet/snow no longer reach
@@ -216,13 +223,23 @@ uniform float uShimmer;   // hue flow along the wind (max OKLab rotation)
 uniform vec4 uTiers;      // matte layers: count, rim, richen, crawl
 uniform float uTierKeep;  // tiering over the live wash beneath (0..1)
 uniform vec2 uOverlap;    // genuine-overlap gate: smoothstep from, to
+uniform vec2 uKnee;       // tone ceiling: knee start, hard asymptote
+// THE VERSION GALLERY + FELT EMOTIONS (2026-07-09):
+uniform float uSmoothWarp; // 1 = swell (few sweeping waves), 0 = 3-oct fbm
+uniform float uBreathShaped; // 1 = soft-clipped exhale, 0 = plain sine
+uniform float uFeltOn;    // 1 = per-emotion form + motion signatures
+uniform float uVeil;      // 1 = NIGHT AIR: unbounded ambient presence
+// NIGHT WEATHER (07-10): the city must not breathe like a metronome.
+// breathVary makes each area's rhythm wander (a bounded rubato) and its
+// depth wax/wane over minutes; meld lets genuinely-overlapping feelings
+// soften each other's dominance so their colors truly interpenetrate.
+uniform float uBreathVary;
+uniform float uMeld;
+uniform vec4 uEmoMotion[${NE}]; // period(s), amp, skew, crisp
+uniform vec4 uEmoFx[${NE}];     // flicker, rise, warpMul, scaleMul
 // CLOSE-ZOOM GRAIN: geographic texture (mercator-anchored — meters, not
 // pixels) that resolves as you approach. amp arrives pre-gated by zoom.
 uniform vec2 uGrain;      // amp (zoom-gated), 1/cell in mercator units
-// THE PAPER WORLD pigment (all zero/inert in the night world):
-uniform vec4 uPig;        // OKLab L, chroma push, stain cap, stain slope
-uniform vec2 uGranP;      // granulation amp (zoom-gated), 1/cell (mercator)
-uniform vec4 uGranEdge;   // wet-edge band: in.from, in.to, out.from, out.to
 uniform vec2 uMercAnchor; // fixed NYC anchor — keeps fbm args small/stable
 out vec4 fragColor;
 
@@ -247,6 +264,13 @@ float fbm(vec2 p) {
   }
   return s;
 }
+// SWELL — the edge-warp's own noise (2026-07-09, the germ fix): one big
+// smooth octave plus a whisper of a second. Three-octave fbm gave the
+// outline many small similarly-sized bumps — a cell membrane. A silhouette
+// should be a few slow sweeping waves: ink drifting, silk settling.
+float swell(vec2 p) {
+  return (vnoise(p) + 0.28 * vnoise(p * 2.6 + 13.1)) / 1.28;
+}
 
 vec3 oklabToLinear(vec3 lab) {
   float l_ = lab.x + 0.3963377774 * lab.y + 0.2158037573 * lab.z;
@@ -268,35 +292,65 @@ vec3 linearToSrgb(vec3 c) {
 }
 
 void main() {
-  // THE PIXEL'S WORLD POSITION, first — every organic domain below (flow
-  // warp, weave, shimmer, crawl, curtains, grain) is anchored in MERCATOR
-  // space, so the texture belongs to the CITY: zooming scales it with the
-  // streets instead of sliding it under them (Eli: "zoom looks weird" —
-  // the old screen-space noise stayed put while the city moved).
+  // The TRUE pixel's world position (vUv, unwarped) — shared by the land
+  // mask, the close-zoom grain, and the felt-emotion clocks: geography
+  // and time are facts, never weather.
   vec2 merc = uMercOrigin + uMercDx * vUv.x + uMercDy * vUv.y;
-  // Geographic noise coords: flow cells are METERS, not screen fractions.
-  vec2 gq = (merc - uMercAnchor) * uFlow.y;
-  vec2 axis = normalize(uAxis);
 
-  // Free-flowing edges: pull each lookup through slowly-drifting fbm warp.
-  // warp 0 (bloom mode) short-circuits to the original circles.
+  // Free-flowing edges: pull each lookup through a slowly-drifting warp.
+  // warpAmp 0 (bloom mode) short-circuits to the original circles.
   vec2 uv = vUv;
-  if (uFlow.x > 0.0) {
-    vec2 q = gq;
+  if (uShape.x > 0.0) {
+    // FELT EMOTIONS: the locally dominant feeling shapes its own edge —
+    // calm swells in wide slow waves, energy runs quicker and finer.
+    // One cheap unwarped pre-tap finds the local majority.
+    float wm = 1.0;
+    float sm = 1.0;
+    // One cheap unwarped pre-tap: the local majority picks the felt edge
+    // language, and the local POOLED weight anchors bright interiors
+    // below — only edge skirts ride the full warp.
+    vec4 t0 = texture(uField0, vUv);
+    vec2 t1 = texture(uField1, vUv).xy;
+    float tI[${NE}];
+    ${["t0.x", "t0.y", "t0.z", "t0.w", "t1.x", "t1.y", "t1.z", "t1.w"]
+      .slice(0, NE)
+      .map((src, i) => `tI[${i}] = ${src};`)
+      .join(" ")}
+    int dTop = 0;
+    float dw = -1.0;
+    float tSum = 0.0;
+    for (int i = 0; i < ${NE}; i++) {
+      tSum += tI[i];
+      if (tI[i] > dw) { dw = tI[i]; dTop = i; }
+    }
+    if (uFeltOn > 0.5 && dw > 0.001) { wm = uEmoFx[dTop].z; sm = uEmoFx[dTop].w; }
+    // WORLD-ANCHORED (07-10): the warp is a fact of the geography — its
+    // noise lives in mercator space, so a silhouette magnifies under zoom
+    // instead of re-rolling, and its amplitude is a fixed ground distance.
+    vec2 q = (merc - uMercAnchor) * (uShape.y * sm / WORLD_SPAN);
+    // The flow axis IS the real wind (mercator y runs opposite screen y).
+    vec2 axis = normalize(vec2(uAxis.x, -uAxis.y));
     // Streak stretches the noise domain along the axis (ribbons), and the
     // drift crawls the domain over time so the weather is alive, not stuck.
     vec2 along = axis * dot(q, axis);
-    q = mix(q, along, uFlow.w * 0.72);
-    q += uFlowTime * uFlow.z * vec2(1.0, -0.6);
-    vec2 w = vec2(fbm(q), fbm(q + 31.416)) - 0.5;
+    q = mix(q, along, uShape.w * 0.72);
+    q += uTimeSec * uShape.z * vec2(1.0, -0.6);
+    // The gallery chooses the edge language: swell (07-09) or fbm (older).
+    vec2 w = mix(vec2(fbm(q), fbm(q + 31.416)),
+                 vec2(swell(q), swell(q + 31.416)), uSmoothWarp) - 0.5;
     // Warp mostly across the axis when streaked — edges feather sideways.
     vec2 across = vec2(-axis.y, axis.x);
     vec2 wStreak = across * dot(w, across) * 1.8;
-    // The warp offset is a GROUND distance (uFlow.x, mercator units) —
-    // converted to a texture offset through the frame's inverse affine,
-    // so its physical size is zoom-true.
-    vec2 dm = mix(w, wStreak, uFlow.w) * uFlow.x;
-    uv += uMercInvDx * dm.x + uMercInvDy * dm.y;
+    // Amplitude: screen-proportional at the wide view (where kernels sit
+    // on their px floors), a fixed ground distance up close (where they
+    // are meter-true) — max() of the two spans, like the kernels.
+    vec2 dm = mix(w, wStreak, uShape.w) * (uShape.x * wm * max(WORLD_SPAN, uPxSpan));
+    // THE ANCHOR HOLD (the torn-crescent fix): where feeling pools deep,
+    // the lookup barely moves — a bright heart can never be displaced
+    // onto empty ground and read as a black bite. The thin outer skirt
+    // keeps the full living undulation.
+    dm *= 1.0 - 0.82 * smoothstep(0.07, 0.55, 1.0 - exp(-uExposure * tSum));
+    uv += vec2(dot(uM2UvX, dm), dot(uM2UvY, dm));
   }
   vec4 f0 = texture(uField0, uv);
   vec2 f1 = texture(uField1, uv).xy;
@@ -306,35 +360,49 @@ void main() {
     .map((src, i) => `I[${i}] = ${src};`)
     .join(" ")}
 
-  float total = 0.0;
-  for (int i = 0; i < ${NE}; i++) total += I[i];
-
-  // Arrival rings first: they must live even over land the darkness
-  // budget keeps night — a raindrop is visible on still water.
-  float ringSum = 0.0;
-  float ringFill = 0.0;
-  float ringRim = 0.0;
-  vec3 ringLab = vec3(0.0);
-  for (int i = 0; i < 8; i++) {
-    if (i >= uArrN) break;
-    vec4 rp = uArr[i];
-    float front = rp.z * uArrShape.x;
-    float dw = (length(merc - rp.xy) - front) * uArrShape.y;
-    float fade2 = (1.0 - rp.z) * (1.0 - rp.z);
-    float ring = exp(-dw * dw) * fade2 * rp.w;
-    ringSum += ring;
-    ringLab += ring * uArrLab[i];
-    // THE INK DROP (pigment world only — uDrop zeroed at night): a filled
-    // blot spreading BEHIND the front, drying as it ages, and a darker wet
-    // rim pooling just ahead of it. Real watercolor arrival physics.
-    if (uDrop.x > 0.0) {
-      float fill = (1.0 - smoothstep(-1.5, 0.5, dw)) * fade2 * rp.w;
-      ringFill += fill;
-      ringRim += exp(-pow(dw - 0.9, 2.0) * 2.2) * fade2 * rp.w;
-      ringLab += fill * uDrop.w * uArrLab[i];
+  // FELT EMOTIONS — each feeling's own clock, applied to its channel
+  // BEFORE mixing, so hue-votes and brightness both live at that
+  // emotion's tempo (Laban Time: sustained calm ↔ sudden energy).
+  // Phase varies across the city (geography-anchored noise) so pools of
+  // one feeling never beat in lockstep. Positions never move.
+  if (uFeltOn > 0.5) {
+    float ph = vnoise((merc - uMercAnchor) * uGrain.y * 0.06) * 0.9;
+    // NIGHT WEATHER: no metronome. rub is a bounded phase wander (a few-
+    // kilometer rubato — each area's rhythm quickens and lags, never
+    // diverging); wax lets the breath's DEPTH drift over minutes at
+    // borough scale, so some places breathe deep while others nearly
+    // still, and the pattern itself slowly migrates. Brightness only —
+    // positions stay facts.
+    float rub = 0.0;
+    float wax = 1.0;
+    if (uBreathVary > 0.0) {
+      vec2 gq = (merc - uMercAnchor) * uGrain.y;
+      rub = (vnoise(gq * 0.045 + uTimeSec * vec2(0.021, -0.013)) - 0.5) * 1.7 * uBreathVary;
+      wax = 1.0 + uBreathVary * 0.85 *
+        (vnoise(gq * 0.028 + uTimeSec * vec2(0.007, 0.0045) + 41.7) - 0.5) * 2.0;
+    }
+    for (int i = 0; i < ${NE}; i++) {
+      vec4 m = uEmoMotion[i];
+      if (m.x < 0.1) continue;
+      float x = 6.2831853 * (uTimeSec / m.x + ph + rub + float(i) * 0.37);
+      // skew: phase-warped sine — quick swell, slow settle (buoyant joy).
+      float s = sin(x - m.z * sin(x));
+      // crisp: tanh sharpening — energy pulses brisk and defined.
+      float cr = max(m.w, 0.001);
+      s = tanh(cr * s) / tanh(cr);
+      float env = 1.0 + m.y * wax * s;
+      // flicker: fine, fast, tiny — candlelight for gratitude.
+      if (uEmoFx[i].x > 0.0) {
+        env += uEmoFx[i].x *
+          (vnoise((merc - uMercAnchor) * uGrain.y * 2.4 + uTimeSec * vec2(1.3, 1.9)) - 0.5);
+      }
+      I[i] *= max(env, 0.0);
     }
   }
-  if (total < 0.002 && ringSum + ringFill < 0.004) discard;
+
+  float total = 0.0;
+  for (int i = 0; i < ${NE}; i++) total += I[i];
+  if (total < 0.002) discard;
 
   // THE MUD RULE: hues mix by dominance share (I^p), never sum. Any local
   // majority snaps the area to its hue and fronts blend over a narrow band.
@@ -346,8 +414,9 @@ void main() {
   float anchorChroma = 0.0;
   int top = 0;
   float topW = -1.0;
-  // Screen-space noise domain shared by the woven-wash passes below.
-  vec2 nq = gq; // every organic domain shares the geographic coords
+  // World-anchored noise domain shared by the woven-wash passes below
+  // (units: reference screen-widths — see the zoom fix note at uM2UvX).
+  vec2 nq = (merc - uMercAnchor) / WORLD_SPAN;
 
   // THE GENUINE-OVERLAP GATE (Eli, 2026-07-08: colors interact ONLY where
   // feelings truly share ground in the data). Measured, not decorative:
@@ -362,15 +431,13 @@ void main() {
   }
   float overlap = smoothstep(uOverlap.x, uOverlap.y, top2 / max(top1, 1e-5));
 
-  // DENSITY-ADAPTIVE DOMINANCE (round 2, item 2b): in thin connective
-  // tissue the winner takes the pixel (high power — the local emotion
-  // stays NAMEABLE, no averaged soup); where feeling genuinely pools the
-  // woven blend takes over (uDominance). Low-density mud was two small
-  // near-equal weights averaging through olive/brown midpoints.
-  float dom = mix(uDomLow.x, uDominance, smoothstep(uDomLow.y, uDomLow.z, total));
+  // THE MELD (07-10): where feelings genuinely share ground, dominance
+  // itself relaxes — the meeting is a real interpenetration of color, not
+  // one hue snapping over the other. Lone blobs are untouched (overlap 0).
+  float domP = uDominance * (1.0 - uMeld * overlap);
 
   for (int i = 0; i < ${NE}; i++) {
-    float w = pow(I[i], dom);
+    float w = pow(I[i], domP);
     // THE WEAVE (from silk): where feelings GENUINELY meet, threads of
     // each interleave through the front — per-emotion bands of slow noise
     // tilt the local vote, so neighbors meld as woven strands, never a
@@ -381,7 +448,7 @@ void main() {
     // lone feeling perfectly still, so speed here only animates genuine
     // meetings (measured 2026-07-08: at 0.025 the interaction was lost
     // under the breath's noise floor).
-    float band = vnoise(nq * uWeave.y + float(i) * 17.31 + uFlowTime * 0.08);
+    float band = vnoise(nq * uWeave.y + float(i) * 17.31 + uTimeSec * 0.08);
     w *= 1.0 + uWeave.x * (band - 0.5) * 2.0 * overlap;
     lab += w * uHueLab[i];
     anchorChroma += w * length(uHueLab[i].yz);
@@ -400,20 +467,15 @@ void main() {
   // asymptotically — never white. The low end is linear: the long fade.
   float b = 1.0 - exp(-uExposure * total);
 
-  // THE DARKNESS BUDGET (round 2): below uFloor.x pooled feeling the land
-  // stays night; full presence by uFloor.y. Most of the city is dark —
-  // feelings are distinct luminous islands, at every zoom. Applied to b
-  // (not a discard) so the edge of an island is still a smooth exhale.
-  b *= smoothstep(uFloor.x, uFloor.y, total);
-
-  // LIVING WATER (bake-off look): the city wears one connected sheet of
-  // dark water; feeling disturbs it. Slow rings ride the CONTOURS of
-  // pooled density — so where two feelings' pools merge, their contours
-  // (and therefore their waves) genuinely interfere. Zero extra texture
-  // work: the wave phase IS the field.
-  if (uRipple.x > 0.0) {
-    float wave = sin(6.2831853 * (b * uRipple.y - uFlowTime * uRipple.z));
-    b *= 1.0 + uRipple.x * wave * smoothstep(0.03, 0.2, b);
+  // THE VEIL (07-10, "night air"): emotion as ATMOSPHERE, not object.
+  // A gamma above 1 stretches the low end into a long continuous fade —
+  // there is no radius where presence "ends", only air that gradually
+  // stops being warm. Plus heat-shimmer: fine geographic air-movement in
+  // the body of the light, the way warmth reads over a street at night.
+  if (uVeil > 0.5) {
+    b = pow(max(b, 0.0), 1.35);
+    float air = fbm((merc - uMercAnchor) * uGrain.y * 0.8 + uTimeSec * vec2(0.014, -0.009));
+    b *= 1.0 + 0.11 * (air - 0.5) * 2.0 * smoothstep(0.02, 0.18, b);
   }
 
   // THE LAND MASK — geography shapes the feeling: the field dies over
@@ -424,7 +486,6 @@ void main() {
                     (merc.y - uMaskRect.y) * uMaskRect.w);
     float land = smoothstep(0.12, 0.82, texture(uMask, muv).r);
     b *= mix(uWaterAtten, 1.0, land);
-    ringSum *= mix(uWaterAtten, 1.0, land); // rings drown in the rivers too
   }
 
   // ---- THE WOVEN WASH (Eli's silk+pigment merge, 2026-07-08) ----------
@@ -433,8 +494,9 @@ void main() {
   // hue is a fact and holds still; only where two feelings truly share
   // ground does the color visibly flow between them.
   {
-    float along = dot(nq, axis);
-    float rot = (fbm(vec2(along * 5.0 - uFlowTime * 0.12, 4.7)) - 0.5) * 2.0 * uShimmer * overlap;
+    vec2 axis2 = normalize(vec2(uAxis.x, -uAxis.y));
+    float along = dot(nq, axis2);
+    float rot = (fbm(vec2(along * 5.0 - uTimeSec * 0.12, 4.7)) - 0.5) * 2.0 * uShimmer * overlap;
     float cr = cos(rot);
     float sr = sin(rot);
     lab.yz = mat2(cr, -sr, sr, cr) * lab.yz;
@@ -445,18 +507,11 @@ void main() {
   // deeper — matte, never glassy). The contours crawl slowly, like paint
   // still deciding where to dry — and the live wash beneath keeps the
   // tiers reading as stacked layers, not posterization.
-  // Round 2, item 2a: the tiers were drawing literal concentric rings —
-  // 70% of each step dead flat, a dark Gaussian rim at every contour.
-  // Now: the step transition spans most of the level (terraces, not
-  // cliffs), the rim is a whisper, and the contours WANDER (crawl up)
-  // so no ring closes on itself as a circle. The heart below rides the
-  // smooth pre-tier b, so its lift is never stepped.
-  float bSmooth = b;
   {
-    float crawl = (fbm(nq * 3.0 + uFlowTime * 0.01) - 0.5) * uTiers.w;
+    float crawl = (fbm(nq * 3.0 + uTimeSec * 0.01) - 0.5) * uTiers.w;
     float lv = clamp(b + crawl, 0.0, 1.0) * uTiers.x;
     float f = fract(lv);
-    float soft = smoothstep(0.12, 0.88, f);
+    float soft = smoothstep(0.35, 0.65, f);
     float b2 = (floor(lv) + soft) / uTiers.x;
     float rim = exp(-pow((f - 0.5) / 0.11, 2.0));
     b = mix(b, b2 * (1.0 - uTiers.y * rim), uTierKeep);
@@ -474,10 +529,22 @@ void main() {
     b *= 1.0 + uGrain.x * (g - 0.5) * 2.0 * smoothstep(0.04, 0.28, b);
   }
 
+  // FELT EMOTIONS — joy's rising light (Kandinsky: yellow moves outward,
+  // toward the viewer): where joy holds ground, a slow band of inner
+  // light travels UP through the pool — catching light, not throbbing.
+  // Brightness only; the shape never moves.
+  if (uFeltOn > 0.5) {
+    float joyShare = I[${Math.max(0, EMOTIONS.indexOf("joy"))}] / max(total, 1e-5);
+    if (joyShare > 0.01) {
+      vec2 rq = (merc - uMercAnchor) * uGrain.y * 0.45;
+      float rise = vnoise(vec2(rq.x, rq.y + uTimeSec * 0.09));
+      b *= 1.0 + uEmoFx[${Math.max(0, EMOTIONS.indexOf("joy"))}].y * joyShare * (rise - 0.5) * 2.0;
+    }
+  }
+
   // THE LUMINOUS HEART: where pooled feeling peaks, the hue itself lifts
-  // toward light — bright AND saturated, capped well below white. Rides
-  // the SMOOTH b (pre-tier), so the lift never steps at a contour.
-  lab.x += uHeart.z * smoothstep(uHeart.x, uHeart.y, bSmooth);
+  // toward light — bright AND saturated, capped well below white.
+  lab.x += uHeart.z * smoothstep(uHeart.x, uHeart.y, b);
 
   // THE NEVER-WHITE CEILING (Eli, 2026-07-07): no matter how much feeling
   // pools — saturated knee, heart lift, the palest anchor (lilac) — the
@@ -485,29 +552,22 @@ void main() {
   // color must always still read as COLOR.
   lab.x = min(lab.x, 0.8);
 
-  // The living tide: a slow, subtle breath, phase-varied across hues.
-  // POOLS BREATHE SOLO: rhythm seeded by WHERE the pool is — each island
-  // on its own slow clock (0.7-2.2× the base period), out of phase, so at
-  // any moment some pool visibly swells while its neighbors rest.
-  float bSeed = vnoise((merc - uMercAnchor) * uBreathVar.x);
-  float bPeriod = uBreathVar.z * mix(0.7, 2.2, bSeed);
-  b *= 1.0 + uBreathVar.y * sin(6.2831853 * (uTimeSec / bPeriod + bSeed * 7.31));
+  // The living tide: a slow exhale, phase-varied across hues. The sine is
+  // soft-clipped (s − 0.22s³): flattened crests read as a breath held and
+  // released — fabric settling — where a pure sine read as a throb. The
+  // gallery chooses the waveform; under FELT EMOTIONS the per-channel
+  // clocks above carry the life and this global tide stands down.
+  float phase = fract(lab.y * 3.7 + lab.z * 5.3);
+  float bs = sin(6.2831853 * (uTimeSec / uBreathPeriod + phase));
+  float bwave = mix(bs, (bs - 0.22 * bs * bs * bs) * 1.28, uBreathShaped);
+  b *= 1.0 + uBreathAmp * bwave * (1.0 - uFeltOn);
 
-  // THE PULSE OF ARRIVAL lands on top: the ring adds its light and pulls
-  // the local hue toward its feeling's color while it passes.
-  if (ringSum + ringFill > 0.0005) {
-    float ringW = ringSum + uDrop.x * ringFill;
-    b += ringW;
-    lab = mix(lab, ringLab / max(ringSum + uDrop.w * ringFill, 1e-4), clamp(ringW / (ringW + max(b - ringW, 0.02)), 0.0, 0.85));
-    lab.x = min(lab.x, 0.8);
-  }
-
-  // Aurora curtains: slow luminous banding across the flow axis — hanging
-  // in the CITY's space, swaying on the flow clock. Modulation only —
-  // never to zero, so the field's coverage is untouched.
+  // Aurora curtains: slow luminous banding across the flow axis. Modulation
+  // only — never to zero, so the field's coverage is untouched.
   if (uBand > 0.0) {
-    float across = dot(nq, vec2(-axis.y, axis.x));
-    float curtain = fbm(vec2(across * 2.2, uFlowTime * 0.05));
+    vec2 axisB = normalize(vec2(uAxis.x, -uAxis.y));
+    float across = dot(nq, vec2(-axisB.y, axisB.x));
+    float curtain = fbm(vec2(across * 9.0, uTimeSec * 0.05));
     b *= 1.0 + uBand * (curtain - 0.5) * 1.6;
   }
 
@@ -524,29 +584,34 @@ void main() {
   // uGain carries paperness × fade as stain strength. Pigment is the same
   // OKLab hue, dropped to pigment depth so it reads saturated on white.
   if (uMode == 2) {
-    // THE PAPER WORLD's pigment (uPig: L, chroma, cap, slope — tune.ts
-    // PIGMENT). Depth is capped on purpose: heavily-pooled spots read as
-    // deeper watercolor, never a bruise.
-    // GRANULATION: real watercolor granules — the same mercator-anchored
-    // fbm trick as uGrain above, finer cells (uGranP.y), loudest at the
-    // wash's WET EDGE (the band where b passes from skirt to body) and
-    // rising as you approach (uGranP.x rides the grain zoom smoothstep).
-    float gp = fbm((merc - uMercAnchor) * uGranP.y);
-    float wetEdge = smoothstep(uGranEdge.x, uGranEdge.y, b) * (1.0 - smoothstep(uGranEdge.z, uGranEdge.w, b));
-    float gran = 1.0 + uGranP.x * (gp - 0.5) * 2.0 * mix(0.3, 1.0, wetEdge);
-    vec3 pig = linearToSrgb(oklabToLinear(vec3(uPig.x, lab.y * uPig.y, lab.z * uPig.y)));
-    // The wet rim pools DEEPER than the standing cap (pigment gathers at
-    // the drop's edge), hard-clamped well short of a bruise.
-    float stain = min(min(uPig.z, max(b, 0.0) * uPig.w * gran) + uDrop.y * ringRim, 0.85) * uGain;
+    // Pigment depth is capped on purpose: heavily-pooled spots must read as
+    // deeper watercolor, never a bruise — but the wash must still carry the
+    // city's feeling at a glance (design-review: stain to .58, pigment L .64).
+    vec3 pig = linearToSrgb(oklabToLinear(vec3(0.64, lab.y * 1.35, lab.z * 1.35)));
+    float stain = min(0.58, max(b, 0.0) * 0.8) * uGain;
     fragColor = vec4(mix(vec3(1.0), pig, stain), 1.0);
     return;
   }
 
-  // Brightness scales LIGHT, not code (round 2, items 2b/2c): b×gain
-  // multiplies the LINEAR color before sRGB encoding. The old gamma-space
-  // multiply literally turned every dim warm pixel olive-brown — the mud
-  // between hearts and the close-zoom stain were this one line.
-  vec3 color = linearToSrgb(oklabToLinear(lab) * (max(b, 0.0) * uGain));
+  // GAMUT (2026-07-09, the red-hot fix): richen + the chroma floor can
+  // push warm hues OUT of sRGB gamut; letting the framebuffer clip each
+  // channel skewed dense coral pools toward hot salmon (R saturating
+  // first). Normalizing the whole linear color instead preserves the
+  // chromaticity exactly — the color deepens, it never distorts.
+  vec3 lin = max(oklabToLinear(lab), 0.0);
+  lin /= max(1.0, max(lin.r, max(lin.g, lin.b)));
+  vec3 color = linearToSrgb(lin) * max(b, 0.0) * uGain;
+
+  // THE TONE CEILING — HDR-style soft knee on the peak CHANNEL (scalar
+  // scale = hue-preserving): identity below uKnee.x, asymptote at
+  // uKnee.y. Where many feelings stack, the additive sum now compresses
+  // into a richer, deeper color — warm at the densest point, never hot.
+  float m = max(color.r, max(color.g, color.b));
+  if (m > uKnee.x) {
+    float span = uKnee.y - uKnee.x;
+    color *= (uKnee.x + span * (1.0 - exp(-(m - uKnee.x) / span))) / m;
+  }
+
   // uMode 0: alpha 0 under mapbox's premultiplied blend == pure additive.
   // uMode 1: caller sets blendFunc(DST_COLOR, ONE) — color multiplies the
   //          base map, so streets inside the field catch its light.
@@ -582,7 +647,7 @@ function compile(gl: WebGL2RenderingContext, vsSrc: string, fsSrc: string): WebG
   return p;
 }
 
-export class FieldLayer implements CustomLayerInterface {
+export class GalleryFieldLayer implements CustomLayerInterface {
   id = "emotion-field";
   type = "custom" as const;
   renderingMode = "2d" as const;
@@ -591,29 +656,16 @@ export class FieldLayer implements CustomLayerInterface {
    *  whole field (accumulation included) costs nothing. Set from MapStage. */
   fade = 1;
 
-  /** THE SHAPE OF FEELING — plain uniform values, geographic units
-   *  (warpM/cellM are METERS: the texture belongs to the city). One of
-   *  the LOOKS presets (bake-off, 2026-07-09); atmosphere nudges live. */
-  look: {
-    warpM: number;
-    cellM: number;
-    drift: number;
-    streak: number;
-    band: number;
-    shimmer: number;
-    weaveAmp: number;
-    ripple: { amp: number; rings: number; speed: number };
-  } = structuredClone(LOOKS[DEFAULT_LOOK]);
+  /** THE SHAPE OF FEELING — plain uniform values (the woven wash is the
+   *  one identity; the atmosphere drives these live). Set from MapStage. */
+  look: { warpAmp: number; scale: number; drift: number; streak: number; band: number } = {
+    ...SHAPES.woven,
+  };
 
   /** 0 = dark ink night (glow), 1 = light paper day (pigment). Set from
    *  MapStage every frame from the atmosphere; crossfades the two ways of
    *  painting. */
   paper = 0;
-
-  /** THE PAPER WORLD: the sun (0..1) — drives the slate-hours pigment
-   *  luminance; set from MapStage each tick. */
-  sunLight = 0;
-  private paperWorld = worldFromUrl() === "paper";
 
 
   /** THE LIVING ATMOSPHERE — plain fields mutated in place from MapStage
@@ -659,31 +711,14 @@ export class FieldLayer implements CustomLayerInterface {
    *  stable) + 1/cell in mercator units. Set once in onAdd. */
   private mercAnchor: [number, number] = [0, 0];
   private grainScale = 0;
-  private meterMerc = 1e-8; // meters → mercator units at the NYC anchor
-  /** THE PULSE OF ARRIVAL — live rings (≤8): real commits auto-ripple on
-   *  new-id detection; the ambient city re-pulses via addRippleLngLat. */
-  private ripples: { x: number; y: number; start: number; ch: number; s: number }[] = [];
-  private knownIds = new Set<string>();
-
-  get ripplesActive(): boolean {
-    return this.ripples.length > 0;
-  }
-
-  addRippleLngLat(lng: number, lat: number, emotion: string, strength = 1) {
-    const mc = mapboxgl.MercatorCoordinate.fromLngLat({ lng, lat });
-    const now = performance.now();
-    this.ripples = this.ripples.filter((r) => now - r.start < FIELD.ripple.lifeMs);
-    if (this.ripples.length >= 8) this.ripples.shift();
-    this.ripples.push({ x: mc.x, y: mc.y, start: now, ch: CHANNEL[emotion] ?? 0, s: strength });
-    this.map?.triggerRepaint();
-  }
+  /** FELT EMOTIONS uniform arrays (period/amp/skew/crisp + flicker/rise/
+   *  warpMul/scaleMul per channel), packed once from tune.FELT. */
+  private emoMotion = new Float32Array(NE * 4);
+  private emoFx = new Float32Array(NE * 4).fill(1);
 
   constructor() {
     EMOTIONS.forEach((e, i) => {
-      // THE PAPER WORLD wears its own joy (Eli, 07-13): the brand lemon
-      // reads muddy as pigment on bone — on paper, joy is true sun-yellow.
-      const hex = (this.paperWorld && PIGMENT.hues[e]) || EMOTION_HUES[e];
-      const [, a, b] = hexToOklab(hex);
+      const [, a, b] = hexToOklab(EMOTION_HUES[e]);
       // Equal feeling = equal light: anchors share one OKLab lightness
       // (raw hues span a wide L range, which made cooler hues glow dimmer
       // than Joy for the same intensity). Hue stays the brand's; chroma
@@ -714,9 +749,15 @@ export class FieldLayer implements CustomLayerInterface {
       // scales with intensity: at middle distance everything sits on its
       // pixel floor, and one flat floor turned the city into uniform
       // polka dots (the medium-zoom valley, Eli 2026-07-08).
+      // Geometry dials read through THE GALLERY (a look switch re-feeds
+      // this whole buffer via MapStage's subscription). Under FELT
+      // EMOTIONS each feeling also has its own footprint: calm settles
+      // wide and soft, energy holds tight and defined, love reaches.
+      const lk = currentLook().config.dials;
+      const feltMul = lk.felt ? (FELT[p.emotion]?.radiusMul ?? 1) : 1;
       this.floorPx[i] = p.wash
         ? FIELD.wash.minRadiusPx
-        : FIELD.minRadiusPx * (0.78 + 0.055 * (p.intensity - 1));
+        : lk.minRadiusPx * (0.78 + 0.055 * (p.intensity - 1)) * feltMul;
       // Only the WASH thins with zoom (it's a city-scale impression);
       // pocket seeds are stand-ins for real entries and must intensify on
       // approach exactly as commits do — the density payoff (2026-07-08).
@@ -727,28 +768,13 @@ export class FieldLayer implements CustomLayerInterface {
       });
       const radiusM = p.wash
         ? FIELD.wash.radiusM
-        : FIELD.radiusM + FIELD.radiusPerIntensityM * (p.intensity - 1);
+        : (lk.radiusM + lk.radiusPerIntensityM * (p.intensity - 1)) * feltMul;
       const o = i * FLOATS_PER_INSTANCE;
       d[o] = mc.x;
       d[o + 1] = mc.y;
       d[o + 2] = radiusM * mc.meterInMercatorCoordinateUnits();
       d[o + 3] = p.weight;
       d[o + 4] = CHANNEL[p.emotion] ?? 0;
-      // A REAL feeling arriving right now sends its ring (seeds re-pulse
-      // via the ambient timer instead — placeholder life, clearly labeled).
-      if (!this.knownIds.has(p.id)) {
-        this.knownIds.add(p.id);
-        if (!p.seed && performance.now() - p.born < 600) {
-          // In the paper world a real commit is THE INK DROP — it hits
-          // the sheet harder than any ambient pulse.
-          this.addRippleLngLat(
-            p.position[0],
-            p.position[1],
-            p.emotion,
-            this.paperWorld ? PIGMENT.drop.own : 1,
-          );
-        }
-      }
     }
     this.count = n;
     this.uploaded = false;
@@ -802,8 +828,14 @@ export class FieldLayer implements CustomLayerInterface {
       lat: CAMERA.initial.latitude,
     });
     this.mercAnchor = [anchor.x, anchor.y];
-    this.meterMerc = anchor.meterInMercatorCoordinateUnits();
-    this.grainScale = 1 / (FIELD.grain.cellM * this.meterMerc);
+    this.grainScale = 1 / (FIELD.grain.cellM * anchor.meterInMercatorCoordinateUnits());
+    // Pack the felt-emotion signatures in channel order.
+    for (let i = 0; i < EMOTIONS.length; i++) {
+      const be = FELT[EMOTIONS[i]];
+      if (!be) continue;
+      this.emoMotion.set([be.period, be.amp, be.skew, be.crisp], i * 4);
+      this.emoFx.set([be.flicker, be.rise, be.warpMul, be.scaleMul], i * 4);
+    }
     const img = new Image();
     img.onload = () => {
       if (!this.gl) return;
@@ -964,8 +996,10 @@ export class FieldLayer implements CustomLayerInterface {
     );
     gl.uniform1f(
       gl.getUniformLocation(this.accumProgram, "uSoftness"),
-      // One softness in every sky (constitution rule 2).
-      FIELD.kernelSoftness,
+      // One softness in every sky (constitution rule 2) — but the GALLERY
+      // may choose it: "night air" runs long diffuse skirts (1.35), the
+      // pool looks run defined hearts (2.5).
+      currentLook().config.dials.kernelSoftness,
     );
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE);
@@ -989,7 +1023,7 @@ export class FieldLayer implements CustomLayerInterface {
       gl.clear(gl.COLOR_BUFFER_BIT);
       this.bindResolve(gl);
       gl.uniform1i(this.loc(gl, this.resolveProgram!, "res", "uMode"), 0);
-      gl.uniform1f(this.loc(gl, this.resolveProgram!, "res", "uGain"), FIELD.gain);
+      gl.uniform1f(this.loc(gl, this.resolveProgram!, "res", "uGain"), currentLook().config.dials.gain);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       // 2) blur down into bloomTex[0] (thresholded), then widen into [1].
       gl.useProgram(this.blurProgram!);
@@ -1049,95 +1083,66 @@ export class FieldLayer implements CustomLayerInterface {
     gl.uniform1i(u("uField0"), 0);
     gl.uniform1i(u("uField1"), 1);
     gl.uniform3fv(u("uHueLab"), this.hueLab);
-    gl.uniform1f(u("uExposure"), FIELD.exposure);
-    gl.uniform2f(u("uFloor"), FIELD.floor.from, FIELD.floor.to);
-    gl.uniform3f(
-      u("uDomLow"),
-      FIELD.dominanceLow.p,
-      FIELD.dominanceLow.from,
-      FIELD.dominanceLow.to,
-    );
-    gl.uniform1f(u("uDominance"), FIELD.dominance);
+    // THE VERSION GALLERY: every overridable dial reads through the live
+    // look — switching iterations is a uniform change, never a rebuild.
+    const lk = currentLook().config;
+    const d = lk.dials;
+    gl.uniform1f(u("uExposure"), d.exposure);
+    gl.uniform1f(u("uDominance"), d.dominance);
     gl.uniform1f(u("uChromaFloor"), FIELD.chromaFloor);
     gl.uniform1f(u("uTimeSec"), this.timeSec);
-    gl.uniform1f(u("uBreathPeriod"), FIELD.breath.periodMs / 1000);
-    gl.uniform1f(u("uBreathAmp"), FIELD.breath.amp);
-    const lk = this.look;
-    gl.uniform2f(u("uWeave"), lk.weaveAmp, WOVEN.weave.scale);
-    gl.uniform1f(u("uShimmer"), lk.shimmer);
-    gl.uniform4f(u("uTiers"), WOVEN.tiers.count, WOVEN.tiers.rim, WOVEN.tiers.richen, WOVEN.tiers.crawl);
-    gl.uniform1f(u("uTierKeep"), WOVEN.tiers.keep);
-    gl.uniform2f(u("uOverlap"), WOVEN.overlap.from, WOVEN.overlap.to);
-    // THE HELD BREATH: one master tempo on every flow clock (the breath
-    // keeps its own unscaled clock).
-    gl.uniform1f(u("uFlowTime"), this.timeSec * FIELD.tempo);
-    // Solo breathing + the arrival rings.
-    gl.uniform3f(
-      u("uBreathVar"),
-      1 / (FIELD.breath.cellM * this.meterMerc),
-      FIELD.breath.amp,
-      FIELD.breath.periodMs / 1000,
-    );
-    const nowR = performance.now();
-    this.ripples = this.ripples.filter((r) => nowR - r.start < FIELD.ripple.lifeMs);
-    gl.uniform1i(u("uArrN"), this.ripples.length);
-    if (this.ripples.length) {
-      const arr = new Float32Array(this.ripples.length * 4);
-      const labArr = new Float32Array(this.ripples.length * 3);
-      this.ripples.forEach((r, i) => {
-        arr[i * 4] = r.x;
-        arr[i * 4 + 1] = r.y;
-        arr[i * 4 + 2] = (nowR - r.start) / FIELD.ripple.lifeMs;
-        arr[i * 4 + 3] = FIELD.ripple.gain * r.s;
-        labArr[i * 3] = this.hueLab[r.ch * 3];
-        labArr[i * 3 + 1] = this.hueLab[r.ch * 3 + 1];
-        labArr[i * 3 + 2] = this.hueLab[r.ch * 3 + 2];
-      });
-      gl.uniform4fv(u("uArr"), arr);
-      gl.uniform3fv(u("uArrLab"), labArr);
-    }
-    gl.uniform2f(
-      u("uArrShape"),
-      FIELD.ripple.spanM * this.meterMerc,
-      1 / (FIELD.ripple.widthM * this.meterMerc),
-    );
-    // THE INK DROP dials — all zero in the night world (bit-identical path).
-    gl.uniform4f(
-      u("uDrop"),
-      this.paperWorld ? PIGMENT.drop.fill : 0,
-      this.paperWorld ? PIGMENT.drop.rim : 0,
-      0,
-      this.paperWorld ? PIGMENT.drop.labPull : 0,
-    );
-    gl.uniform4f(u("uRipple"), lk.ripple.amp, lk.ripple.rings, lk.ripple.speed, 0);
-    gl.uniform1f(u("uBand"), lk.band);
-    gl.uniform1f(u("uAspect"), this.texW / Math.max(1, this.texH));
+    gl.uniform1f(u("uBreathPeriod"), d.breathPeriodMs / 1000);
+    gl.uniform1f(u("uBreathAmp"), d.breathAmp);
+    gl.uniform1f(u("uBreathShaped"), d.breathShaped);
+    gl.uniform2f(u("uWeave"), d.weaveAmp, WOVEN.weave.scale);
+    gl.uniform1f(u("uShimmer"), d.shimmer);
+    gl.uniform4f(u("uTiers"), WOVEN.tiers.count, WOVEN.tiers.rim, d.richen, WOVEN.tiers.crawl);
+    gl.uniform1f(u("uTierKeep"), d.tierKeep);
+    // Gate off = the pre-07-08 ungated flow (smoothstep saturates at 1).
+    // A look may open the gate earlier (night weather: interaction reads
+    // where feelings merely lean into each other, not only dead-center).
+    if (d.overlapGate)
+      gl.uniform2f(
+        u("uOverlap"),
+        d.overlapFrom ?? WOVEN.overlap.from,
+        d.overlapTo ?? WOVEN.overlap.to,
+      );
+    else gl.uniform2f(u("uOverlap"), -2.0, -1.0);
+    // Knee off = the pre-07-09 raw output (start above any real value).
+    if (d.toneKnee) gl.uniform2f(u("uKnee"), FIELD.tone.kneeFrom, FIELD.tone.cap);
+    else gl.uniform2f(u("uKnee"), 9.0, 9.5);
+    gl.uniform1f(u("uSmoothWarp"), lk.shape.smoothWarp);
+    gl.uniform1f(u("uFeltOn"), d.felt);
+    gl.uniform1f(u("uVeil"), d.veil);
+    gl.uniform1f(u("uBreathVary"), d.breathVary ?? 0);
+    gl.uniform1f(u("uMeld"), d.meld ?? 0);
+    gl.uniform4fv(u("uEmoMotion"), this.emoMotion);
+    gl.uniform4fv(u("uEmoFx"), this.emoFx);
+    gl.uniform4f(u("uShape"), this.look.warpAmp, this.look.scale, this.look.drift, this.look.streak);
+    gl.uniform1f(u("uBand"), this.look.band);
     const w = this.weather;
     gl.uniform2f(u("uAxis"), w.axisX, w.axisY);
-    // Screen → world (shared by the land mask, the grain, and the FLOW —
-    // the whole organic domain is geographic now); features gate off when
-    // the frame isn't derivable.
+    // Screen → world (shared by the land mask, the grain, and every
+    // world-anchored texture domain); features gate off when the frame
+    // isn't derivable. The inverse (world → screen-uv) carries the edge
+    // warp's mercator displacement back into the texture lookup.
     const mf = this.mercFrame;
     if (mf.ok) {
       gl.uniform2f(u("uMercOrigin"), mf.ox, mf.oy);
       gl.uniform2f(u("uMercDx"), mf.dxx, mf.dxy);
       gl.uniform2f(u("uMercDy"), mf.dyx, mf.dyy);
-      // Inverse frame affine (uv per mercator) + geographic flow units.
       const det = mf.dxx * mf.dyy - mf.dyx * mf.dxy;
-      if (det !== 0) {
-        gl.uniform2f(u("uMercInvDx"), mf.dyy / det, -mf.dxy / det);
-        gl.uniform2f(u("uMercInvDy"), -mf.dyx / det, mf.dxx / det);
+      if (Math.abs(det) > 1e-20) {
+        gl.uniform2f(u("uM2UvX"), mf.dyy / det, -mf.dyx / det);
+        gl.uniform2f(u("uM2UvY"), -mf.dxy / det, mf.dxx / det);
+      } else {
+        gl.uniform2f(u("uM2UvX"), 0, 0);
+        gl.uniform2f(u("uM2UvY"), 0, 0);
       }
-      gl.uniform4f(
-        u("uFlow"),
-        lk.warpM * this.meterMerc,
-        1 / Math.max(1e-12, lk.cellM * this.meterMerc),
-        lk.drift,
-        lk.streak,
-      );
     } else {
-      gl.uniform4f(u("uFlow"), 0, 1, 0, 0); // no frame: circles, never junk
-      gl.uniform4f(u("uRipple"), 0, 0, 0, 0);
+      // No frame → no warp this frame (a rare transient; never garbage).
+      gl.uniform2f(u("uM2UvX"), 0, 0);
+      gl.uniform2f(u("uM2UvY"), 0, 0);
     }
     // The coastline (off until the mask texture lands — never a blocker).
     const maskOn = this.maskReady && mf.ok;
@@ -1149,27 +1154,17 @@ export class FieldLayer implements CustomLayerInterface {
       gl.uniform4f(u("uMaskRect"), ...this.maskRect);
       gl.uniform1f(u("uWaterAtten"), FIELD.landMask.waterAtten);
     }
+    // The screen's mercator width (warp amplitude's px-floor law).
+    const zNow = this.map?.getZoom() ?? 0;
+    const cssW = this.map?.getContainer().clientWidth ?? 1280;
+    gl.uniform1f(u("uPxSpan"), cssW / (512 * Math.pow(2, zNow)));
     // Close-zoom grain: amp fades in as the camera commits to a place.
     const gz = FIELD.grain.zoomIn;
-    const zNow = this.map?.getZoom() ?? 0;
     const gt = Math.min(1, Math.max(0, (zNow - gz.from) / (gz.to - gz.from)));
     const grainAmp = mf.ok ? FIELD.grain.amp * gt * gt * (3 - 2 * gt) : 0;
     gl.uniform2f(u("uGrain"), grainAmp, this.grainScale);
     gl.uniform2f(u("uMercAnchor"), this.mercAnchor[0], this.mercAnchor[1]);
-    gl.uniform3f(u("uHeart"), FIELD.heart.from, FIELD.heart.to, FIELD.heart.lift);
-    // THE PAPER WORLD pigment: granulation rides the SAME zoom smoothstep
-    // as the grain (the block-by-block soak on approach comes free); the
-    // whole group is inert unless the pigment pass runs (paper > 0.01).
-    const gAmp = PIGMENT.gran.amp * (1 + (PIGMENT.gran.zoomBoost - 1) * gt * gt * (3 - 2 * gt));
-    gl.uniform4f(u("uPig"), PIGMENT.L, PIGMENT.chroma, PIGMENT.cap, PIGMENT.slope);
-    gl.uniform2f(u("uGranP"), mf.ok ? gAmp : 0, 1 / (PIGMENT.gran.cellM * this.meterMerc));
-    gl.uniform4f(
-      u("uGranEdge"),
-      PIGMENT.gran.edgeIn[0],
-      PIGMENT.gran.edgeIn[1],
-      PIGMENT.gran.edgeOut[0],
-      PIGMENT.gran.edgeOut[1],
-    );
+    gl.uniform3f(u("uHeart"), FIELD.heart.from, FIELD.heart.to, d.heartLift);
   }
 
   render(gl: WebGL2RenderingContext) {
@@ -1202,18 +1197,6 @@ export class FieldLayer implements CustomLayerInterface {
       gl.uniform1f(u("uGain"), this.paper * this.fade);
       gl.blendFunc(gl.ZERO, gl.SRC_COLOR);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-
-      // SLATE HOURS (paper world only): on the deep-slate sheet the
-      // multiply alone goes mute — the pigments pick up a faint
-      // luminance, crossfaded by how deep the night is. Screen blend:
-      // asymptotic toward white, never reaching it (rule 3 holds).
-      const slate = this.paperWorld ? 1 - this.sunLight : 0;
-      if (slate > 0.01) {
-        gl.uniform1i(u("uMode"), 0);
-        gl.uniform1f(u("uGain"), FIELD.gain * this.fade * PIGMENT.slateLum * slate);
-        gl.blendFunc(gl.ONE_MINUS_DST_COLOR, gl.ONE);
-        gl.drawArrays(gl.TRIANGLES, 0, 3);
-      }
     }
 
     // Pass 1 — streetlight: field × base map (dst is the pure ink city).
@@ -1237,7 +1220,7 @@ export class FieldLayer implements CustomLayerInterface {
     // Over the near-black base, screen ≈ additive; only the top end bends.
     if (night > 0.01) {
       gl.uniform1i(u("uMode"), 0);
-      gl.uniform1f(u("uGain"), FIELD.gain * this.fade * night * thin);
+      gl.uniform1f(u("uGain"), currentLook().config.dials.gain * this.fade * night * thin);
       gl.blendFunc(gl.ONE_MINUS_DST_COLOR, gl.ONE);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }

@@ -43,6 +43,7 @@ layout(std140) uniform glowUniforms {
   float emberHeartR;
   float emberHeartOff;
   float emberWarmth;
+  float garden;
 } glow;
 `,
   uniformTypes: {
@@ -70,6 +71,7 @@ layout(std140) uniform glowUniforms {
     emberHeartR: "f32" as const,
     emberHeartOff: "f32" as const,
     emberWarmth: "f32" as const,
+    garden: "f32" as const,
   },
 };
 
@@ -85,6 +87,7 @@ precision highp float;
 in vec4 vFillColor;
 in vec2 unitPosition;
 in float vPhase;
+in vec4 vGarden; // growth, petal count/255, memory, seed (garden mode)
 in float vSeed;
 out vec4 fragColor;
 
@@ -96,6 +99,51 @@ void main(void) {
 
   // Breathing: per-point phase — the city never throbs in lockstep.
   float s = sin(6.2831853 * (glow.timeSec / glow.periodSec + vPhase));
+
+  // THE GARDEN (2026-07-10, the journal that grows): an entry is a BLOOM
+  // that matures with age — a near-round bud when fresh, opening into
+  // petals with visible growth rings as weeks pass; attaching a memory
+  // adds a ring. Same matte pigment language as the gems; the GROWTH is
+  // the design: a month-old journal looks like something you've built.
+  if (glow.garden > 0.5) {
+    float grow = vGarden.x;
+    float petals = max(3.0, floor(vGarden.y * 255.0 + 0.5));
+    float seedPh = vGarden.w * 6.2831853;
+    float theta = atan(unitPosition.y, unitPosition.x);
+    // THE SILK BLOOM (07-10, the public germ fix at diary scale): the old
+    // cos(petals·θ) rosette was radially-symmetric scallops — a burr, the
+    // exact biological read banned from the public field. The emotion's
+    // petal count now sets HOW MANY slow waves ride the edge (calm 2 …
+    // energy 4 — integer, so the silhouette closes), and a strong 1θ term
+    // makes every bloom LEAN — directional, like a flower toward light.
+    float waves = clamp(floor(petals * 0.4 + 0.5), 2.0, 4.0);
+    float lb = 0.38 * sin(theta + seedPh + glow.timeSec * 0.021)
+             + 0.62 * sin(waves * theta + seedPh * 1.7 + glow.timeSec * 0.033);
+    // Waves deepen as the bloom matures; a slow sway keeps it alive.
+    float depth = 0.05 + 0.26 * grow;
+    float edgeR = 1.0 - depth * (0.5 + 0.5 * lb);
+    // Ben's shader declares rr later (the ember breathes in light, not
+    // shape) — the garden computes its own breathing radius locally.
+    float breatheG = (1.0 + glow.radiusAmp * s) / (1.0 + glow.radiusAmp);
+    float rg = (r / breatheG) / max(edgeR, 0.25);
+    if (rg >= 1.0) discard;
+    float n0 = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+    // Growth rings, written outward by time; the memory ring rides along.
+    float rings = 1.0 + floor(grow * 3.0 + vGarden.z + 0.001);
+    float ringWave = 0.5 + 0.5 * cos(rg * rings * 4.6 - 1.2);
+    float edge = smoothstep(1.0, 0.88, rg);
+    float tone = (0.5 + 0.34 * w) * (0.86 + 0.14 * ringWave);
+    vec3 col = vFillColor.rgb * tone;
+    col += vFillColor.rgb * 0.45 * exp(-pow(rg / 0.16, 2.0)) * (0.5 + 0.5 * grow);
+    col = min(col, vFillColor.rgb * 0.96); // nothing brighter than the hue
+    float a = edge * (glow.peakBase + glow.peakPerIntensity * w) * glow.gain * (0.8 + 0.2 * grow);
+    a *= smoothstep(0.0, 0.12, w);
+    a *= 1.0 + 0.04 * s;
+    a = clamp(a + (n0 - 0.5) * 0.006, 0.0, 0.92);
+    fragColor = vec4(col * a, a);
+    DECKGL_FILTER_COLOR(fragColor, geometry);
+    return;
+  }
 
   // THE EMBER (round 2, item 3 — the journal's memory mark). Sea-glass
   // silhouette: a roundish base with 2-4 gentle undulations, seeded by the
@@ -176,16 +224,18 @@ void main(void) {
   float rr = r / breathe;
 
   // FREE-FORM (wobble > 0 — the journal): the silhouette stops being a
-  // circle. Three angular harmonics, phase-hashed per point and drifting
-  // very slowly, dent the radius INWARD only — every mark a unique, living
-  // blot that still fits its quad and keeps the lamp's core/falloff law.
+  // circle. RESHAPED 07-10 (the public germ fix, at diary scale): the old
+  // 3θ/5θ/8θ harmonics gave every mark many small similar bumps — a cell
+  // wall. Now: one 1θ LEAN (the mark reaches to a side — directional,
+  // intentional) plus two large slow waves, drifting at exhale speed.
+  // Every mark still unique (phase-hashed), inward-only, quad-safe.
   if (glow.wobble > 0.0) {
     float theta = atan(unitPosition.y, unitPosition.x);
     float ph = vPhase * 6.2831853;
     float lobes =
-        0.50 * sin(3.0 * theta + ph + glow.timeSec * 0.11)
-      + 0.35 * sin(5.0 * theta - ph * 1.7 + glow.timeSec * 0.07)
-      + 0.15 * sin(8.0 * theta + ph * 2.3 - glow.timeSec * 0.05);
+        0.32 * sin(theta + ph * 0.9 + glow.timeSec * 0.021)
+      + 0.46 * sin(2.0 * theta + ph + glow.timeSec * 0.05)
+      + 0.22 * sin(3.0 * theta - ph * 1.7 + glow.timeSec * 0.033);
     float shrink = 1.0 - glow.wobble * (0.5 + 0.5 * lobes);
     rr = rr / max(shrink, 0.35);
   }
@@ -335,6 +385,9 @@ type LightParams = {
   emberHeartOff: number;
   /** Heart hue lift toward warm white on the additive pass. */
   emberWarmth: number;
+  /** 1 = THE GARDEN (Eli, 07-10): entries as blooms that mature with age
+   *  — growth data arrives per-instance via getLineColor. */
+  garden: number;
 };
 
 type EmotionGlowLayerProps = ScatterplotLayerProps<GlowDatum> & {
@@ -385,10 +438,11 @@ export class EmotionGlowLayer extends ScatterplotLayer<
     // vSeed carries the id-hashed ember shape seed through.
     shaders.inject = {
       ...shaders.inject,
-      "vs:#decl": "in float instanceSeeds;\nout float vPhase;\nout float vSeed;\n",
+      "vs:#decl": "in float instanceSeeds;\nout float vPhase;\nout float vSeed;\nout vec4 vGarden;\n",
       "vs:#main-end":
         "vPhase = fract(sin(dot(instancePositions.xy, vec2(12.9898, 78.233))) * 43758.5453);\n" +
-        "vSeed = instanceSeeds;\n",
+        "vSeed = instanceSeeds;\n" +
+        "vGarden = instanceLineColors;\n",
     };
     return shaders;
   }
@@ -419,6 +473,7 @@ export class EmotionGlowLayer extends ScatterplotLayer<
       emberHeartR: 0.5,
       emberHeartOff: 0.22,
       emberWarmth: 0.35,
+      garden: 0,
       ...light,
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -449,6 +504,7 @@ export class EmotionGlowLayer extends ScatterplotLayer<
         emberHeartR: p.emberHeartR,
         emberHeartOff: p.emberHeartOff,
         emberWarmth: p.emberWarmth,
+        garden: p.garden,
       },
     });
     super.draw(params as never);

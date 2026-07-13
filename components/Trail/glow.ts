@@ -16,6 +16,8 @@ import {
   type GlowDatum,
 } from "./GlowLayer";
 import { journalTestMode, journalTestPoints, JOURNAL_TEST_VERSION } from "./testJournal";
+import { currentLook } from "@/components/Map/lookState";
+import { buildGalleryTrailLayers } from "./galleryGlow";
 import type { LivePoint } from "@/lib/momentsStore";
 import { GLOW, LAMP, TRAIL } from "@/components/Map/tune";
 
@@ -319,12 +321,23 @@ export function buildTrailLayers(
   /** Chrome ink weight (inkWeight upstream): 0 = pale ink on dark ground,
    *  1 = graphite on light ground. Threads + cues follow it. */
   ink = 0,
+  /** Thread looks only: an aurora connection was tapped (gapMs, x, y). */
+  onTapGap?: (gapMs: number, x: number, y: number) => void,
 ) {
   // DEV ONLY (`?journal=test`): the dense judging set — ~60 moments over
   // 3 months, home + work clusters + scatter. Never touches the store.
   if (journalTestMode()) {
     data = journalTestPoints();
     version = JOURNAL_TEST_VERSION;
+  }
+  // THE ONE GALLERY (merge, 07-13): the active look chooses its journal.
+  // Ben's forever-ember renders below; Eli's aurora THREAD and GARDEN
+  // render in galleryGlow.ts, preserved whole.
+  const journalKind = currentLook().config.journal;
+  if (journalKind !== "ember") {
+    return buildGalleryTrailLayers(
+      data, version, timeSec, zoom, fade, paper, onTapEntry, onTapCluster, onTapGap,
+    );
   }
   if (fade < 0.01 || data.length === 0) return [];
 

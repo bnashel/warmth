@@ -96,6 +96,14 @@ export function worldFromUrl(): WorldName {
   return (worldCache = "night");
 }
 
+/** THE ONE WORLD (merge, 2026-07-13): the gallery switches worlds LIVE —
+ *  a look entry may carry world:"paper", overriding the URL choice. Every
+ *  consumer calls worldFromUrl() fresh; MapStage rebuilds the style and
+ *  the field engine when it flips. */
+export function setWorld(w: WorldName): void {
+  worldCache = w;
+}
+
 /**
  * Chrome ink weight: "how light is the ground under this text/orb?"
  * Night world: the paper scalar (0 in product; ramps under ?daylight).

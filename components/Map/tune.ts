@@ -592,6 +592,10 @@ export const PIGMENT = {
    *  front; rim = the darker wet edge pooling ahead of it; labPull =
    *  how hard the drop drags local hue toward its feeling. */
   drop: { own: 2.4, ringStain: 1.6, fill: 0.5, rim: 0.45, labPull: 0.6 },
+  /** Paper-only hue overrides (Eli, 07-13): joy's brand lemon goes muddy
+   *  as pigment on bone — on the sheet it is true sun-yellow. Night hues
+   *  are untouched. */
+  hues: { joy: "#F2C010" } as Partial<Record<string, string>>,
 } as const;
 
 export const WOVEN = {

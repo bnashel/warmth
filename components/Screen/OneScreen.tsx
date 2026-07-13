@@ -14,6 +14,7 @@ import { EMOTION_HUES as EMOTION_HUES_SAFE, SPRING, type Emotion } from "@/lib/t
 import { Atmosphere, MissingToken } from "@/components/Map/Atmosphere";
 import { Lightning } from "@/components/Map/Lightning";
 import MapStage from "@/components/Map/MapStage";
+import { LookGallery, galleryEnabled } from "@/components/Lab/LookGallery";
 import { ambientSeedMoments } from "@/components/Map/ambientSeed";
 import { fetchPublicField, subscribePublicField, markSelfCommit } from "@/lib/publicField";
 import { CAMERA, CHOREO, MOTION } from "@/components/Map/tune";
@@ -24,6 +25,26 @@ import { WeatherPreview } from "@/components/Lab/WeatherPreview";
 import { MemoryCard } from "@/components/Trail/MemoryCard";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
+
+/** "3 months apart" — the aurora's time-gap whisper (tap a connection). */
+function gapLabel(ms: number): string {
+  const minutes = ms / 60_000;
+  const hours = minutes / 60;
+  const days = hours / 24;
+  const weeks = days / 7;
+  const months = days / 30.44;
+  const years = days / 365.25;
+  const n = (v: number, unit: string) => {
+    const r = Math.round(v);
+    return r === 1 ? `${unit === "an hour" ? "an hour" : `a ${unit}`} apart` : `${r} ${unit}s apart`;
+  };
+  if (minutes < 45) return "moments apart";
+  if (hours < 36) return n(hours, "hour").replace("a hour", "an hour");
+  if (days < 10) return n(days, "day");
+  if (weeks < 8) return n(weeks, "week");
+  if (months < 18) return n(months, "month");
+  return n(years, "year");
+}
 
 const VIEWS = [
   { key: "public", label: "public", caption: "the whole city, feeling together" },
@@ -100,6 +121,16 @@ export default function OneScreen() {
       return 0;
     }
   });
+  // Aurora time-gap whisper (thread looks): tap a connection between two
+  // memories and the time between them surfaces there, then breathes away.
+  const [gapChip, setGapChip] = useState<{ text: string; x: number; y: number } | null>(null);
+  const gapTimer = useRef<number | null>(null);
+  // THE ONE GALLERY (dev-only chip). Set a beat after mount: SSR-stable.
+  const [galleryOn, setGalleryOn] = useState(false);
+  useEffect(() => {
+    const id = window.setTimeout(() => setGalleryOn(galleryEnabled()), 0);
+    return () => window.clearTimeout(id);
+  }, []);
   const [view, setView] = useState<ViewKey>("public");
   // The trail rehydrates from localStorage when the store module loads —
   // by first render the diary already knows if it has entries.
@@ -335,6 +366,11 @@ export default function OneScreen() {
             mapRef.current = m;
           }}
           onEntryTap={(id) => setEditingId(id)}
+          onGapTap={(gapMs, x, y) => {
+            setGapChip({ text: gapLabel(gapMs), x, y });
+            if (gapTimer.current) window.clearTimeout(gapTimer.current);
+            gapTimer.current = window.setTimeout(() => setGapChip(null), 2600);
+          }}
         />
       ) : (
         <MissingToken />
@@ -629,6 +665,45 @@ export default function OneScreen() {
           </motion.p>
         )}
       </AnimatePresence>
+      {/* The aurora's answer: tap a connection, learn the distance in time
+          between its two memories. A quiet glass chip at the tap, gone soon. */}
+      <AnimatePresence>
+        {view === "private" && gapChip && (
+          <motion.p
+            key={`${gapChip.x}:${gapChip.y}:${gapChip.text}`}
+            initial={{ opacity: 0, y: 6, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={SPRING.settle}
+            style={{
+              position: "absolute",
+              left: gapChip.x,
+              top: gapChip.y - 44,
+              x: "-50%",
+              zIndex: 12,
+              margin: 0,
+              padding: "7px 13px",
+              borderRadius: 999,
+              background: "rgba(16,13,20,0.72)",
+              border: "1px solid rgba(244,220,180,0.16)",
+              backdropFilter: "blur(12px)",
+              WebkitBackdropFilter: "blur(12px)",
+              color: "rgba(240,224,196,0.88)",
+              fontSize: 12,
+              letterSpacing: "0.04em",
+              pointerEvents: "none",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {gapChip.text}
+          </motion.p>
+        )}
+      </AnimatePresence>
+
+      {/* THE ONE GALLERY (merge, 07-13): every look from both trunks —
+          Eli's nine, Ben's four pond looks, and the PAPER WORLD — one
+          dropdown, live switches. Dev builds (or ?looks=1). */}
+      {galleryOn && <LookGallery />}
     </div>
   );
 }
