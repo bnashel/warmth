@@ -29,10 +29,12 @@ export const CAMERA = {
 } as const;
 
 export const MOTION = {
-  /** Pan glide: lower deceleration = longer, heavier glide (glass feel). */
-  dragPan: { linearity: 0.28, maxSpeed: 1200, deceleration: 1900 },
+  /** Pan glide: lower deceleration = longer, heavier glide (glass feel).
+   *  Softened 07-14 (Eli: smoother movement everywhere) — the release
+   *  now glides further and settles more gradually, never abruptly. */
+  dragPan: { linearity: 0.22, maxSpeed: 1300, deceleration: 1450 },
   /** Wheel/pinch zoom rate — lower = weightier, more anchored zoom. */
-  wheelZoomRate: 1 / 460,
+  wheelZoomRate: 1 / 560, // weightier 07-14: each notch travels less, reads smoother
   /** Cross-fade for tile/label raster fades, ms. Longer = dreamier arrivals. */
   fadeDurationMs: 600,
 } as const;
@@ -449,7 +451,10 @@ export const PERF = {
    *  visually near-identical on a dark map. Ben's lag report, honored. */
   maxPixelRatio: 2,
   /** rAF cadence at rest (ms between pushes) — breath stays smooth. */
-  restFrameMs: 66,
+  /** Raised to 30fps at rest (was 15) 07-14, Eli: the field's breath and
+   *  the journal's sway visibly stepped at 66ms — smoothness is the
+   *  product. Still half of full rate; moving/blooming stays uncapped. */
+  restFrameMs: 33,
 } as const;
 
 /* ------------------------------------------------------------------ */
