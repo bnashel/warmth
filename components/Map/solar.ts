@@ -11,7 +11,8 @@
  */
 import type { ExpressionSpecification, Map as MapboxMap } from "mapbox-gl";
 import type { AtmosphereState } from "@/lib/atmosphere";
-import { INK, JOURNEY, PAPER, SOLAR, WEATHER } from "./tune";
+import { EMOTION_HUES, type Emotion } from "@/lib/theme";
+import { INK, JOURNEY, PAPER, PIGMENT, SOLAR, WEATHER } from "./tune";
 import { roadOpacityExpr, roadWidthExpr } from "./styles";
 
 type InkKey = "bg" | "water" | "park" | "building" | "road";
@@ -102,6 +103,19 @@ export function worldFromUrl(): WorldName {
  *  the field engine when it flips. */
 export function setWorld(w: WorldName): void {
   worldCache = w;
+}
+
+/**
+ * The hex an emotion wears in the CURRENT world — the ONE source of truth
+ * for world-aware feeling color. Night worlds use the brand palette exactly
+ * (lib/theme, Eli's bake-off pick — never edited). THE PAPER WORLD swaps in
+ * PIGMENT.hues where a brand hue dies as pigment on bone: joy's lemon goes
+ * muddy on the sheet, so on paper joy is true sun-yellow (#F2C010). Every
+ * renderer that colors feeling routes through here — the field engines at
+ * construction, the store's point hues at add/retint time.
+ */
+export function emotionHue(e: Emotion): string {
+  return (worldFromUrl() === "paper" && PIGMENT.hues[e]) || EMOTION_HUES[e];
 }
 
 /**

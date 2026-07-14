@@ -295,7 +295,7 @@ export const LOOKS: LookDef[] = [
     id: "paper-world",
     name: "PAPER WORLD · ben",
     date: "07-12",
-    note: "FROM SCRATCH (Ben): the bone sheet — a sky-graded paper city where feelings soak in as granulated pigment and a commit blooms as a spreading ink drop. Joy on paper is true sun-yellow.",
+    note: "FROM SCRATCH (Ben): the bone sheet — a sky-graded paper city where feelings soak in as granulated pigment and a commit blooms as a spreading ink drop. Joy on paper is true sun-yellow (#F2C010).",
     engine: "pond", pond: "still-water", world: "paper",
     config: { shape: { warpAmp: 0, scale: 0, drift: 0, streak: 0, band: 0, smoothWarp: 1 }, dials: { ...POND_DIALS }, journal: "ember" },
   },

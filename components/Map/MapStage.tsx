@@ -121,6 +121,10 @@ export default function MapStage({
     const want = currentLook().world ?? "night";
     if (want !== worldFromUrl()) {
       setWorld(want);
+      // Point hues are baked at add-time and world-aware (PIGMENT.hues —
+      // joy is sun-yellow on paper): re-ink the standing points so the
+      // journal's marks cross worlds with the map.
+      momentsStore.retint();
       fieldRef.current = null; // the style swap drops the custom layers
       precipRef.current = null;
       labelCache.current = null;

@@ -24,9 +24,10 @@
  * All look-tunables live in tune.ts (FIELD); this file is the machinery.
  */
 import mapboxgl, { type CustomLayerInterface, type Map as MapboxMap } from "mapbox-gl";
-import { EMOTION_HUES, EMOTIONS } from "@/lib/theme";
+import { EMOTIONS } from "@/lib/theme";
 import type { LivePoint } from "@/lib/momentsStore";
 import { CAMERA, WEATHER } from "./tune";
+import { emotionHue } from "./solar";
 import { FELT, FIELD, SHAPES, WOVEN } from "./galleryTune";
 import { currentLook } from "./lookState";
 
@@ -718,7 +719,11 @@ export class GalleryFieldLayer implements CustomLayerInterface {
 
   constructor() {
     EMOTIONS.forEach((e, i) => {
-      const [, a, b] = hexToOklab(EMOTION_HUES[e]);
+      // World-aware hue (solar.emotionHue — the one PIGMENT.hues gate):
+      // every gallery look stands on the night city today, so this is the
+      // brand palette verbatim; if a gallery look ever crosses to paper,
+      // its pigment (uMode 2) picks up the paper overrides for free.
+      const [, a, b] = hexToOklab(emotionHue(e));
       // Equal feeling = equal light: anchors share one OKLab lightness
       // (raw hues span a wide L range, which made cooler hues glow dimmer
       // than Joy for the same intensity). Hue stays the brand's; chroma

@@ -9,12 +9,16 @@
  * the data is built here and handed straight to the trail renderer.
  */
 import type { LivePoint } from "@/lib/momentsStore";
-import { EMOTION_HUES, EMOTIONS, type Emotion } from "@/lib/theme";
+import { EMOTIONS, type Emotion } from "@/lib/theme";
+import { emotionHue, worldFromUrl } from "@/components/Map/solar";
 import { TRAIL } from "@/components/Map/tune";
 
 export const JOURNAL_TEST_VERSION = 987654321; // fixed: caches stay warm
 
 let cached: LivePoint[] | null = null;
+/** Hues are world-aware (PIGMENT.hues on paper), so the cache keys on the
+ *  world and rebuilds if the gallery flips night ↔ paper mid-session. */
+let cachedWorld: string | null = null;
 let modeChecked: boolean | null = null;
 
 export function journalTestMode(): boolean {
@@ -52,7 +56,7 @@ function journalWeight(intensity: number, ageDays: number): number {
 }
 
 export function journalTestPoints(): LivePoint[] {
-  if (cached) return cached;
+  if (cached && cachedWorld === worldFromUrl()) return cached;
   const rng = mulberry32(0xe11e11);
   const now = Date.now();
   const pts: LivePoint[] = [];
@@ -69,7 +73,7 @@ export function journalTestPoints(): LivePoint[] {
     pts.push({
       id,
       position: [lng, lat],
-      hue: hexToRgb(EMOTION_HUES[emotion]),
+      hue: hexToRgb(emotionHue(emotion)), // world-aware: sun-yellow joy on paper
       weight: journalWeight(intensity, ageDays),
       emotion,
       intensity,
@@ -137,5 +141,6 @@ export function journalTestPoints(): LivePoint[] {
     );
   }
   cached = pts;
+  cachedWorld = worldFromUrl();
   return pts;
 }

@@ -17,10 +17,10 @@
  * All look-tunables live in tune.ts (FIELD); this file is the machinery.
  */
 import mapboxgl, { type CustomLayerInterface, type Map as MapboxMap } from "mapbox-gl";
-import { EMOTION_HUES, EMOTIONS } from "@/lib/theme";
+import { EMOTIONS } from "@/lib/theme";
 import type { LivePoint } from "@/lib/momentsStore";
 import { CAMERA, DEFAULT_LOOK, FIELD, LOOKS, PIGMENT, WEATHER, WOVEN } from "./tune";
-import { worldFromUrl } from "./solar";
+import { emotionHue, worldFromUrl } from "./solar";
 
 /* ---------------- OKLab (Björn Ottosson, via components/Orb/oklch.ts) --- */
 
@@ -681,8 +681,10 @@ export class FieldLayer implements CustomLayerInterface {
   constructor() {
     EMOTIONS.forEach((e, i) => {
       // THE PAPER WORLD wears its own joy (Eli, 07-13): the brand lemon
-      // reads muddy as pigment on bone — on paper, joy is true sun-yellow.
-      const hex = (this.paperWorld && PIGMENT.hues[e]) || EMOTION_HUES[e];
+      // reads muddy as pigment on bone — on paper, joy is true sun-yellow
+      // (#F2C010). solar.emotionHue is the ONE source of truth (PIGMENT.hues);
+      // a fresh engine is built per world swap, so construction-time is safe.
+      const hex = emotionHue(e);
       const [, a, b] = hexToOklab(hex);
       // Equal feeling = equal light: anchors share one OKLab lightness
       // (raw hues span a wide L range, which made cooler hues glow dimmer

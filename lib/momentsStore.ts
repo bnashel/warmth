@@ -18,6 +18,7 @@
  */
 import { CHOREO, FIELD, GLOW, RECENCY, TRAIL } from "@/components/Map/tune";
 import { currentLook } from "@/components/Map/lookState";
+import { emotionHue } from "@/components/Map/solar";
 import { EMOTION_HUES, type Emotion } from "@/lib/theme";
 import { pushMemoryToCloud, pushMomentToCloud } from "@/lib/sync";
 import type { PublicCell } from "@/lib/publicField";
@@ -205,7 +206,10 @@ class MomentsStore {
     return {
       id: m.id,
       position: [m.lng, m.lat],
-      hue: hexToRgb(EMOTION_HUES[m.emotion]),
+      // World-aware (solar.emotionHue): the trail's marks draw straight
+      // from this hue, and THE PAPER WORLD wears its own pigment hues
+      // (PIGMENT.hues — joy's lemon is sun-yellow #F2C010 on the sheet).
+      hue: hexToRgb(emotionHue(m.emotion)),
       // Born dark, raised by the arrival envelope — unless quiet (seed /
       // rehydration), where the light must simply already be standing.
       weight: 0,
@@ -402,6 +406,22 @@ class MomentsStore {
       },
       { quiet: false },
     );
+  }
+
+  /**
+   * Re-tint every standing point for the CURRENT world (solar.emotionHue).
+   * Called when the gallery flips worlds live (night ↔ paper): hues are
+   * baked into points at add-time, so a flip must re-ink them or the
+   * journal's marks keep the old world's color. In-place mutation on the
+   * same arrays (no re-alloc); the version bumps re-key deck's color
+   * accessors and re-feed the field next tick.
+   */
+  retint(): void {
+    for (const p of this.points) p.hue = hexToRgb(emotionHue(p.emotion));
+    for (const p of this.ownPoints) p.hue = hexToRgb(emotionHue(p.emotion));
+    this.version++;
+    this.ownVersion++;
+    this.dirty = true;
   }
 
   /** Seed data is lab-only; the product screen sweeps it on mount. */
