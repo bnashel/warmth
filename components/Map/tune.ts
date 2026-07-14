@@ -593,8 +593,13 @@ export const PIGMENT = {
    *  how hard the drop drags local hue toward its feeling. */
   drop: { own: 2.4, ringStain: 1.6, fill: 0.5, rim: 0.45, labPull: 0.6 },
   /** Paper-only hue overrides (Eli, 07-13): joy's brand lemon goes muddy
-   *  as pigment on bone — on the sheet it is true sun-yellow. Night hues
-   *  are untouched. */
+   *  as pigment on bone — on the sheet it is true sun-yellow (#F2C010).
+   *  Night hues are untouched; every renderer reads these through
+   *  solar.emotionHue (the one gate). Readability pass (07-14): the other
+   *  four brand hues keep their identity through the pigment transform
+   *  (L 0.6 / chroma ×1.5 on bone) — coral deepens to terracotta, rose to
+   *  deep rose, lilac to violet, mint to jade — so restraint wins: joy is
+   *  the only override. */
   hues: { joy: "#F2C010" } as Partial<Record<string, string>>,
 } as const;
 
