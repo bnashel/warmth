@@ -140,6 +140,52 @@ export function OrbFlow({
 
   /* ---------- discrete React state ---------- */
   const [phase, setPhase] = useState<Phase>("idle");
+  // FIRST-USE HINT (07-14): a one-time whisper above the orb — how the
+  // gesture works. Gone forever after one successful drop or a tap-away
+  // (localStorage "warmth_orb_tutorial_seen").
+  const [hintOn, setHintOn] = useState(false);
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      try {
+        if (window.localStorage.getItem("warmth_orb_tutorial_seen") !== "1") setHintOn(true);
+      } catch { /* storage blocked: no hint, no harm */ }
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, []);
+  const hintOnRef = useRef(false);
+  useEffect(() => { hintOnRef.current = hintOn; }, [hintOn]);
+  const retireHint = () => {
+    try { window.localStorage.setItem("warmth_orb_tutorial_seen", "1"); } catch { /* ok */ }
+    setHintOn(false);
+  };
+  // Tap-away anywhere outside the orb retires it.
+  useEffect(() => {
+    if (!hintOn) return;
+    const away = (e: PointerEvent) => {
+      if (!(e.target as HTMLElement)?.closest?.("[data-orb-hit]")) retireHint();
+    };
+    window.addEventListener("pointerdown", away);
+    return () => window.removeEventListener("pointerdown", away);
+     
+  }, [hintOn]);
+
+  // THE INVITE (07-14, discoverability): before anyone touches it, the
+  // orb visibly asks — two gentle swells shortly after mount (mobile has
+  // no hover), and a slight lift under the cursor on desktop. Idle-only:
+  // the moment a gesture starts, the invite never fights it.
+  useEffect(() => {
+    let cancelled = false;
+    const t = window.setTimeout(async () => {
+      if (cancelled || phaseRef.current !== "idle") return;
+      for (let i = 0; i < 2; i++) {
+        if (cancelled || phaseRef.current !== "idle") return;
+        await animate(baseScale, 1.07, spring(SPRINGS.settle));
+        if (cancelled || phaseRef.current !== "idle") return;
+        await animate(baseScale, 1, spring(SPRINGS.settle));
+      }
+    }, 1400);
+    return () => { cancelled = true; window.clearTimeout(t); };
+  }, []);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const [lockedEmotion, setLockedEmotion] = useState<Emotion | null>(null);
   const [burst, setBurst] = useState<{ seed: number; rgb: string; scale: number } | null>(
@@ -390,6 +436,7 @@ export function OrbFlow({
 
   /* ---------- commit / cancel ---------- */
   function commit(emotion: Emotion) {
+    if (hintOnRef.current) retireHint(); // one real drop = lesson learned
     const st = g.current;
     st.pointerId = null;
     const committedRgb = rgb.get();
@@ -488,7 +535,16 @@ export function OrbFlow({
 
   return (
     <div
+      data-orb-hit
       onPointerDown={onPointerDown}
+      onPointerEnter={(e) => {
+        if (e.pointerType === "mouse" && phaseRef.current === "idle")
+          animate(baseScale, 1.045, spring(SPRINGS.settle));
+      }}
+      onPointerLeave={(e) => {
+        if (e.pointerType === "mouse" && phaseRef.current === "idle")
+          animate(baseScale, 1, spring(SPRINGS.settle));
+      }}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerEnd}
       onPointerCancel={(e) => {
@@ -725,6 +781,50 @@ export function OrbFlow({
         )}
       </AnimatePresence>
 
+      {/* the one-time gesture whisper */}
+      <AnimatePresence>
+        {hintOn && (
+          <motion.div
+            key="orb-hint"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 6, transition: { duration: 0.35 } }}
+            transition={{ delay: 2.2, duration: 0.6 }}
+            style={{
+              position: "absolute",
+              bottom: "112%",
+              left: "50%",
+              transform: "translateX(-50%)",
+              width: 210,
+              marginLeft: -105,
+              textAlign: "center",
+              pointerEvents: "none",
+              zIndex: 8,
+            }}
+          >
+            <svg width="54" height="20" viewBox="0 0 54 20" style={{ display: "block", margin: "0 auto 6px" }}>
+              <path d="M 5 16 A 24 24 0 0 1 49 16" fill="none" stroke={chromeInk(0.4)} strokeWidth="1.5" strokeLinecap="round" strokeDasharray="1 5" />
+              <motion.circle
+                r="2.6"
+                fill={chromeInk(0.9)}
+                animate={{ cx: [7, 47, 7], cy: [15, 15, 15] }}
+                transition={{ duration: 2.6, repeat: Infinity, ease: "easeInOut" }}
+              />
+            </svg>
+            <span
+              style={{
+                fontSize: 12.5,
+                lineHeight: 1.5,
+                letterSpacing: "0.03em",
+                color: chromeInk(0.85),
+                textShadow: paper > 0.5 ? "none" : "0 1px 10px rgba(0,0,0,0.5)",
+              }}
+            >
+              hold the orb, then slide — how strong does it feel?
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <Orb rgb={rgb} scale={scale} haloAlpha={haloAlpha} paper={paper} />
 
       {/* The reward — never the same twice. */}

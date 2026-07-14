@@ -15,6 +15,8 @@ import { Atmosphere, MissingToken } from "@/components/Map/Atmosphere";
 import { Lightning } from "@/components/Map/Lightning";
 import MapStage from "@/components/Map/MapStage";
 import { LookGallery, galleryEnabled } from "@/components/Lab/LookGallery";
+import IntroVeil from "@/components/Screen/IntroVeil";
+import EmotionLegend from "@/components/Map/EmotionLegend";
 import { ambientSeedMoments } from "@/components/Map/ambientSeed";
 import { fetchPublicField, subscribePublicField, markSelfCommit } from "@/lib/publicField";
 import { CAMERA, CHOREO, MOTION } from "@/components/Map/tune";
@@ -704,6 +706,13 @@ export default function OneScreen() {
           Eli's nine, Ben's four pond looks, and the PAPER WORLD — one
           dropdown, live switches. Dev builds (or ?looks=1). */}
       {galleryOn && <LookGallery />}
+      {/* THE LEGEND (07-14): five glowing dots, bottom-left — which color
+          is which feeling. Reads over night and paper alike. */}
+      <EmotionLegend />
+
+      {/* THE FIRST HELLO (07-14): a one-time veil for brand-new users —
+          three lines, tap to skip, the live city breathing underneath. */}
+      <IntroVeil />
     </div>
   );
 }
