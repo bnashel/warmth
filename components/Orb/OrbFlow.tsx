@@ -164,8 +164,13 @@ export function OrbFlow({
     const away = (e: PointerEvent) => {
       if (!(e.target as HTMLElement)?.closest?.("[data-orb-hit]")) retireHint();
     };
-    window.addEventListener("pointerdown", away);
-    return () => window.removeEventListener("pointerdown", away);
+    // Armed only once the whisper is actually visible (~2.2s fade-in) —
+    // otherwise skipping the intro veil would retire it unseen.
+    const arm = window.setTimeout(() => window.addEventListener("pointerdown", away), 3400);
+    return () => {
+      window.clearTimeout(arm);
+      window.removeEventListener("pointerdown", away);
+    };
      
   }, [hintOn]);
 
@@ -804,12 +809,9 @@ export function OrbFlow({
           >
             <svg width="54" height="20" viewBox="0 0 54 20" style={{ display: "block", margin: "0 auto 6px" }}>
               <path d="M 5 16 A 24 24 0 0 1 49 16" fill="none" stroke={chromeInk(0.4)} strokeWidth="1.5" strokeLinecap="round" strokeDasharray="1 5" />
-              <motion.circle
-                r="2.6"
-                fill={chromeInk(0.9)}
-                animate={{ cx: [7, 47, 7], cy: [15, 15, 15] }}
-                transition={{ duration: 2.6, repeat: Infinity, ease: "easeInOut" }}
-              />
+              <circle cx="7" cy="15" r="2.6" fill={chromeInk(0.9)}>
+                <animate attributeName="cx" values="7;47;7" dur="2.6s" repeatCount="indefinite" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1" />
+              </circle>
             </svg>
             <span
               style={{

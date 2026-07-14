@@ -17,6 +17,21 @@ import { SPRING } from "@/lib/theme";
 import { LOOKS } from "@/components/Map/looks";
 import { currentLook, favoriteId, onLookChange, setFavorite, setLook } from "@/components/Map/lookState";
 
+/** PRESENTER MODE (?present=1): client-facing — hides dates, authorship
+ *  tags, and the experiments group so the dropdown reads as a clean set
+ *  of visual directions during a demo. */
+export function presenterMode(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("present") === "1";
+}
+
+/** The demo-ready set (proposed 07-14 — adjust with Ben in one place).
+ *  Everything else files under "earlier experiments". */
+const FINISHED = new Set([
+  "night-weather", "the-garden", "night-air", "felt-emotions",
+  "paper-world", "ben-still-water", "ben-living-water",
+]);
+
 export function galleryEnabled(): boolean {
   if (typeof window === "undefined") return false;
   if (process.env.NODE_ENV === "development") return true;
@@ -68,12 +83,39 @@ export function LookGallery() {
             width: 236,
           }}
         >
-          {[...LOOKS].reverse().map((l) => (
+          {(() => {
+            const present = presenterMode();
+            const all = [...LOOKS].reverse();
+            const groups: { title: string; items: typeof all }[] = [
+              { title: present ? "worlds" : "finished worlds", items: all.filter((l) => FINISHED.has(l.id)) },
+              ...(present ? [] : [{ title: "earlier experiments", items: all.filter((l) => !FINISHED.has(l.id)) }]),
+            ];
+            const label = (name: string) => (present ? name.replace(/\s*·\s*ben$/i, "") : name);
+            return groups.flatMap((g) => [
+              <div
+                key={`h-${g.title}`}
+                style={{
+                  padding: "8px 9px 4px",
+                  fontSize: 9.5,
+                  letterSpacing: "0.16em",
+                  textTransform: "uppercase" as const,
+                  color: "rgba(233,236,244,0.35)",
+                }}
+              >
+                {g.title}
+              </div>,
+              ...g.items.map((l) => (
             <div key={l.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <button
                 type="button"
                 onClick={() => setLook(l.id)}
                 title={l.note}
+                onMouseEnter={(e) => {
+                  if (l.id !== activeId) e.currentTarget.style.background = "rgba(233,236,244,0.06)";
+                }}
+                onMouseLeave={(e) => {
+                  if (l.id !== activeId) e.currentTarget.style.background = "transparent";
+                }}
                 style={{
                   flex: 1,
                   textAlign: "left",
@@ -81,13 +123,19 @@ export function LookGallery() {
                   borderRadius: 9,
                   border: "none",
                   cursor: "pointer",
+                  transition: "background 160ms ease, color 160ms ease",
                   background: l.id === activeId ? "rgba(233,236,244,0.12)" : "transparent",
+                  boxShadow: l.id === activeId ? "0 0 14px -6px rgba(233,236,244,0.55)" : "none",
                   color: l.id === activeId ? "rgba(233,236,244,0.95)" : "rgba(233,236,244,0.6)",
                   fontSize: 12,
+                  fontWeight: 300,
+                  letterSpacing: "0.02em",
                 }}
               >
-                {l.name}
-                <span style={{ opacity: 0.45, marginLeft: 6, fontSize: 10.5 }}>{l.date}</span>
+                {label(l.name)}
+                {!present && (
+                  <span style={{ opacity: 0.45, marginLeft: 6, fontSize: 10.5 }}>{l.date}</span>
+                )}
               </button>
               <button
                 type="button"
@@ -107,7 +155,9 @@ export function LookGallery() {
                 ★
               </button>
             </div>
-          ))}
+              )),
+            ]);
+          })()}
         </motion.div>
       )}
       </AnimatePresence>
