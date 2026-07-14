@@ -284,6 +284,10 @@ export default function MapStage({
     let lastFrame = 0;
     let lastRainPush = 0;
     let trailShown = false;
+    // Borough-cap dims are a pure function of (store version, boroughsGone)
+    // — cached so the O(points × boroughs) loop and its array + string
+    // allocations stop running on every push (perf pass, 2026-07-14).
+    let dimsCache: { version: number; gone: boolean; dims: number[]; key: string } | null = null;
     const tick = () => {
       raf = requestAnimationFrame(tick);
       const map = mapRef.current?.getMap();
@@ -417,22 +421,36 @@ export default function MapStage({
       const zoom = map.getZoom();
       // Borough caps yield to feeling: pooled field weight near each anchor
       // dims its cap (rule: no label ever fights a feeling). Quantized to
-      // eighths so the label cache only rebuilds on a real change.
+      // eighths so the label cache only rebuilds on a real change. Weights
+      // only move on a store version bump, so the loop reruns exactly then.
       const bd = LABELS.boroughFieldDim;
       const boroughsGone = zoom > LABELS.boroughFadeOut.to + 0.1;
-      const boroughDims = LABELS.boroughs.map((b) => {
-        if (boroughsGone) return 1; // invisible caps never churn the cache
-        let pooled = 0;
-        for (const p of momentsStore.points) {
-          if (p.seed) continue; // the ambient wash never dims a name
-          const dx = p.position[0] - b.anchor[0];
-          const dy = p.position[1] - b.anchor[1];
-          if (dx * dx + dy * dy < bd.radiusDeg * bd.radiusDeg) pooled += p.weight;
-        }
-        const dim = 1 - bd.dimMax * (pooled / (pooled + bd.halfWeight));
-        return Math.round(dim * 8) / 8;
-      });
-      const dimsKey = boroughDims.join(",");
+      if (
+        !dimsCache ||
+        dimsCache.version !== momentsStore.version ||
+        dimsCache.gone !== boroughsGone
+      ) {
+        const dims = LABELS.boroughs.map((b) => {
+          if (boroughsGone) return 1; // invisible caps never churn the cache
+          let pooled = 0;
+          for (const p of momentsStore.points) {
+            if (p.seed) continue; // the ambient wash never dims a name
+            const dx = p.position[0] - b.anchor[0];
+            const dy = p.position[1] - b.anchor[1];
+            if (dx * dx + dy * dy < bd.radiusDeg * bd.radiusDeg) pooled += p.weight;
+          }
+          const dim = 1 - bd.dimMax * (pooled / (pooled + bd.halfWeight));
+          return Math.round(dim * 8) / 8;
+        });
+        dimsCache = {
+          version: momentsStore.version,
+          gone: boroughsGone,
+          dims,
+          key: dims.join(","),
+        };
+      }
+      const boroughDims = dimsCache.dims;
+      const dimsKey = dimsCache.key;
       // Labels re-ink when the camera moves OR the paperness drifts (dawn,
       // dusk, a preview jump) — graphite on paper, whisper-white on ink.
       const labelsStale =

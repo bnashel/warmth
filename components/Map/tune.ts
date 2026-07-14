@@ -450,7 +450,53 @@ export const PERF = {
   maxPixelRatio: 2,
   /** rAF cadence at rest (ms between pushes) — breath stays smooth. */
   restFrameMs: 66,
+  /** LOW-TIER FIELD SCALE (perf pass, 2026-07-14): on genuinely weak
+   *  phones the field's offscreen buffers render at resolutionScale ×
+   *  this. The accumulation targets hold soft coreless bells that the
+   *  resolve upsamples bilinearly, so the cut is invisible at phone
+   *  viewing distance while the splat fill — the #1 low-end cost —
+   *  drops ~44%. Buffer resolution ONLY; visible character dials must
+   *  never key off the device tier. */
+  lowTierFieldScale: 0.75,
 } as const;
+
+/** Raw device pixel ratio, captured at module load — BEFORE MapStage's
+ *  maxPixelRatio override redefines window.devicePixelRatio (its scoped
+ *  getter would hide the true density from the tier heuristic below). */
+const RAW_DPR = typeof window !== "undefined" ? window.devicePixelRatio : 1;
+
+let lowTierCache: boolean | null = null;
+/**
+ * DEVICE TIER (perf pass, 2026-07-14) — a deliberately modest heuristic:
+ * CPU core count + raw DPR + a WebGL renderer-string sniff, nothing else,
+ * zero dependencies. Consumers may apply it only to INVISIBLE knobs
+ * (offscreen buffer resolution, precision) — never to any dial that
+ * changes a look's character. Cached after the first conclusive answer.
+ */
+export function isLowTierDevice(gl?: WebGL2RenderingContext): boolean {
+  if (lowTierCache !== null) return lowTierCache;
+  if (typeof navigator === "undefined") return false;
+  const cores = navigator.hardwareConcurrency || 8;
+  // ≤4 cores is genuinely low-end; a 3× screen driven by a mid CPU is
+  // fill-bound even under the canvas DPR cap.
+  if (cores <= 4 || (RAW_DPR >= 3 && cores <= 6)) return (lowTierCache = true);
+  if (!gl) return false; // no context yet — leave uncached, sniff later
+  try {
+    // Known entry-level mobile GPUs (conservative: older Adreno 2xx–5xx,
+    // Mali-4xx/T-series, entry Mali-G5x, budget PowerVR GE8xxx).
+    const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+    const renderer = String(
+      dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+    );
+    lowTierCache =
+      /Adreno[^\d]*[1-5]\d\d\b|Mali-4\d\d|Mali-T\d|Mali-G5[127]\b|PowerVR Rogue GE8/i.test(
+        renderer,
+      );
+  } catch {
+    lowTierCache = false; // the sniff is best-effort — never a blocker
+  }
+  return lowTierCache;
+}
 
 /* ------------------------------------------------------------------ */
 /* The commit choreography — orb burst → a beat → the city receives it */

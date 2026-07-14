@@ -174,6 +174,8 @@ const getClusterRadius = (d: SparkCluster) =>
  * on (version, quantized zoom) and reused across frames (code review). */
 let clusterCache: { key: string; clusters: SparkCluster[] } | null = null;
 let ringCache: { version: number; data: LivePoint[]; remembered: LivePoint[] } | null = null;
+/** The newest entry (the "now" cue) — same version-keyed reuse. */
+let newestCache: { version: number; data: LivePoint[]; last: LivePoint } | null = null;
 
 /* ---- THE THREAD (round 2, item 4 — off by default, on demand) --------
  * The always-on beaded network is gone (Ben + Eli). What remains is ONE
@@ -291,11 +293,22 @@ function cachedRemembered(data: LivePoint[], version: number): LivePoint[] {
 
 /** Which private renderer draws the memory marks. Default = THE EMBER
  *  (round 2, item 3); `?trail=splat` shows the old matte-gem for the
- *  side-by-side judging (loser gets deleted once Ben + Eli decide). */
+ *  side-by-side judging (loser gets deleted once Ben + Eli decide).
+ *  Memoized on the search string — this runs on every push while the
+ *  private view breathes, and URLSearchParams allocates + parses
+ *  (perf pass, 2026-07-14). */
+let rendererCache: { search: string; value: "ember" | "splat" } | null = null;
 function trailRenderer(): "ember" | "splat" {
   if (typeof window !== "undefined") {
-    const p = new URLSearchParams(window.location.search).get("trail");
-    if (p === "splat" || p === "ember") return p;
+    const search = window.location.search;
+    if (!rendererCache || rendererCache.search !== search) {
+      const p = new URLSearchParams(search).get("trail");
+      rendererCache = {
+        search,
+        value: p === "splat" || p === "ember" ? p : TRAIL.renderer,
+      };
+    }
+    return rendererCache.value;
   }
   return TRAIL.renderer;
 }
@@ -557,8 +570,16 @@ export function buildTrailLayers(
     // WHERE IT BEGAN → NOW: two whispers that make the journey legible at
     // a cold glance — "now" on the newest moment ONLY (round 2, item 4).
     if (data.length > 1) {
-      const byTime = [...data].sort((a, b) => a.createdAt - b.createdAt);
-      const last = byTime[byTime.length - 1];
+      // Version-keyed like the other trail caches: this was a full copy +
+      // sort on every push while the private view breathed (perf pass,
+      // 2026-07-14). `>=` keeps the stable sort's tie behavior (last
+      // occurrence of the newest timestamp wins).
+      if (!newestCache || newestCache.version !== version || newestCache.data !== data) {
+        let newest = data[0];
+        for (const p of data) if (p.createdAt >= newest.createdAt) newest = p;
+        newestCache = { version, data, last: newest };
+      }
+      const last = newestCache.last;
       layers.push(
         new TextLayer<LivePoint>({
           id: "journal-journey-cues",

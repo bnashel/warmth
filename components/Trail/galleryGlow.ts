@@ -141,6 +141,17 @@ const getClusterRadius = (d: SparkCluster) =>
  * on (version, quantized zoom) and reused across frames (code review). */
 let clusterCache: { key: string; clusters: SparkCluster[] } | null = null;
 let ringCache: { version: number; data: LivePoint[]; remembered: LivePoint[] } | null = null;
+/** Journey cues (oldest + newest + the "began" date label) — version-keyed
+ *  like the caches above: this was a full copy + sort AND an Intl
+ *  toLocaleDateString on every push while the private view breathed
+ *  (perf pass, 2026-07-14). */
+let cueCache: {
+  version: number;
+  data: LivePoint[];
+  first: LivePoint;
+  last: LivePoint;
+  began: string;
+} | null = null;
 
 /* ---- THE AURORA (Eli's redesign, 2026-07-08): the journey between ---- */
 
@@ -448,13 +459,27 @@ export function buildGalleryTrailLayers(
     // a cold glance — the oldest memory carries its date, the newest says
     // "now". Each speaks in its own entry's hue (no white in the journal).
     if (data.length > 1) {
-      const byTime = [...data].sort((a, b) => a.createdAt - b.createdAt);
-      const first = byTime[0];
-      const last = byTime[byTime.length - 1];
-      const began = new Date(first.createdAt).toLocaleDateString(undefined, {
-        month: "long",
-        day: "numeric",
-      });
+      // `<` / `>=` keep the stable sort's tie behavior (first occurrence of
+      // the oldest, last occurrence of the newest).
+      if (!cueCache || cueCache.version !== version || cueCache.data !== data) {
+        let oldest = data[0];
+        let newest = data[0];
+        for (const p of data) {
+          if (p.createdAt < oldest.createdAt) oldest = p;
+          if (p.createdAt >= newest.createdAt) newest = p;
+        }
+        cueCache = {
+          version,
+          data,
+          first: oldest,
+          last: newest,
+          began: new Date(oldest.createdAt).toLocaleDateString(undefined, {
+            month: "long",
+            day: "numeric",
+          }),
+        };
+      }
+      const { first, last, began } = cueCache;
       layers.push(
         new TextLayer<LivePoint>({
           id: "journal-journey-cues",

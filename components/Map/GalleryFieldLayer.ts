@@ -26,7 +26,7 @@
 import mapboxgl, { type CustomLayerInterface, type Map as MapboxMap } from "mapbox-gl";
 import { EMOTIONS } from "@/lib/theme";
 import type { LivePoint } from "@/lib/momentsStore";
-import { CAMERA, WEATHER } from "./tune";
+import { CAMERA, WEATHER, isLowTierDevice, PERF } from "./tune";
 import { emotionHue } from "./solar";
 import { FELT, FIELD, SHAPES, WOVEN } from "./galleryTune";
 import { currentLook } from "./lookState";
@@ -745,6 +745,10 @@ export class GalleryFieldLayer implements CustomLayerInterface {
       this.isSeed = new Uint8Array(Math.max(64, n * 2));
     }
     const d = this.instanceData;
+    // Geometry dials read through THE GALLERY (a look switch re-feeds
+    // this whole buffer via MapStage's subscription) — one read for the
+    // whole pass, not one per point (perf pass, 2026-07-14).
+    const lk = currentLook().config.dials;
     for (let i = 0; i < n; i++) {
       const p = points[i];
       // TWO LAYERS, ONE FIELD (2026-07-08): entries (commits + pocket
@@ -754,11 +758,8 @@ export class GalleryFieldLayer implements CustomLayerInterface {
       // scales with intensity: at middle distance everything sits on its
       // pixel floor, and one flat floor turned the city into uniform
       // polka dots (the medium-zoom valley, Eli 2026-07-08).
-      // Geometry dials read through THE GALLERY (a look switch re-feeds
-      // this whole buffer via MapStage's subscription). Under FELT
-      // EMOTIONS each feeling also has its own footprint: calm settles
-      // wide and soft, energy holds tight and defined, love reaches.
-      const lk = currentLook().config.dials;
+      // Under FELT EMOTIONS each feeling also has its own footprint: calm
+      // settles wide and soft, energy holds tight and defined, love reaches.
       const feltMul = lk.felt ? (FELT[p.emotion]?.radiusMul ?? 1) : 1;
       this.floorPx[i] = p.wash
         ? FIELD.wash.minRadiusPx
@@ -872,8 +873,13 @@ export class GalleryFieldLayer implements CustomLayerInterface {
   }
 
   private ensureTargets(gl: WebGL2RenderingContext) {
-    const w = Math.max(2, Math.round(gl.drawingBufferWidth * FIELD.resolutionScale));
-    const h = Math.max(2, Math.round(gl.drawingBufferHeight * FIELD.resolutionScale));
+    // PERF (2026-07-14): weak phones take the buffers a notch lower —
+    // the accum targets hold soft bells the resolve upsamples bilinearly,
+    // so the cut is invisible; only buffer resolution ever reads the tier.
+    const scale =
+      FIELD.resolutionScale * (isLowTierDevice(gl) ? PERF.lowTierFieldScale : 1);
+    const w = Math.max(2, Math.round(gl.drawingBufferWidth * scale));
+    const h = Math.max(2, Math.round(gl.drawingBufferHeight * scale));
     if (w === this.texW && h === this.texH && this.tex[0]) return;
     this.texW = w;
     this.texH = h;
@@ -920,6 +926,14 @@ export class GalleryFieldLayer implements CustomLayerInterface {
   prerender(gl: WebGL2RenderingContext, matrix: number[]) {
     this.bloomReady = false;
     if (!this.accumProgram || !this.map || this.fade < 0.01) return;
+    // Empty field: render() early-returns on count === 0, so the clear,
+    // the unprojections, and the target (re)build are all dead work here
+    // (perf pass, 2026-07-14 — the pre-data frames cost nothing now).
+    if (this.count === 0) return;
+    // One frame stamp per prerender: render() skips re-uploading the ~40
+    // shared resolve uniforms when the bloom path already set them this
+    // frame (uniforms are program state — mapbox can't touch ours).
+    this.frameStamp++;
     // One clock per frame, shared by every pass — the bloom's halo must
     // warp in perfect sync with the sharp field beneath it.
     if (this.epoch === 0) this.epoch = performance.now();
@@ -952,11 +966,6 @@ export class GalleryFieldLayer implements CustomLayerInterface {
     gl.viewport(0, 0, this.texW, this.texH);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    if (this.count === 0) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-      return;
-    }
 
     gl.useProgram(this.accumProgram);
     gl.bindVertexArray(this.quadVao);
@@ -994,13 +1003,11 @@ export class GalleryFieldLayer implements CustomLayerInterface {
       this.clampScale = mercPerCssPx;
     }
 
-    gl.uniformMatrix4fv(
-      gl.getUniformLocation(this.accumProgram, "uMatrix"),
-      false,
-      matrix,
-    );
+    // Locations via the cache — getUniformLocation is a per-frame driver
+    // string lookup otherwise (perf pass, 2026-07-14).
+    gl.uniformMatrix4fv(this.loc(gl, this.accumProgram, "acc", "uMatrix"), false, matrix);
     gl.uniform1f(
-      gl.getUniformLocation(this.accumProgram, "uSoftness"),
+      this.loc(gl, this.accumProgram, "acc", "uSoftness"),
       // One softness in every sky (constitution rule 2) — but the GALLERY
       // may choose it: "night air" runs long diffuse skirts (1.35), the
       // pool looks run defined hearts (2.5).
@@ -1059,6 +1066,12 @@ export class GalleryFieldLayer implements CustomLayerInterface {
   private floorPx = new Float32Array(0);
   private isSeed = new Uint8Array(0);
   private uniformCache = new Map<string, WebGLUniformLocation | null>();
+  /** Frame bookkeeping (perf pass, 2026-07-14): prerender bumps the stamp;
+   *  bindResolve uploads its ~40 uniforms once per stamp — the second call
+   *  in the same frame (bloom path + render) rebinds only program/VAO/
+   *  textures, since uniform values are program state and frame-constant. */
+  private frameStamp = 0;
+  private resolveStamp = -1;
 
   /** Uniform-location cache across our four programs. */
   private loc(
@@ -1081,10 +1094,21 @@ export class GalleryFieldLayer implements CustomLayerInterface {
     gl.useProgram(this.resolveProgram!);
     gl.bindVertexArray(this.resolveVao);
     const u = (name: string) => this.loc(gl, this.resolveProgram!, "res", name);
+    // Texture UNITS are context state — mapbox and the bloom blur rebind
+    // them between our passes, so these rebind every call…
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.tex[0]);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.tex[1]);
+    const mfBind = this.mercFrame;
+    if (this.maskReady && mfBind.ok) {
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
+    }
+    // …but uniform VALUES are program state and frame-constant: skip the
+    // ~40 re-uploads when the bloom path already set them this frame.
+    if (this.resolveStamp === this.frameStamp) return;
+    this.resolveStamp = this.frameStamp;
     gl.uniform1i(u("uField0"), 0);
     gl.uniform1i(u("uField1"), 1);
     gl.uniform3fv(u("uHueLab"), this.hueLab);
@@ -1150,11 +1174,10 @@ export class GalleryFieldLayer implements CustomLayerInterface {
       gl.uniform2f(u("uM2UvY"), 0, 0);
     }
     // The coastline (off until the mask texture lands — never a blocker).
+    // The TEXTURE2 bind itself happens above, before the once-per-frame gate.
     const maskOn = this.maskReady && mf.ok;
     gl.uniform1f(u("uMaskOn"), maskOn ? 1 : 0);
     if (maskOn) {
-      gl.activeTexture(gl.TEXTURE2);
-      gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
       gl.uniform1i(u("uMask"), 2);
       gl.uniform4f(u("uMaskRect"), ...this.maskRect);
       gl.uniform1f(u("uWaterAtten"), FIELD.landMask.waterAtten);

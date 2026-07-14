@@ -19,7 +19,7 @@
 import mapboxgl, { type CustomLayerInterface, type Map as MapboxMap } from "mapbox-gl";
 import { EMOTIONS } from "@/lib/theme";
 import type { LivePoint } from "@/lib/momentsStore";
-import { CAMERA, DEFAULT_LOOK, FIELD, LOOKS, PIGMENT, WEATHER, WOVEN } from "./tune";
+import { CAMERA, DEFAULT_LOOK, FIELD, LOOKS, PIGMENT, WEATHER, WOVEN, isLowTierDevice, PERF } from "./tune";
 import { emotionHue, worldFromUrl } from "./solar";
 
 /* ---------------- OKLab (Björn Ottosson, via components/Orb/oklch.ts) --- */
@@ -837,8 +837,13 @@ export class FieldLayer implements CustomLayerInterface {
   }
 
   private ensureTargets(gl: WebGL2RenderingContext) {
-    const w = Math.max(2, Math.round(gl.drawingBufferWidth * FIELD.resolutionScale));
-    const h = Math.max(2, Math.round(gl.drawingBufferHeight * FIELD.resolutionScale));
+    // PERF (2026-07-14): weak phones take the buffers a notch lower —
+    // the accum targets hold soft bells the resolve upsamples bilinearly,
+    // so the cut is invisible; only buffer resolution ever reads the tier.
+    const scale =
+      FIELD.resolutionScale * (isLowTierDevice(gl) ? PERF.lowTierFieldScale : 1);
+    const w = Math.max(2, Math.round(gl.drawingBufferWidth * scale));
+    const h = Math.max(2, Math.round(gl.drawingBufferHeight * scale));
     if (w === this.texW && h === this.texH && this.tex[0]) return;
     this.texW = w;
     this.texH = h;
@@ -885,6 +890,14 @@ export class FieldLayer implements CustomLayerInterface {
   prerender(gl: WebGL2RenderingContext, matrix: number[]) {
     this.bloomReady = false;
     if (!this.accumProgram || !this.map || this.fade < 0.01) return;
+    // Empty field: render() early-returns on count === 0, so the clear,
+    // the unprojections, and the target (re)build are all dead work here
+    // (perf pass, 2026-07-14 — the pre-data frames cost nothing now).
+    if (this.count === 0) return;
+    // One frame stamp per prerender: render() skips re-uploading the ~40
+    // shared resolve uniforms when the bloom path already set them this
+    // frame (uniforms are program state — mapbox can't touch ours).
+    this.frameStamp++;
     // One clock per frame, shared by every pass — the bloom's halo must
     // warp in perfect sync with the sharp field beneath it.
     if (this.epoch === 0) this.epoch = performance.now();
@@ -917,11 +930,6 @@ export class FieldLayer implements CustomLayerInterface {
     gl.viewport(0, 0, this.texW, this.texH);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    if (this.count === 0) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-      return;
-    }
 
     gl.useProgram(this.accumProgram);
     gl.bindVertexArray(this.quadVao);
@@ -959,13 +967,11 @@ export class FieldLayer implements CustomLayerInterface {
       this.clampScale = mercPerCssPx;
     }
 
-    gl.uniformMatrix4fv(
-      gl.getUniformLocation(this.accumProgram, "uMatrix"),
-      false,
-      matrix,
-    );
+    // Locations via the cache — getUniformLocation is a per-frame driver
+    // string lookup otherwise (perf pass, 2026-07-14).
+    gl.uniformMatrix4fv(this.loc(gl, this.accumProgram, "acc", "uMatrix"), false, matrix);
     gl.uniform1f(
-      gl.getUniformLocation(this.accumProgram, "uSoftness"),
+      this.loc(gl, this.accumProgram, "acc", "uSoftness"),
       // One softness in every sky (constitution rule 2).
       FIELD.kernelSoftness,
     );
@@ -1022,6 +1028,16 @@ export class FieldLayer implements CustomLayerInterface {
   private floorPx = new Float32Array(0);
   private isSeed = new Uint8Array(0);
   private uniformCache = new Map<string, WebGLUniformLocation | null>();
+  /** Frame bookkeeping (perf pass, 2026-07-14): prerender bumps the stamp;
+   *  bindResolve uploads its ~40 uniforms once per stamp — the second call
+   *  in the same frame (bloom path + render) rebinds only program/VAO/
+   *  textures, since uniform values are program state and frame-constant. */
+  private frameStamp = 0;
+  private resolveStamp = -1;
+  /** Preallocated ripple uniform scratch (≤8 rings — vec4[8] / vec3[8]);
+   *  was two fresh Float32Arrays per frame while any ring lived. */
+  private rippleArr = new Float32Array(32);
+  private rippleLab = new Float32Array(24);
 
   /** Uniform-location cache across our four programs. */
   private loc(
@@ -1044,10 +1060,21 @@ export class FieldLayer implements CustomLayerInterface {
     gl.useProgram(this.resolveProgram!);
     gl.bindVertexArray(this.resolveVao);
     const u = (name: string) => this.loc(gl, this.resolveProgram!, "res", name);
+    // Texture UNITS are context state — mapbox and the bloom blur rebind
+    // them between our passes, so these rebind every call…
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.tex[0]);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.tex[1]);
+    const mfBind = this.mercFrame;
+    if (this.maskReady && mfBind.ok) {
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
+    }
+    // …but uniform VALUES are program state and frame-constant: skip the
+    // ~40 re-uploads when the bloom path already set them this frame.
+    if (this.resolveStamp === this.frameStamp) return;
+    this.resolveStamp = this.frameStamp;
     gl.uniform1i(u("uField0"), 0);
     gl.uniform1i(u("uField1"), 1);
     gl.uniform3fv(u("uHueLab"), this.hueLab);
@@ -1081,12 +1108,24 @@ export class FieldLayer implements CustomLayerInterface {
       FIELD.breath.periodMs / 1000,
     );
     const nowR = performance.now();
-    this.ripples = this.ripples.filter((r) => nowR - r.start < FIELD.ripple.lifeMs);
-    gl.uniform1i(u("uArrN"), this.ripples.length);
-    if (this.ripples.length) {
-      const arr = new Float32Array(this.ripples.length * 4);
-      const labArr = new Float32Array(this.ripples.length * 3);
-      this.ripples.forEach((r, i) => {
+    // Expire in place + pack into preallocated scratch — this ran every
+    // frame, and .filter() + two fresh Float32Arrays were steady GC food
+    // on low-end phones (perf pass, 2026-07-14).
+    let live = 0;
+    for (let i = 0; i < this.ripples.length; i++) {
+      const r = this.ripples[i];
+      if (nowR - r.start < FIELD.ripple.lifeMs) {
+        if (live !== i) this.ripples[live] = r;
+        live++;
+      }
+    }
+    if (live !== this.ripples.length) this.ripples.length = live;
+    gl.uniform1i(u("uArrN"), live);
+    if (live) {
+      const arr = this.rippleArr;
+      const labArr = this.rippleLab;
+      for (let i = 0; i < live; i++) {
+        const r = this.ripples[i];
         arr[i * 4] = r.x;
         arr[i * 4 + 1] = r.y;
         arr[i * 4 + 2] = (nowR - r.start) / FIELD.ripple.lifeMs;
@@ -1094,7 +1133,9 @@ export class FieldLayer implements CustomLayerInterface {
         labArr[i * 3] = this.hueLab[r.ch * 3];
         labArr[i * 3 + 1] = this.hueLab[r.ch * 3 + 1];
         labArr[i * 3 + 2] = this.hueLab[r.ch * 3 + 2];
-      });
+      }
+      // Full-size upload (vec4[8]/vec3[8]) — entries past uArrN are never
+      // read by the shader loop, so stale floats are harmless.
       gl.uniform4fv(u("uArr"), arr);
       gl.uniform3fv(u("uArrLab"), labArr);
     }
@@ -1142,11 +1183,10 @@ export class FieldLayer implements CustomLayerInterface {
       gl.uniform4f(u("uRipple"), 0, 0, 0, 0);
     }
     // The coastline (off until the mask texture lands — never a blocker).
+    // The TEXTURE2 bind itself happens above, before the once-per-frame gate.
     const maskOn = this.maskReady && mf.ok;
     gl.uniform1f(u("uMaskOn"), maskOn ? 1 : 0);
     if (maskOn) {
-      gl.activeTexture(gl.TEXTURE2);
-      gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
       gl.uniform1i(u("uMask"), 2);
       gl.uniform4f(u("uMaskRect"), ...this.maskRect);
       gl.uniform1f(u("uWaterAtten"), FIELD.landMask.waterAtten);
