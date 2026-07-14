@@ -16,6 +16,7 @@ import { Lightning } from "@/components/Map/Lightning";
 import MapStage from "@/components/Map/MapStage";
 import { LookGallery, galleryEnabled } from "@/components/Lab/LookGallery";
 import IntroVeil from "@/components/Screen/IntroVeil";
+import { COPY } from "@/lib/copy";
 import EmotionLegend from "@/components/Map/EmotionLegend";
 import { ambientSeedMoments } from "@/components/Map/ambientSeed";
 import { fetchPublicField, subscribePublicField, markSelfCommit } from "@/lib/publicField";
@@ -49,10 +50,10 @@ function gapLabel(ms: number): string {
 }
 
 const VIEWS = [
-  { key: "public", label: "public", caption: "the whole city, feeling together" },
+  { key: "public", label: COPY.viewPublic, caption: COPY.viewPublicCaption },
   // The journal must read cold: whose it is, what the marks are, and that
   // they're one story through time (Eli, 2026-07-08 clarity pass).
-  { key: "private", label: "private", caption: "only you can see this" },
+  { key: "private", label: COPY.viewPrivate, caption: COPY.viewPrivateCaption },
 ] as const;
 type ViewKey = (typeof VIEWS)[number]["key"];
 
