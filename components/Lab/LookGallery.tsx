@@ -14,12 +14,16 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { SPRING } from "@/lib/theme";
+import { devUnlocked } from "@/lib/dev";
 import { LOOKS } from "@/components/Map/looks";
 import { currentLook, favoriteId, onLookChange, setFavorite, setLook } from "@/components/Map/lookState";
 
 export function galleryEnabled(): boolean {
   if (typeof window === "undefined") return false;
-  if (process.env.NODE_ENV === "development") return true;
+  // One gate for all judging tools (audit fix, 07-14): devUnlocked() is
+  // dev builds AND judging previews (NEXT_PUBLIC_WARMTH_JUDGE=1) — the
+  // phone bake-off gets the gallery without hand-adding ?looks=1.
+  if (devUnlocked()) return true;
   return new URLSearchParams(window.location.search).get("looks") === "1";
 }
 

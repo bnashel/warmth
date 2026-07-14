@@ -10,6 +10,7 @@
  */
 import type { LivePoint } from "@/lib/momentsStore";
 import { EMOTIONS, type Emotion } from "@/lib/theme";
+import { devUnlocked } from "@/lib/dev";
 import { emotionHue, worldFromUrl } from "@/components/Map/solar";
 import { TRAIL } from "@/components/Map/tune";
 
@@ -24,7 +25,11 @@ let modeChecked: boolean | null = null;
 export function journalTestMode(): boolean {
   if (modeChecked !== null) return modeChecked;
   if (typeof window === "undefined") return false;
-  modeChecked = new URLSearchParams(window.location.search).get("journal") === "test";
+  // Gated like ?wall=off and ?field=seed (audit fix, 07-14): synthetic
+  // moments must never render for a real production user — dev builds
+  // and judging previews (devUnlocked) only.
+  modeChecked =
+    devUnlocked() && new URLSearchParams(window.location.search).get("journal") === "test";
   return modeChecked;
 }
 
