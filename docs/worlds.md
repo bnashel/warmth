@@ -90,16 +90,25 @@ Each look declares which private-journal rendering it pairs with
 - **The look owns its world.** At page load, lookState resolves the initial
   look (URL param → starred favorite → default) and seeds the world from
   that look (fixed 07-14: previously `?look=paper-world` mounted the pigment
-  engine over the night base).
+  engine over the night base). **The night gate** (review fix, 07-14): on a
+  real production build (`devUnlocked()` false), load-time resolution never
+  lands on a paper look — `?world=paper`, `?look=paper-world`, and a starred
+  paper favorite all fall through to the night default, and the world is
+  seeded to night. Dev and judging previews resolve paper exactly as before.
 - **The switcher UI** is `components/Lab/LookGallery.tsx` — the "looks ·"
   chip, bottom-right. It just lists the registry; it holds no look logic.
 - **The star (favorite)** makes a look this device's default (localStorage,
-  key `warmth-look-favorite`). Dev-only in practice, since only the gallery
-  sets it.
-- **Deep links** (work everywhere, by design — the phone bake-off):
-  `?look=<id>` · `?world=paper` · Ben's pond aliases (`?look=still-water`
-  etc.). Precedence at load: `?world=paper` beats `?look=`, which beats the
-  starred favorite, which beats the default (`night-weather`).
+  key `warmth-look-favorite`). Only the gallery sets it — but the gallery is
+  reachable on ANY build via `?looks=1`, so a production user CAN star a
+  look. A starred night look persists as their default; a starred PAPER look
+  does not survive a plain-URL reload in production (the night gate skips it
+  at load), so night remains the product default no matter what was starred.
+- **Deep links** (the phone bake-off): `?look=<id>` · `?world=paper` ·
+  Ben's pond aliases (`?look=still-water` etc.). Precedence at load:
+  `?world=paper` beats `?look=`, which beats the starred favorite, which
+  beats the default (`night-weather`). Night looks deep-link on any build;
+  the PAPER links resolve only where `devUnlocked()` is true (local dev +
+  judging previews) — in production they land on the night default.
 
 ## Who sees what (dev gating)
 
@@ -108,14 +117,19 @@ Each look declares which private-journal rendering it pairs with
 - **`devUnlocked()`** (`lib/dev.ts`) is true in local dev and on judging
   previews deployed with `NEXT_PUBLIC_WARMTH_JUDGE=1`. It gates: the looks
   switcher chip, the weather preview chip, `?wall=off` (skip sign-in),
-  `?field=seed` (force the rich seeded city), and `?journal=test` (the
+  `?field=seed` (force the rich seeded city), `?journal=test` (the
   synthetic judging journal — gated 07-14; synthetic moments must never
-  render for a real user).
+  render for a real user), and landing on the PAPER world at load
+  (the night gate, 07-14 — constitution rule 1).
 - **`?looks=1`** additionally shows the switcher on any build — the one
   intentional escape hatch for sharing a build without the judge flag.
-- **Deep links are ungated** on purpose: a production user who types
+- **Night deep links are ungated** on purpose: a production user who types
   `?look=first-bloom` gets that look. The product never *surfaces* the
-  option; the URL is the contract.
+  option; the URL is the contract. The one exception is the light PAPER
+  world (see the night gate above): in production its links resolve to the
+  night default. Note the `?looks=1` switcher can still flip to paper LIVE
+  for that session — a deliberate judging hatch — but it can't become the
+  default: the next plain-URL load opens on night.
 - The labs (`/lab`, `/maplab`) 404 in production unless
   `NEXT_PUBLIC_LABS=1`. The parked paper-day preview is `?daylight=1`
   (see docs/later.md).

@@ -172,7 +172,7 @@ const getClusterRadius = (d: SparkCluster) =>
  * visible (the breath rides a time uniform), but deck re-uploads attributes
  * whenever DATA identity changes — so clusters and ring subsets are cached
  * on (version, quantized zoom) and reused across frames (code review). */
-let clusterCache: { key: string; clusters: SparkCluster[] } | null = null;
+let clusterCache: { key: string; data: LivePoint[]; clusters: SparkCluster[] } | null = null;
 let ringCache: { version: number; data: LivePoint[]; remembered: LivePoint[] } | null = null;
 /** The newest entry (the "now" cue) — same version-keyed reuse. */
 let newestCache: { version: number; data: LivePoint[]; last: LivePoint } | null = null;
@@ -278,8 +278,12 @@ function threadReveal(fade: number, timeSec: number): number {
 
 function cachedClusters(data: LivePoint[], version: number, zoom: number): SparkCluster[] {
   const key = `${version}:${Math.round(zoom * 4) / 4}`;
-  if (!clusterCache || clusterCache.key !== key) {
-    clusterCache = { key, clusters: clusterSparks(data, zoom) };
+  // Data identity matters like in the sibling caches (review fix, 07-14):
+  // ?journal=test keeps a FIXED version but re-allocates its points with
+  // fresh world-aware hues on a night ↔ paper switch — without this check
+  // the constellations kept the old world's colors until zoom moved.
+  if (!clusterCache || clusterCache.key !== key || clusterCache.data !== data) {
+    clusterCache = { key, data, clusters: clusterSparks(data, zoom) };
   }
   return clusterCache.clusters;
 }
