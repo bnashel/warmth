@@ -433,7 +433,7 @@ export default function MapStage({
       // dusk, a preview jump) — graphite on paper, whisper-white on ink.
       const labelsStale =
         !labelCache.current ||
-        Math.abs(labelCache.current.zoom - zoom) > 0.02 ||
+        Math.abs(labelCache.current.zoom - zoom) > 0.05 || // 07-14: was 0.02 = every frame mid-zoom
         Math.abs(labelCache.current.paper - inkWeight(atmo)) > 0.04 ||
         labelCache.current.dimsKey !== dimsKey;
       if (labelsStale) {
