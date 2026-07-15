@@ -14,17 +14,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import { devUnlocked } from "@/lib/dev";
 import { welcomeStage } from "@/components/Welcome/stage";
 import { onReplayWelcome } from "@/components/Welcome/state";
 import { WELCOME_DEFAULT, type WelcomeVersion } from "@/components/Welcome/script";
-import { welcomed, clearWelcomed, useWelcome, type WelcomeFinish } from "@/components/Welcome/useWelcome";
-import { WelcomeChrome } from "@/components/Welcome/WelcomeChrome";
+import { welcomed, clearWelcomed } from "@/components/Welcome/useWelcome";
 import { SlidesWalkthrough } from "@/components/Welcome/SlidesWalkthrough";
+import { CinematicWalkthrough } from "@/components/Welcome/CinematicWalkthrough";
 
-/** The auth wall exits over ~0.5–0.6s; the welcome enters after it's gone. */
-const WALL_EXIT_MS = 700;
+/** The auth wall exits over ~0.5–0.6s. The film waits it out (its stage is
+ *  the live map the wall reveals); the slides start almost at once — their
+ *  void rises WITH the wall's exit so darkness stays continuous and the
+ *  app is never glimpsed before scene five's reveal. */
+const ENTER_DELAY_MS: Record<WelcomeVersion, number> = { slides: 150, film: 700 };
 
 export function WelcomeGate() {
   const [active, setActive] = useState<WelcomeVersion | null>(null);
@@ -49,7 +52,7 @@ export function WelcomeGate() {
           : WELCOME_DEFAULT && !welcomed()
             ? WELCOME_DEFAULT
             : null;
-      if (version) timer = window.setTimeout(() => begin(version), WALL_EXIT_MS);
+      if (version) timer = window.setTimeout(() => begin(version), ENTER_DELAY_MS[version]);
     }
     return () => window.clearTimeout(timer);
   }, []);
@@ -81,62 +84,8 @@ export function WelcomeGate() {
         <SlidesWalkthrough key={`slides-${run}`} onFinish={() => setActive(null)} />
       )}
       {active === "film" && (
-        <WelcomeShell key={`film-${run}`} version="film" onFinish={() => setActive(null)} />
+        <CinematicWalkthrough key={`film-${run}`} onFinish={() => setActive(null)} />
       )}
     </AnimatePresence>
-  );
-}
-
-/**
- * The film's placeholder shell: captions over a soft scrim until the real
- * CinematicWalkthrough lands. Root is pointer-transparent — the chrome
- * layer decides what's touchable, so the handoff step can let the real orb
- * receive the gesture.
- */
-function WelcomeShell({
-  version,
-  onFinish,
-}: {
-  version: WelcomeVersion;
-  onFinish: (how: WelcomeFinish) => void;
-}) {
-  const seq = useWelcome(onFinish);
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1, transition: { duration: 0.7, ease: "easeOut" } }}
-      exit={{ opacity: 0, transition: { duration: 0.6, ease: "easeInOut" } }}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 30,
-        pointerEvents: "none",
-      }}
-    >
-      {/* the focus veil — the hold-scrim recipe: one ink div, opacity only */}
-      <motion.div
-        aria-hidden
-        animate={{ opacity: seq.handoff ? 0 : 0.5 }}
-        transition={{ duration: 0.7, ease: "easeInOut" }}
-        style={{
-          position: "absolute",
-          inset: 0,
-          background: "#06070A",
-          opacity: 0.5,
-          pointerEvents: "none",
-        }}
-      />
-      <WelcomeChrome
-        step={seq.step}
-        stepIndex={seq.stepIndex}
-        total={seq.total}
-        handoff={seq.handoff}
-        finished={seq.finished}
-        version={version}
-        onAdvance={seq.advance}
-        onSkip={seq.skip}
-      />
-    </motion.div>
   );
 }
