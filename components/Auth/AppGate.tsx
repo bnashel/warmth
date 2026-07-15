@@ -8,6 +8,7 @@ import { AuthOverlay } from "@/components/Auth/AuthOverlay";
 import { AccountChip } from "@/components/Auth/AccountChip";
 import { initAuth, onAuthChange, isSignedIn, currentUserId, useSession } from "@/lib/auth";
 import { claimLocalJournal, hydrateJournalFromCloud } from "@/lib/journalSync";
+import { WelcomeGate } from "@/components/Welcome/WelcomeGate";
 
 /**
  * THE GATE. OneScreen is always mounted so the living field breathes behind
@@ -82,6 +83,12 @@ export default function AppGate() {
         {!wallOff && !loading && !userId && <AuthOverlay key="wall" />}
       </AnimatePresence>
       {!loading && userId && <AccountChip />}
+
+      {/* THE WELCOME: the first-run walkthrough (two versions, judged behind
+          ?welcome=slides / ?welcome=film until Ben picks). Mounts only once
+          the wall has resolved — it waits a further beat inside so the
+          wall's exit finishes before the welcome breathes in. */}
+      {!loading && (userId || wallOff) && <WelcomeGate />}
     </>
   );
 }

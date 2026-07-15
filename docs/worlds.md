@@ -192,9 +192,12 @@ on:
 - **It may set the look** — `setLook(id)` from lookState — if a step ever
   wants to present a specific world. The dissolve choreography comes free;
   never swap styles or layers directly.
-- **It mounts in** `components/Screen/OneScreen.tsx`, as a sibling of the
-  view pills / whispers (the z-index 10–12 band), above the map, below
-  nothing sacred. The orb island and the hold-scrim are load-bearing —
+- **It mounts in** `components/Auth/AppGate.tsx` (as `WelcomeGate`, built
+  2026-07-15), a sibling of OneScreen at fixed zIndex 30 — above the whole
+  HUD band (10–12) and the account chip (20), below the auth wall (100).
+  It reaches the product only through the stage contract in
+  `components/Welcome/stage.ts` (view switch, map camera, orb-island fade,
+  first-commit event). The orb island and the hold-scrim are load-bearing —
   compose around them, don't reparent them.
 - **It must never touch**: entries in `looks.ts` (history), any dial in
   `tune.ts` / `galleryTune.ts`, renderer internals (`FieldLayer`,

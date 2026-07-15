@@ -23,6 +23,12 @@ import { atmosphere } from "@/lib/atmosphere";
 import { inkWeight } from "@/components/Map/solar";
 import { WeatherPreview } from "@/components/Lab/WeatherPreview";
 import { MemoryCard } from "@/components/Trail/MemoryCard";
+import {
+  setWelcomeStage,
+  welcomeStage,
+  notifyWelcomeCommit,
+  type WelcomeStage,
+} from "@/components/Welcome/stage";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
 
@@ -135,6 +141,24 @@ export default function OneScreen() {
   // The trail rehydrates from localStorage when the store module loads —
   // by first render the diary already knows if it has entries.
   const [hasOwn, setHasOwn] = useState(() => momentsStore.ownPoints.length > 0);
+  // THE WELCOME's stage contract: the walkthrough may switch the view, move
+  // the camera, and fade the orb island while its ghost performs in place.
+  // OneScreen never knows whether a welcome is playing — it just registers
+  // the doorway (and announces the first feeling in handleCommit below).
+  const [orbHidden, setOrbHidden] = useState(false);
+  useEffect(() => {
+    const mine: WelcomeStage = {
+      setView: (v) => setView(v),
+      getMap: () => mapRef.current,
+      setOrbHidden,
+    };
+    setWelcomeStage(mine);
+    // Unregister only our own registration — never clobber a newer one
+    // (strict-mode remounts interleave cleanup with the next setup).
+    return () => {
+      if (welcomeStage() === mine) setWelcomeStage(null);
+    };
+  }, []);
   // The journal: which spark's memory is open, and today's resurfaced moment.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [onThisDay, setOnThisDay] = useState<Moment | null>(null);
@@ -276,6 +300,9 @@ export default function OneScreen() {
   function handleCommit({ emotion, intensity }: { emotion: Emotion; intensity: number }) {
     const map = mapRef.current;
     committedOnce.current = true;
+    // The welcome (if one is playing) dissolves on this exact beat — the
+    // burst has just begun; the first real feeling completes the walkthrough.
+    notifyWelcomeCommit({ emotion, intensity });
     // Learning labels retire after the third commit.
     setCommitCount((n) => {
       const next = n + 1;
@@ -517,8 +544,12 @@ export default function OneScreen() {
       </AnimatePresence>
 
       {/* The orb, floating bottom-center above the city. Touch gestures are
-          the orb's inside this island; the map keeps its own everywhere else. */}
-      <div
+          the orb's inside this island; the map keeps its own everywhere else.
+          The welcome may fade the island while its ghost demos in its place —
+          opacity only, and the island goes deaf so taps fall through. */}
+      <motion.div
+        animate={{ opacity: orbHidden ? 0 : 1 }}
+        transition={SPRING.settle}
         onPointerDown={() => {
           unlockAudio();
           // Location permission is asked at INTENT, never on load — and never
@@ -556,6 +587,7 @@ export default function OneScreen() {
           zIndex: 10,
           touchAction: "none",
           WebkitTouchCallout: "none",
+          pointerEvents: orbHidden ? "none" : "auto",
         }}
       >
         <OrbFlow
@@ -566,7 +598,7 @@ export default function OneScreen() {
           gestureDepth={gestureDepth}
           onCommit={handleCommit}
         />
-      </div>
+      </motion.div>
 
       {/* The journal: tap a spark, hold the moment. */}
       <AnimatePresence>
