@@ -195,6 +195,17 @@ export function OrbFlow({
   const phaseRef = useRef<Phase>("idle");
   phaseRef.current = phase;
 
+  // THE HUM GUARD: the charge hum lives in a module singleton and outlives
+  // this component — if the flow unmounts while a finger (real or synthetic)
+  // still owns a gesture, no pointer event can ever reach us again to stop
+  // it. Unmount mid-gesture must silence it unconditionally.
+  useEffect(
+    () => () => {
+      if (g.current.pointerId !== null) stopHum();
+    },
+    [],
+  );
+
   function driveScale(target: number, s: Transition) {
     scaleAnim.current?.stop();
     scaleAnim.current = animate(baseScale, target, s);
