@@ -55,8 +55,9 @@ export const WELCOME_STEPS: WelcomeStep[] = [
   },
   {
     id: "orb",
+    // The ghost narrates its own phases (GHOST_CAPTIONS) — these lines are
+    // only the fallback before the first gesture begins.
     lines: ["press and hold — slide to a feeling, then how strong"],
-    note: { slides: "stronger burns brighter", film: "stronger burns brighter" },
   },
   {
     id: "yours",

@@ -21,6 +21,7 @@ import { onReplayWelcome } from "@/components/Welcome/state";
 import { WELCOME_DEFAULT, type WelcomeVersion } from "@/components/Welcome/script";
 import { welcomed, clearWelcomed, useWelcome, type WelcomeFinish } from "@/components/Welcome/useWelcome";
 import { WelcomeChrome } from "@/components/Welcome/WelcomeChrome";
+import { SlidesWalkthrough } from "@/components/Welcome/SlidesWalkthrough";
 
 /** The auth wall exits over ~0.5–0.6s; the welcome enters after it's gone. */
 const WALL_EXIT_MS = 700;
@@ -76,22 +77,21 @@ export function WelcomeGate() {
 
   return (
     <AnimatePresence>
-      {active && (
-        <WelcomeShell
-          key={`${active}-${run}`}
-          version={active}
-          onFinish={() => setActive(null)}
-        />
+      {active === "slides" && (
+        <SlidesWalkthrough key={`slides-${run}`} onFinish={() => setActive(null)} />
+      )}
+      {active === "film" && (
+        <WelcomeShell key={`film-${run}`} version="film" onFinish={() => setActive(null)} />
       )}
     </AnimatePresence>
   );
 }
 
 /**
- * The placeholder shell: captions over a soft scrim, both versions alike,
- * until the real stages land (SlidesWalkthrough / CinematicWalkthrough).
- * Root is pointer-transparent — the chrome layer decides what's touchable,
- * so the handoff step can let the real orb receive the gesture.
+ * The film's placeholder shell: captions over a soft scrim until the real
+ * CinematicWalkthrough lands. Root is pointer-transparent — the chrome
+ * layer decides what's touchable, so the handoff step can let the real orb
+ * receive the gesture.
  */
 function WelcomeShell({
   version,

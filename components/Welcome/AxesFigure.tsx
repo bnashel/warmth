@@ -21,10 +21,12 @@ const OX = 46;
 const OY = H - 40;
 const AX = W - 34; // x-axis end
 const AY = 30; // y-axis top
-// the time axis recedes up-right at ~-32°
-const TLEN = 120;
-const TX = OX + TLEN * Math.cos(-0.56);
-const TY = OY + TLEN * Math.sin(-0.56);
+// the time axis recedes up-right, steep enough to thread the empty lane
+// between the feelings (label lands in clear ink)
+const T_RAD = -0.873; // ~-50°
+const TLEN = 105;
+const TX = OX + TLEN * Math.cos(T_RAD);
+const TY = OY + TLEN * Math.sin(T_RAD);
 
 const INK = (a: number) => `rgba(233,236,244,${a})`;
 
@@ -164,9 +166,11 @@ export function AxesFigure({ axes, ghost = false }: { axes: 2 | 3; ghost?: boole
           />
           <motion.text
             x={TX + 8}
-            y={TY - 4}
+            y={TY - 8}
             fill={INK(0.5)}
-            style={{ fontSize: 10, letterSpacing: "0.16em" }}
+            stroke="#0A0B0F"
+            strokeWidth={5}
+            style={{ fontSize: 10, letterSpacing: "0.16em", paintOrder: "stroke" }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 1.0, duration: 0.5 }}
@@ -181,8 +185,8 @@ export function AxesFigure({ axes, ghost = false }: { axes: 2 | 3; ghost?: boole
             return [1, 2].map((k) => (
               <motion.circle
                 key={`${i}-${k}`}
-                cx={p.x - k * 11 * Math.cos(-0.56)}
-                cy={p.y - k * 11 * Math.sin(-0.56)}
+                cx={p.x - k * 11 * Math.cos(T_RAD)}
+                cy={p.y - k * 11 * Math.sin(T_RAD)}
                 r={(2.4 + 1.8 * d.s) * (1 - k * 0.28)}
                 fill={EMOTION_HUES[d.e]}
                 initial={{ opacity: 0 }}
