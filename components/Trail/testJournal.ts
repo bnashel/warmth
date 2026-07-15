@@ -22,12 +22,25 @@ let cached: LivePoint[] | null = null;
 let cachedWorld: string | null = null;
 let modeChecked: boolean | null = null;
 
+/** THE WELCOME's borrow (film, the time-axis step): a brand-new user has no
+ *  journal, so the walkthrough shows this same judging set for one beat —
+ *  framed on screen as "a glimpse — yours begins tonight" — then sweeps it.
+ *  Programmatic twin of ?journal=test; unlike the URL param it is not
+ *  dev-gated, because the welcome itself decides when it may appear and
+ *  guarantees the sweep. Still never touches the store. */
+let previewOn = false;
+export function setJournalPreview(on: boolean): void {
+  previewOn = on;
+}
+
 export function journalTestMode(): boolean {
+  if (previewOn) return true;
   if (modeChecked !== null) return modeChecked;
   if (typeof window === "undefined") return false;
   // Gated like ?wall=off and ?field=seed (audit fix, 07-14): synthetic
   // moments must never render for a real production user — dev builds
-  // and judging previews (devUnlocked) only.
+  // and judging previews (devUnlocked) only. (The welcome's preview above
+  // is the one deliberate, self-sweeping exception.)
   modeChecked =
     devUnlocked() && new URLSearchParams(window.location.search).get("journal") === "test";
   return modeChecked;
