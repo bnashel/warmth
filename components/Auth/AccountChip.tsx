@@ -6,6 +6,8 @@ import { EMOTION_HUES, SPRING, type Emotion } from "@/lib/theme";
 import { supabase } from "@/lib/supabase";
 import { signOut } from "@/lib/auth";
 import { momentsStore } from "@/lib/momentsStore";
+import { replayWelcome } from "@/components/Welcome/state";
+import { WELCOME_DEFAULT } from "@/components/Welcome/script";
 
 /**
  * THE PROFILE (Ben, 2026-07-09): a small round chip, bottom-left; tap it
@@ -125,6 +127,29 @@ export function AccountChip() {
               <p style={{ margin: "16px 0 0", fontSize: 12, color: "rgba(233,236,244,0.4)" }}>
                 feeling the city since {since.toLowerCase()}
               </p>
+            )}
+            {/* the quiet way back to the welcome — only once a version has
+                been picked (during the bake-off there is nothing to replay) */}
+            {WELCOME_DEFAULT && (
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  replayWelcome();
+                }}
+                style={{
+                  display: "block",
+                  marginTop: 14,
+                  padding: 0,
+                  border: "none",
+                  background: "transparent",
+                  color: "rgba(233,236,244,0.45)",
+                  fontSize: 12,
+                  cursor: "pointer",
+                }}
+              >
+                watch the welcome again
+              </button>
             )}
             <button
               type="button"

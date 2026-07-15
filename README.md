@@ -38,6 +38,9 @@ floating above it.
             and feel.ts (every orb feel-knob)
   Trail/    THE DIARY (private view): your commits as glowing marks —
             ember, thread, or garden (the active look picks the pairing)
+  Welcome/  THE WELCOME (first-run walkthrough): two versions in a bake-off
+            (slides / film) behind ?welcome=…; the sequencer, the stage
+            contract into the product, the ghost hand, the axes figure
   Lab/      dev-gated harnesses (look gallery, weather preview, labs) &
             test seed data — never visible to real users
 
@@ -60,7 +63,7 @@ Rule of thumb: **look-and-feel knobs live in `Map/tune.ts` and `Orb/feel.ts`**
 - **Branches:** `<name>/<thing>` (e.g. `ben/one-screen`). `main` is always the
   real product.
 - **Commits:** prefix with the area so history reads like a log of the product:
-  `orb:`, `map:`, `field:`, `screen:`, `trail:`, `store:`, `docs:`.
+  `orb:`, `map:`, `field:`, `screen:`, `trail:`, `store:`, `welcome:`, `docs:`.
 - Superseded ideas aren't deleted from memory — they're parked in
   [docs/later.md](./docs/later.md).
 

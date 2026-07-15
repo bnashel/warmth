@@ -62,13 +62,14 @@ An ambient, beautiful live map of how a city feels. Emotion is rendered as glowi
 ```
 /app         page.tsx = the product (one screen); lab/ + maplab/ = dev-only workshops
 /components  Screen/ (composition + public/private tabs) · Map/ (city + public field, tune.ts)
-             · Orb/ (the slider, feel.ts) · Trail/ (private diary dots) · Lab/ (workshop harnesses)
+             · Orb/ (the slider, feel.ts) · Trail/ (private diary dots) · Welcome/ (first-run
+             walkthrough — slides/film bake-off) · Lab/ (workshop harnesses)
 /lib         theme.ts (tokens), momentsStore.ts (live data), map.ts, location.ts, sound.ts, supabase.ts
 /supabase    migrations (via Supabase CLI — never hand-edit applied files)
 /docs        build plan, design system, later.md (parked ideas), map-candidates (style history)
 ```
 Ownership: Ben drives Orb/, Eli drives Map/; Screen/, Trail/, lib/ are shared.
-Commit prefixes by area: orb: · map: · field: · screen: · trail: · store: · docs:
+Commit prefixes by area: orb: · map: · field: · screen: · trail: · store: · welcome: · docs:
 
 ## Commands
 - Dev server: `npm run dev` (labs at /lab and /maplab are dev-only)
