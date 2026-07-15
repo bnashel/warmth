@@ -32,6 +32,8 @@ type Props = {
   linesOverride?: string[];
   /** The slides scene draws its own wordmark — hide the chrome's. */
   hideTitle?: boolean;
+  /** The ghost's burst light must own its beat — the footer steps back. */
+  footDim?: boolean;
 };
 
 export function WelcomeChrome({
@@ -45,6 +47,7 @@ export function WelcomeChrome({
   onSkip,
   linesOverride,
   hideTitle,
+  footDim,
 }: Props) {
   const reduced = useReducedMotion();
   const enter = reduced ? { duration: 0.15 } : SPRING.settle;
@@ -166,20 +169,32 @@ export function WelcomeChrome({
                 {step.tag}
               </p>
             )}
-            {lines.map((line) => (
-              <p
-                key={line}
-                style={{
-                  margin: 0,
-                  fontSize: 15.5,
-                  lineHeight: 1.55,
-                  letterSpacing: "0.02em",
-                  color: WHISPER(0.85),
-                }}
+            {/* live caption swaps (the ghost narrating its phases) crossfade
+                — the most-watched words in the welcome must never pop */}
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={lines.join("¶")}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0, transition: { duration: 0.16 } }}
+                transition={{ duration: 0.28, ease: "easeOut" }}
               >
-                {line}
-              </p>
-            ))}
+                {lines.map((line) => (
+                  <p
+                    key={line}
+                    style={{
+                      margin: 0,
+                      fontSize: 15.5,
+                      lineHeight: 1.55,
+                      letterSpacing: "0.02em",
+                      color: WHISPER(0.85),
+                    }}
+                  >
+                    {line}
+                  </p>
+                ))}
+              </motion.div>
+            </AnimatePresence>
             {note && (
               <p
                 style={{
@@ -202,7 +217,7 @@ export function WelcomeChrome({
           <motion.div
             key="chrome-foot"
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+            animate={{ opacity: footDim ? 0.25 : 1 }}
             exit={{ opacity: 0, transition: { duration: 0.5 } }}
             transition={enter}
             style={{

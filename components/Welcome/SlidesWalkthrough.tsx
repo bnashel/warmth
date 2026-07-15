@@ -42,17 +42,23 @@ export function SlidesWalkthrough({ onFinish }: { onFinish: (how: WelcomeFinish)
   return (
     <motion.div
       className={inter.className}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1, transition: { duration: 0.7, ease: "easeOut" } }}
       exit={{ opacity: 0, transition: { duration: 0.6, ease: "easeInOut" } }}
       style={{ position: "fixed", inset: 0, zIndex: 30, pointerEvents: "none" }}
     >
-      {/* the void — opaque until the handoff, when it dissolves into the
-          running app beneath (OneScreen never stopped breathing) */}
+      {/* the void — the ink arrives FIRST and fast (darkness stays as
+          continuous as the wall's exit allows: the app must not be glimpsed,
+          or scene five's reveal is spent), opaque until the handoff, when it
+          dissolves into the running app beneath (OneScreen never stopped
+          breathing). The root itself doesn't fade in — only out. */}
       <motion.div
         aria-hidden
+        initial={{ opacity: 0 }}
         animate={{ opacity: seq.handoff ? 0 : 1 }}
-        transition={{ duration: 0.9, ease: "easeInOut" }}
+        transition={
+          seq.handoff
+            ? { duration: 0.9, ease: "easeInOut" }
+            : { duration: 0.45, ease: "easeOut" }
+        }
         style={{ position: "absolute", inset: 0, background: "#0A0B0F" }}
       />
 
@@ -84,7 +90,7 @@ export function SlidesWalkthrough({ onFinish }: { onFinish: (how: WelcomeFinish)
               transform: "translate(-50%, 50%)",
             }}
           >
-            <GhostOrb playing onPhase={setGhostPhase} />
+            <GhostOrb playing={!seq.finished} onPhase={setGhostPhase} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -100,6 +106,7 @@ export function SlidesWalkthrough({ onFinish }: { onFinish: (how: WelcomeFinish)
         onSkip={seq.skip}
         hideTitle={seq.step.id === "welcome"}
         linesOverride={seq.step.id === "orb" ? [GHOST_CAPTIONS[ghostPhase]] : undefined}
+        footDim={seq.step.id === "orb" && ghostPhase === "burst"}
       />
     </motion.div>
   );

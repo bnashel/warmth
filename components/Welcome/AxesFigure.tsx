@@ -59,13 +59,16 @@ export function AxesFigure({ axes, ghost = false }: { axes: 2 | 3; ghost?: boole
       ? { duration: 0.15, delay }
       : { pathLength: { duration: 1.1, ease: [0.3, 0, 0.2, 1], delay }, opacity: { duration: 0.3, delay } },
   });
-  const threadPoints = THREAD.map((i) => px(FIELD_DOTS[i]));
-  const threadD =
-    `M ${threadPoints[0].x} ${threadPoints[0].y} ` +
-    threadPoints
-      .slice(1)
-      .map((p) => `L ${p.x} ${p.y}`)
-      .join(" ");
+  // the thread bends softly through its stations (quadratic midpoints —
+  // a straight polyline reads as a trend line, not a story)
+  const tp = THREAD.map((i) => px(FIELD_DOTS[i]));
+  let threadD = `M ${tp[0].x} ${tp[0].y}`;
+  for (let i = 1; i < tp.length - 1; i++) {
+    const mx = (tp[i].x + tp[i + 1].x) / 2;
+    const my = (tp[i].y + tp[i + 1].y) / 2;
+    threadD += ` Q ${tp[i].x} ${tp[i].y} ${mx} ${my}`;
+  }
+  threadD += ` L ${tp[tp.length - 1].x} ${tp[tp.length - 1].y}`;
 
   return (
     <motion.svg
@@ -74,6 +77,19 @@ export function AxesFigure({ axes, ghost = false }: { axes: 2 | 3; ghost?: boole
       style={{ display: "block", overflow: "visible", opacity: ghost ? 0.2 : 1 }}
       aria-hidden
     >
+      {/* one glow recipe everywhere — halos are gradients (tight center,
+          soft exponential-feeling falloff), never flat discs */}
+      <defs>
+        {(Object.keys(EMOTION_HUES) as Array<keyof typeof EMOTION_HUES>).map((e) => (
+          <radialGradient key={e} id={`welcome-halo-${e}`}>
+            <stop offset="0%" stopColor={EMOTION_HUES[e]} stopOpacity={0.5} />
+            <stop offset="35%" stopColor={EMOTION_HUES[e]} stopOpacity={0.22} />
+            <stop offset="70%" stopColor={EMOTION_HUES[e]} stopOpacity={0.05} />
+            <stop offset="100%" stopColor={EMOTION_HUES[e]} stopOpacity={0} />
+          </radialGradient>
+        ))}
+      </defs>
+
       {/* where — the ground */}
       <motion.line x1={OX} y1={OY} x2={AX} y2={OY} stroke={INK(0.3)} strokeWidth={1} {...draw(0.1)} />
       <motion.text
@@ -130,9 +146,9 @@ export function AxesFigure({ axes, ghost = false }: { axes: 2 | 3; ghost?: boole
             <motion.circle
               cx={p.x}
               cy={p.y}
-              r={10 * d.s + 4}
-              fill={EMOTION_HUES[d.e]}
-              animate={reduced ? { opacity: 0.16 } : { opacity: [0.1, 0.22], scale: [1, 1.12] }}
+              r={14 * d.s + 6}
+              fill={`url(#welcome-halo-${d.e})`}
+              animate={reduced ? { opacity: 0.7 } : { opacity: [0.45, 0.85], scale: [1, 1.12] }}
               transition={
                 reduced
                   ? undefined
@@ -154,15 +170,23 @@ export function AxesFigure({ axes, ghost = false }: { axes: 2 | 3; ghost?: boole
       {/* when — the third axis, and time made visible */}
       {axes === 3 && (
         <>
+          {/* grows out of the origin by its endpoint (pathLength animation
+              would overwrite the dashes — receding time must stay dashed) */}
           <motion.line
             x1={OX}
             y1={OY}
-            x2={TX}
-            y2={TY}
             stroke={INK(0.3)}
             strokeWidth={1}
             strokeDasharray="3 4"
-            {...draw(0.15)}
+            initial={{ x2: OX, y2: OY, opacity: 0 }}
+            animate={{ x2: TX, y2: TY, opacity: 1 }}
+            transition={
+              reduced
+                ? { duration: 0.15 }
+                : { x2: { duration: 1.1, ease: [0.3, 0, 0.2, 1], delay: 0.15 },
+                    y2: { duration: 1.1, ease: [0.3, 0, 0.2, 1], delay: 0.15 },
+                    opacity: { duration: 0.3, delay: 0.15 } }
+            }
           />
           <motion.text
             x={TX + 8}

@@ -45,7 +45,8 @@ export const WELCOME_STEPS: WelcomeStep[] = [
     id: "public",
     lines: ["every light is someone, feeling something — right now"],
     tag: "where × what",
-    note: { film: "the whole city, feeling together" },
+    // the public view's own caption, verbatim — met again in the HUD
+    note: { slides: "the whole city, feeling together", film: "the whole city, feeling together" },
   },
   {
     id: "private",

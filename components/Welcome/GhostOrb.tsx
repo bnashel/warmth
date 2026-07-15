@@ -17,11 +17,13 @@ import type { GhostPhase } from "@/components/Welcome/script";
 import { runGhostGesture, type GhostGesture } from "@/components/Welcome/ghostDriver";
 
 /** Each pass teaches a different feeling at a different strength — the
- *  variation IS the lesson ("stronger burns brighter"). */
+ *  variation IS the lesson ("stronger burns brighter"). Emotions sit low
+ *  on the arc so every intensity sweep travels UPWARD from the dot's seat
+ *  (a high dot would morph the bar in already full — confusing to watch). */
 const DEMO_LOOP: Array<{ emotion: Emotion; intensity: number }> = [
   { emotion: "joy", intensity: 8 },
-  { emotion: "calm", intensity: 3 },
-  { emotion: "love", intensity: 9 },
+  { emotion: "energy", intensity: 4 },
+  { emotion: "love", intensity: 10 },
 ];
 
 const REST_BETWEEN_MS = 1400;
