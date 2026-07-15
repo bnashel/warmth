@@ -12,7 +12,7 @@
  */
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { momentsStore } from "@/lib/momentsStore";
 import { CAMERA } from "@/components/Map/tune";
@@ -22,7 +22,6 @@ import { setJournalPreview } from "@/components/Trail/testJournal";
 import { welcomeStage } from "@/components/Welcome/stage";
 import { useWelcome, type WelcomeFinish } from "@/components/Welcome/useWelcome";
 import { WelcomeChrome } from "@/components/Welcome/WelcomeChrome";
-import { AxesFigure } from "@/components/Welcome/AxesFigure";
 import { GhostOrb } from "@/components/Welcome/GhostOrb";
 import { demoMoments } from "@/components/Welcome/demoMoments";
 import { GHOST_CAPTIONS, type GhostPhase, type WelcomeStep } from "@/components/Welcome/script";
@@ -38,8 +37,41 @@ const SCRIM: Record<WelcomeStep["id"], number> = {
 };
 
 export function CinematicWalkthrough({ onFinish }: { onFinish: (how: WelcomeFinish) => void }) {
-  const seq = useWelcome(onFinish);
   const [ghostPhase, setGhostPhase] = useState<GhostPhase>("press");
+  // THE EXHALE: a skip must never hard-cut borrowed scenery in plain view
+  // (design-review blocker). On skip the veil deepens for a beat, the view
+  // comes home and the sweep happens under near-dark, THEN the shell fades
+  // out to the clean, restored city. A committed finish is already clean.
+  const [leaving, setLeaving] = useState(false);
+  const demoTimers = useRef<number[]>([]);
+  const restore = () => {
+    const stage = welcomeStage();
+    demoTimers.current.forEach((t) => window.clearTimeout(t));
+    demoTimers.current = [];
+    setJournalPreview(false);
+    momentsStore.clearTest();
+    stage?.setOrbHidden(false);
+    stage?.setHintsMuted(false);
+    stage?.setView("public");
+    stage?.getMap()?.stop();
+  };
+  const finishWithRestore = (how: WelcomeFinish) => {
+    if (how === "committed") {
+      // nothing borrowed remains by the handoff — dissolve on the burst beat
+      onFinish(how);
+      return;
+    }
+    setLeaving(true); // the veil deepens (see SCRIM below)
+    window.setTimeout(restore, 380); // sweep under near-dark
+    window.setTimeout(() => onFinish(how), 500); // then the exit fade, from dark
+  };
+  const seq = useWelcome(finishWithRestore);
+
+  // two teachers must never talk over each other — quiet the product's
+  // own hints (the empty-diary whisper) while the film narrates
+  useEffect(() => {
+    welcomeStage()?.setHintsMuted(true);
+  }, []);
 
   // THE CHOREOGRAPHY — each step directs the real product once, on entry.
   useEffect(() => {
@@ -63,9 +95,12 @@ export function CinematicWalkthrough({ onFinish }: { onFinish: (how: WelcomeFini
           duration: 2800,
         });
         // mid-caption, three feelings arrive — the "right now" made visible
-        demoMoments().forEach((m, i) =>
-          timers.push(window.setTimeout(() => momentsStore.add(m), 900 + i * 850)),
-        );
+        // (ids also kept in demoTimers so a skip can silence pending ones)
+        demoMoments().forEach((m, i) => {
+          const t = window.setTimeout(() => momentsStore.add(m), 900 + i * 850);
+          timers.push(t);
+          demoTimers.current.push(t);
+        });
         break;
       }
       case "private": {
@@ -100,15 +135,16 @@ export function CinematicWalkthrough({ onFinish }: { onFinish: (how: WelcomeFini
     return () => timers.forEach((t) => window.clearTimeout(t));
   }, [seq.step.id]);
 
-  // THE RESTORATION — graceful or not (skip mid-step, sign-out unmount),
-  // everything borrowed goes back: preview off, demo blooms swept, orb
-  // returned, view public, any scripted camera move halted. All idempotent.
+  // THE SAFETY NET — an ungraceful unmount (sign-out) still restores
+  // everything. Idempotent: on the graceful paths this is all no-ops.
   useEffect(
     () => () => {
       const stage = welcomeStage();
+      demoTimers.current.forEach((t) => window.clearTimeout(t));
       setJournalPreview(false);
       momentsStore.clearTest();
       stage?.setOrbHidden(false);
+      stage?.setHintsMuted(false);
       stage?.setView("public");
       stage?.getMap()?.stop();
     },
@@ -122,11 +158,12 @@ export function CinematicWalkthrough({ onFinish }: { onFinish: (how: WelcomeFini
       exit={{ opacity: 0, transition: { duration: 0.6, ease: "easeInOut" } }}
       style={{ position: "fixed", inset: 0, zIndex: 30, pointerEvents: "none" }}
     >
-      {/* the focus veil — one ink div, opacity only (the hold-scrim recipe) */}
+      {/* the focus veil — one ink div, opacity only (the hold-scrim recipe).
+          On skip it deepens first: the sweep happens under near-dark. */}
       <motion.div
         aria-hidden
-        animate={{ opacity: SCRIM[seq.step.id] }}
-        transition={{ duration: 0.7, ease: "easeInOut" }}
+        animate={{ opacity: leaving ? 0.88 : SCRIM[seq.step.id] }}
+        transition={leaving ? { duration: 0.3, ease: "easeIn" } : { duration: 0.7, ease: "easeInOut" }}
         style={{
           position: "absolute",
           inset: 0,
@@ -135,29 +172,6 @@ export function CinematicWalkthrough({ onFinish }: { onFinish: (how: WelcomeFini
           pointerEvents: "none",
         }}
       />
-
-      {/* the axes, ghosted over the living field — drawn, then let go */}
-      <AnimatePresence>
-        {seq.step.id === "public" && (
-          <motion.div
-            key="ghost-axes"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0, transition: { duration: 0.5 } }}
-            transition={SPRING.settle}
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              top: "13%",
-              display: "flex",
-              justifyContent: "center",
-            }}
-          >
-            <AxesFigure axes={2} ghost />
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* the ghost hand, playing the orb exactly where the real one lives */}
       <AnimatePresence>

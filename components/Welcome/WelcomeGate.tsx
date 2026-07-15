@@ -74,6 +74,7 @@ export function WelcomeGate() {
   useEffect(
     () => () => {
       welcomeStage()?.setOrbHidden(false);
+      welcomeStage()?.setHintsMuted(false);
     },
     [],
   );

@@ -16,6 +16,9 @@ export type WelcomeStage = {
   getMap(): MapboxMap | null;
   /** Fade the real orb island out/in (the ghost performs in its place). */
   setOrbHidden(hidden: boolean): void;
+  /** Quiet OneScreen's teaching whispers (the empty-diary hint) while the
+   *  welcome is narrating — two teachers must never talk over each other. */
+  setHintsMuted(muted: boolean): void;
 };
 
 export type WelcomeCommit = { emotion: Emotion; intensity: number };

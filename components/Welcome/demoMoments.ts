@@ -15,7 +15,9 @@ import type { Emotion } from "@/lib/theme";
 const SPOTS: Array<{ lng: number; lat: number; emotion: Emotion; intensity: number }> = [
   { lng: -73.9442, lat: 40.7181, emotion: "joy", intensity: 7 }, // Williamsburg
   { lng: -73.9903, lat: 40.7336, emotion: "love", intensity: 6 }, // Union Square
-  { lng: -73.9632, lat: 40.6791, emotion: "calm", intensity: 8 }, // Prospect Park
+  // East Harlem, not Prospect Park: the third ignition must land in open
+  // map, never behind the caption plate (design review)
+  { lng: -73.9496, lat: 40.797, emotion: "calm", intensity: 8 },
 ];
 
 export function demoMoments(): Moment[] {

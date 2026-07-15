@@ -170,8 +170,9 @@ export function WelcomeChrome({
               </p>
             )}
             {/* live caption swaps (the ghost narrating its phases) crossfade
-                — the most-watched words in the welcome must never pop */}
-            <AnimatePresence mode="wait" initial={false}>
+                IN PLACE — mode="wait" would leave the glass pill empty for a
+                beat, and these are the most-watched words in the welcome */}
+            <AnimatePresence mode="popLayout" initial={false}>
               <motion.div
                 key={lines.join("¶")}
                 initial={{ opacity: 0 }}

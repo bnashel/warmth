@@ -146,11 +146,13 @@ export default function OneScreen() {
   // OneScreen never knows whether a welcome is playing — it just registers
   // the doorway (and announces the first feeling in handleCommit below).
   const [orbHidden, setOrbHidden] = useState(false);
+  const [hintsMuted, setHintsMuted] = useState(false);
   useEffect(() => {
     const mine: WelcomeStage = {
       setView: (v) => setView(v),
       getMap: () => mapRef.current,
       setOrbHidden,
+      setHintsMuted,
     };
     setWelcomeStage(mine);
     // Unregister only our own registration — never clobber a newer one
@@ -515,9 +517,10 @@ export default function OneScreen() {
         </AnimatePresence>
       </div>
 
-      {/* Private view, no entries yet: the diary explains itself. */}
+      {/* Private view, no entries yet: the diary explains itself — unless
+          the welcome is mid-story (its captions own the screen). */}
       <AnimatePresence>
-        {view === "private" && !hasOwn && (
+        {view === "private" && !hasOwn && !hintsMuted && (
           <motion.p
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 0.55, y: 0 }}
