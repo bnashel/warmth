@@ -107,12 +107,18 @@ export function runGhostGesture(
     opts.onPhase?.("press");
     inFlight = true;
     fire("pointerdown", cx, cy);
-    await sleep(420);
+    await sleep(350);
     if (cancelled) return false;
 
-    // glide out to the feeling
+    // THE NAMES' BEAT: hold at home with the wheel open — all five named
+    // dots get a readable moment before anything moves (Ben's note: the
+    // names appeared and vanished too fast to ever be read)
     opts.onPhase?.("wheel");
-    await glide({ x: cx, y: cy }, dot, 560);
+    await sleep(1150);
+    if (cancelled) return false;
+
+    // glide out to the feeling — unhurried
+    await glide({ x: cx, y: cy }, dot, 700);
     if (cancelled) return false;
 
     // hold — a thumb is never perfectly still; micro-jitter keeps it honest

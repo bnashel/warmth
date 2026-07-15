@@ -26,7 +26,7 @@ const DEMO_LOOP: Array<{ emotion: Emotion; intensity: number }> = [
   { emotion: "love", intensity: 10 },
 ];
 
-const REST_BETWEEN_MS = 1400;
+const REST_BETWEEN_MS = 1900;
 
 export function GhostOrb({
   playing,
@@ -61,7 +61,7 @@ export function GhostOrb({
 
     const run = async () => {
       // let the step's entrance settle before the ghost reaches for the orb
-      await new Promise((r) => window.setTimeout(r, 900));
+      await new Promise((r) => window.setTimeout(r, 1250));
       let i = 0;
       while (alive) {
         // dispatch on OrbFlow's own container — the first element inside

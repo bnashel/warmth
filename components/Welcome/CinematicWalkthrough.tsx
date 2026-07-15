@@ -159,11 +159,26 @@ export function CinematicWalkthrough({ onFinish }: { onFinish: (how: WelcomeFini
       style={{ position: "fixed", inset: 0, zIndex: 30, pointerEvents: "none" }}
     >
       {/* the focus veil — one ink div, opacity only (the hold-scrim recipe).
-          On skip it deepens first: the sweep happens under near-dark. */}
+          On skip it deepens first: the sweep happens under near-dark. The
+          two view flips (private in, private out) get a veil PULSE — the
+          product's crossfade is near-instant (tau 130ms), and a breath of
+          ink over it turns a hard world-swap into a scene change. */}
       <motion.div
         aria-hidden
-        animate={{ opacity: leaving ? 0.88 : SCRIM[seq.step.id] }}
-        transition={leaving ? { duration: 0.3, ease: "easeIn" } : { duration: 0.7, ease: "easeInOut" }}
+        animate={{
+          opacity: leaving
+            ? 0.88
+            : seq.step.id === "private" || seq.step.id === "orb"
+              ? [0.55, SCRIM[seq.step.id]]
+              : SCRIM[seq.step.id],
+        }}
+        transition={
+          leaving
+            ? { duration: 0.3, ease: "easeIn" }
+            : seq.step.id === "private" || seq.step.id === "orb"
+              ? { duration: 1.5, times: [0.3, 1], ease: "easeInOut" }
+              : { duration: 0.7, ease: "easeInOut" }
+        }
         style={{
           position: "absolute",
           inset: 0,

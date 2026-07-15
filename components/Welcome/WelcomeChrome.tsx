@@ -11,7 +11,7 @@
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Inter } from "next/font/google";
-import { SPRING } from "@/lib/theme";
+import { EMOTIONS, EMOTION_HUES, SPRING } from "@/lib/theme";
 import type { WelcomeStep, WelcomeVersion } from "@/components/Welcome/script";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
@@ -196,6 +196,36 @@ export function WelcomeChrome({
                 ))}
               </motion.div>
             </AnimatePresence>
+            {step.legend && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "center",
+                  flexWrap: "wrap",
+                  gap: "4px 14px",
+                  margin: "10px 0 0",
+                }}
+              >
+                {EMOTIONS.map((e, i) => (
+                  <motion.span
+                    key={e}
+                    initial={{ opacity: 0, y: reduced ? 0 : 3 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={
+                      reduced ? { duration: 0.15 } : { ...SPRING.settle, delay: 0.5 + i * 0.12 }
+                    }
+                    style={{
+                      fontSize: 12.5,
+                      letterSpacing: "0.06em",
+                      color: EMOTION_HUES[e],
+                      textShadow: `0 0 10px ${EMOTION_HUES[e]}44`,
+                    }}
+                  >
+                    {e}
+                  </motion.span>
+                ))}
+              </div>
+            )}
             {note && (
               <p
                 style={{

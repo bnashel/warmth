@@ -27,6 +27,9 @@ export type WelcomeStep = {
   lines: string[];
   /** The axes tag — Ben's motif, growing one axis at a time. */
   tag?: string;
+  /** Show the five feelings by name, each glowing its own hue — the
+   *  vocabulary is taught in a calm reading moment, not mid-gesture. */
+  legend?: boolean;
   /** A version-specific whisper under the lines (e.g. the film's honesty
    *  note when it shows the glimpse journal). */
   note?: Partial<Record<WelcomeVersion, string>>;
@@ -45,6 +48,7 @@ export const WELCOME_STEPS: WelcomeStep[] = [
     id: "public",
     lines: ["every light is someone, feeling something — right now"],
     tag: "where × what",
+    legend: true,
     // the public view's own caption, verbatim — met again in the HUD
     note: { slides: "the whole city, feeling together", film: "the whole city, feeling together" },
   },
@@ -70,7 +74,7 @@ export const WELCOME_STEPS: WelcomeStep[] = [
 /** Captions the orb step swaps through as the ghost hand moves. */
 export const GHOST_CAPTIONS = {
   press: "press and hold",
-  wheel: "slide to a feeling",
+  wheel: "five feelings fan out — slide to one",
   bar: "hold it — then how strong?",
   burst: "stronger burns brighter",
 } as const;
