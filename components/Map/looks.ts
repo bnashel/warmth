@@ -69,8 +69,10 @@ export type LookConfig = {
   };
   /** Which private-journal rendering this look pairs with:
    *  thread = Eli's aurora curtains, garden = Eli's growing blooms,
-   *  ember = Ben's forever-ember (his trunk's journal). */
-  journal: "thread" | "garden" | "ember";
+   *  ember = Ben's forever-ember (his trunk's journal),
+   *  lantern = THE KEEPSAKE LANTERN (private redesign, 07-17): a small
+   *  crisp point of warm light, still and precise — never a blob. */
+  journal: "thread" | "garden" | "ember" | "lantern";
 };
 
 export type LookDef = {
@@ -242,7 +244,7 @@ export const LOOKS: LookDef[] = [
     id: "night-weather",
     name: "night weather",
     date: "07-10",
-    note: "the felt city, un-metronomed: every area breathes in its own drifting rhythm, overlapping feelings genuinely interpenetrate (meld + earlier gate), and silhouettes run freer — bigger slower swells leaning with the flow, never cellular. Journal = the garden.",
+    note: "the felt city, un-metronomed: every area breathes in its own drifting rhythm, overlapping feelings genuinely interpenetrate (meld + earlier gate), and silhouettes run freer — bigger slower swells leaning with the flow, never cellular. Journal = the keepsake lantern (07-17; was the garden — still in ?trail=garden and the-garden look).",
     config: {
       shape: { warpAmp: 0.052, scale: 3.8, drift: 0.012, streak: 0.4, band: 0.25, smoothWarp: 1 },
       dials: {
@@ -252,7 +254,7 @@ export const LOOKS: LookDef[] = [
         tierKeep: 0.85, richen: 0.55, weaveAmp: 0.85, shimmer: 0.5, overlapGate: 1, felt: 1, veil: 0, kernelSoftness: 2.5,
         breathVary: 1, meld: 0.4, overlapFrom: 0.08, overlapTo: 0.38,
       },
-      journal: "garden",
+      journal: "lantern",
     },
   },
   // ---- BEN'S TRUNK (folded in whole by THE ONE WORLD merge, 07-13) ----

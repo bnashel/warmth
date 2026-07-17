@@ -388,6 +388,11 @@ type LightParams = {
   /** 1 = THE GARDEN (Eli, 07-10): entries as blooms that mature with age
    *  — growth data arrives per-instance via getLineColor. */
   garden: number;
+  /** Breath overrides (THE LANTERN, 07-17): a keepsake is STILL — its
+   *  light barely breathes and its size never does. Absent = the shared
+   *  GLOW.pulse amplitudes, so every existing layer is untouched. */
+  radiusAmp: number;
+  brightnessAmp: number;
 };
 
 type EmotionGlowLayerProps = ScatterplotLayerProps<GlowDatum> & {
@@ -474,6 +479,8 @@ export class EmotionGlowLayer extends ScatterplotLayer<
       emberHeartOff: 0.22,
       emberWarmth: 0.35,
       garden: 0,
+      radiusAmp: GLOW.pulse.radiusAmp,
+      brightnessAmp: GLOW.pulse.brightnessAmp,
       ...light,
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -485,8 +492,8 @@ export class EmotionGlowLayer extends ScatterplotLayer<
         corePeak: p.corePeak,
         coreWhiteness: p.coreWhiteness,
         tailFalloff: p.tailFalloff,
-        radiusAmp: GLOW.pulse.radiusAmp,
-        brightnessAmp: GLOW.pulse.brightnessAmp,
+        radiusAmp: p.radiusAmp,
+        brightnessAmp: p.brightnessAmp,
         periodSec: GLOW.pulse.periodMs / 1000,
         peakBase: p.peakBase,
         peakPerIntensity: p.peakPerIntensity,

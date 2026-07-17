@@ -441,6 +441,36 @@ export const TRAIL = {
     /** Count whisper beside a constellation. */
     countLabel: { sizePx: 10.5, alpha: 120 },
   },
+  /** THE KEEPSAKE LANTERN (private redesign, 2026-07-17, Eli's pick):
+   *  a memory is a small crisp point of warm light — a firefly, a tiny
+   *  paper lantern — perfectly STILL (no shape breath, the faintest
+   *  brightness sigh), precise, with a soft contained halo in the
+   *  feeling's own hue. Deliberately the orb's porcelain-lamp language
+   *  at map scale: crisp edge, small bright core, tight halo — and
+   *  never a blob, never biological. Marks that carry words/photos
+   *  burn a touch larger and wear the fine ring. */
+  lantern: {
+    baseRadiusPx: 5,
+    radiusPerIntensityPx: 9,
+    maxRadiusPx: 20,
+    minRadiusPx: 3,
+    /** The lamp body: a solid porcelain mark blended OVER (never added),
+     *  color capped at the hue itself — a home of 25 stacked nights
+     *  DEEPENS to pure saturated hue and structurally cannot whiten
+     *  (rule 3). edge = crisp rim start; glint = the bright pure-hue
+     *  heart that makes it a lamp, not a dot. */
+    core: { edge: 0.84, rim: 0.14, glint: 0.85, gain: 0.9 },
+    /** The contained halo: coreless, exponential, tight, DIM — rule 5;
+     *  kept quiet so even a dense cluster's pooled halos stay hue-deep. */
+    halo: { radiusFactor: 2.6, gain: 0.28, falloff: 2.6, maxRadiusPx: 52 },
+    /** Brightness sigh only — a lantern is still. */
+    breath: 0.05,
+    /** A remembered moment (words/photo) stands a touch larger. */
+    memoryGrow: 1.15,
+    ring: { radiusFactor: 1.7, widthPx: 1.1, alpha: 150 },
+    /** Paper world: the lantern soaks in as a crisp round keepsake stain. */
+    stain: { edge: 0.9, ring: 0.24, heart: 0.1, radiusScale: 1.0, gainBoost: 1.3 },
+  },
 } as const;
 
 /* ------------------------------------------------------------------ */

@@ -18,6 +18,7 @@ import {
 import { journalTestMode, journalTestPoints, JOURNAL_TEST_VERSION } from "./testJournal";
 import { currentLook } from "@/components/Map/lookState";
 import { buildGalleryTrailLayers } from "./galleryGlow";
+import { buildLanternTrailLayers } from "./lanternGlow";
 import type { LivePoint } from "@/lib/momentsStore";
 import { GLOW, LAMP, TRAIL } from "@/components/Map/tune";
 
@@ -295,26 +296,28 @@ function cachedRemembered(data: LivePoint[], version: number): LivePoint[] {
   return ringCache.remembered;
 }
 
-/** Which private renderer draws the memory marks. Default = THE EMBER
- *  (round 2, item 3); `?trail=splat` shows the old matte-gem for the
- *  side-by-side judging (loser gets deleted once Ben + Eli decide).
- *  Memoized on the search string — this runs on every push while the
- *  private view breathes, and URLSearchParams allocates + parses
+/** The `?trail=` judging param, raw. Extended for the private redesign
+ *  (07-17): any journal renderer can be forced for a side-by-side —
+ *  lantern | thread | garden | ember | splat — regardless of the active
+ *  look. Memoized on the search string — this runs on every push while
+ *  the private view breathes, and URLSearchParams allocates + parses
  *  (perf pass, 2026-07-14). */
-let rendererCache: { search: string; value: "ember" | "splat" } | null = null;
-function trailRenderer(): "ember" | "splat" {
-  if (typeof window !== "undefined") {
-    const search = window.location.search;
-    if (!rendererCache || rendererCache.search !== search) {
-      const p = new URLSearchParams(search).get("trail");
-      rendererCache = {
-        search,
-        value: p === "splat" || p === "ember" ? p : TRAIL.renderer,
-      };
-    }
-    return rendererCache.value;
+let trailParamCache: { search: string; value: string | null } | null = null;
+function trailParam(): string | null {
+  if (typeof window === "undefined") return null;
+  const search = window.location.search;
+  if (!trailParamCache || trailParamCache.search !== search) {
+    trailParamCache = { search, value: new URLSearchParams(search).get("trail") };
   }
-  return TRAIL.renderer;
+  return trailParamCache.value;
+}
+
+/** Which ember-era mark draws inside the ember branch. Default = THE
+ *  EMBER (round 2, item 3); `?trail=splat` shows the old matte-gem for
+ *  the side-by-side judging. */
+function trailRenderer(): "ember" | "splat" {
+  const p = trailParam();
+  return p === "splat" || p === "ember" ? p : TRAIL.renderer;
 }
 
 /** The ember's forever-shape seed: a hash of the entry ID — stable across
@@ -347,10 +350,23 @@ export function buildTrailLayers(
     data = journalTestPoints();
     version = JOURNAL_TEST_VERSION;
   }
-  // THE ONE GALLERY (merge, 07-13): the active look chooses its journal.
-  // Ben's forever-ember renders below; Eli's aurora THREAD and GARDEN
-  // render in galleryGlow.ts, preserved whole.
-  const journalKind = currentLook().config.journal;
+  // THE ONE GALLERY (merge, 07-13): the active look chooses its journal —
+  // and `?trail=` overrides it for judging (private redesign, 07-17).
+  // Ben's forever-ember renders below; Eli's aurora THREAD and GARDEN in
+  // galleryGlow.ts; THE KEEPSAKE LANTERN (the product default) in
+  // lanternGlow.ts. All preserved whole — nothing thrown away.
+  const forced = trailParam();
+  const journalKind =
+    forced === "lantern" || forced === "thread" || forced === "garden"
+      ? forced
+      : forced === "ember" || forced === "splat"
+        ? "ember"
+        : currentLook().config.journal;
+  if (journalKind === "lantern") {
+    return buildLanternTrailLayers(
+      data, version, timeSec, zoom, fade, paper, onTapEntry, onTapCluster,
+    );
+  }
   if (journalKind !== "ember") {
     return buildGalleryTrailLayers(
       data, version, timeSec, zoom, fade, paper, onTapEntry, onTapCluster, onTapGap,
