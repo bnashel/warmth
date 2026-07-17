@@ -46,16 +46,41 @@ async function shrinkPhoto(file: File): Promise<string | null> {
   }
 }
 
-function whenLabel(createdAt: number): string {
+/** The WHEN is the emotional anchor of looking back (private redesign,
+ *  07-17): "wow — July 14th, 12:28pm, I was so grateful." The date leads,
+ *  written out; the clock and a quiet how-long-ago whisper follow. */
+function dateLabel(createdAt: number): string {
   const d = new Date(createdAt);
-  const date = d.toLocaleDateString(undefined, {
+  return d.toLocaleDateString(undefined, {
     weekday: "long",
     month: "long",
     day: "numeric",
     year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
   });
-  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-  return `${date} · ${time}`;
+}
+
+function timeLabel(createdAt: number): string {
+  return new Date(createdAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+/** "3 weeks ago" — null for today (today needs no distance). */
+function agoWhisper(createdAt: number): string | null {
+  const now = new Date();
+  const then = new Date(createdAt);
+  if (now.toDateString() === then.toDateString()) return null;
+  const days = Math.max(1, Math.round((now.getTime() - createdAt) / 86_400_000));
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days} days ago`;
+  if (days < 35) {
+    const w = Math.round(days / 7);
+    return w === 1 ? "a week ago" : `${w} weeks ago`;
+  }
+  if (days < 365) {
+    const m = Math.round(days / 30.44);
+    return m === 1 ? "a month ago" : `${m} months ago`;
+  }
+  const y = Math.round(days / 365.25);
+  return y === 1 ? "a year ago" : `${y} years ago`;
 }
 
 const inputStyle: React.CSSProperties = {
@@ -191,24 +216,45 @@ export function MemoryCard({ entryId, onClose }: { entryId: string; onClose: () 
           gap: 12,
         }}
       >
-        {/* The moment: emotion star + when. */}
-        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-          <span
-            aria-hidden
-            style={{
-              width: 9,
-              height: 9,
-              borderRadius: "50%",
-              background: hue,
-              boxShadow: `0 0 10px 1px ${hue}99`,
-            }}
-          />
-          <span style={{ fontSize: 13.5, fontWeight: 500, color: "rgba(233,236,244,0.92)" }}>
-            {entry.emotion}
-          </span>
-          <span style={{ fontSize: 11.5, color: "rgba(233,236,244,0.4)", marginLeft: "auto" }}>
-            {whenLabel(entry.createdAt)}
-          </span>
+        {/* The moment. The WHEN leads — the date written out like a diary
+            page — then the feeling in its own color, the clock, and how
+            long ago it was. Landing here should feel like remembering. */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <span
+              style={{
+                fontSize: 16.5,
+                fontWeight: 500,
+                letterSpacing: "0.01em",
+                color: "rgba(233,236,244,0.95)",
+              }}
+            >
+              {dateLabel(entry.createdAt)}
+            </span>
+            {agoWhisper(entry.createdAt) && (
+              <span style={{ fontSize: 11, color: "rgba(233,236,244,0.38)", marginLeft: "auto" }}>
+                {agoWhisper(entry.createdAt)}
+              </span>
+            )}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            <span
+              aria-hidden
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: hue,
+                boxShadow: `0 0 10px 1px ${hue}99`,
+              }}
+            />
+            <span style={{ fontSize: 12.5, fontWeight: 500, color: hue, opacity: 0.95 }}>
+              {entry.emotion}
+            </span>
+            <span style={{ fontSize: 11.5, color: "rgba(233,236,244,0.45)" }}>
+              · {timeLabel(entry.createdAt)}
+            </span>
+          </div>
         </div>
 
         <textarea

@@ -397,7 +397,21 @@ export default function OneScreen() {
           onMapReady={(m) => {
             mapRef.current = m;
           }}
-          onEntryTap={(id) => setEditingId(id)}
+          onEntryTap={(id) => {
+            setEditingId(id);
+            // The camera breathes toward the memory as its card opens —
+            // the spot rises to the upper third so the card never covers
+            // the lantern you just touched (private redesign, 07-17).
+            const entry = momentsStore.journalEntry(id);
+            const m = mapRef.current;
+            if (entry && m) {
+              m.easeTo({
+                center: [entry.lng, entry.lat],
+                offset: [0, -Math.round(m.getContainer().clientHeight * 0.16)],
+                duration: 900,
+              });
+            }
+          }}
           onGapTap={(gapMs, x, y) => {
             setGapChip({ text: gapLabel(gapMs), x, y });
             if (gapTimer.current) window.clearTimeout(gapTimer.current);
