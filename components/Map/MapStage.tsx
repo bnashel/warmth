@@ -9,9 +9,9 @@ import { MAPBOX_TOKEN } from "@/lib/map";
 import { momentsStore } from "@/lib/momentsStore";
 import { atmosphere } from "@/lib/atmosphere";
 import { setRainLevel } from "@/lib/sound";
-import { CAMERA, CHOREO, FIELD, INK, LABELS, LOOKS, MOTION, PAPER, PERF, SOLAR, WEATHER } from "./tune";
+import { CAMERA, CHOREO, FIELD, INK, LABELS, LOOKS, MOTION, PAPER, PERF, PRIVATE, SOLAR, WEATHER } from "./tune";
 import { buildStyle } from "./styles";
-import { applyAtmosphereInk, inkWeight, setWorld, worldFromUrl } from "./solar";
+import { applyAtmosphereInk, atmosphereInk, inkWeight, setWorld, worldFromUrl } from "./solar";
 import { FieldLayer } from "./FieldLayer";
 import { GalleryFieldLayer } from "./GalleryFieldLayer";
 import { currentLook, onLookChange } from "./lookState";
@@ -92,6 +92,34 @@ export default function MapStage({
       }),
     [],
   );
+  // THE QUIET GROUND (private redesign, 07-17): applied veil opacity —
+  // the tick only touches paint when the crossfade actually moves it.
+  const veilApplied = useRef(0);
+  /** The veil: one background layer in the ground's own graded tone,
+   *  raised by the private crossfade so the base city recedes and the
+   *  memories come forward. Rests at 0 in public (pixel-untouched).
+   *  A spec layer — mapbox restores it itself on context loss; a world
+   *  swap drops it with the style, and the style.load re-stand re-adds. */
+  const ensureVeil = (map: MapboxMap) => {
+    try {
+      if (map.getLayer("private-veil")) return;
+      map.addLayer({
+        id: "private-veil",
+        type: "background",
+        paint: {
+          "background-color": atmosphereInk(atmosphere.current).bg,
+          // The solar cadence re-tints it; ease like the rest of the ink.
+          "background-color-transition": { duration: SOLAR.transitionMs, delay: 0 },
+          "background-opacity": 0,
+          // The tick drives opacity per frame — mapbox must not double-ease.
+          "background-opacity-transition": { duration: 0, delay: 0 },
+        },
+      });
+      veilApplied.current = 0;
+    } catch (err) {
+      console.error("warmth: the private veil failed to stand", err);
+    }
+  };
   /** Mount the engine the CURRENT look wants (pond = Ben's, gallery =
    *  Eli's). A fresh instance every swap: cheap at the dissolve trough,
    *  and Ben's pigment path re-reads the world on construction. */
@@ -135,6 +163,7 @@ export default function MapStage({
         { diff: false } as Parameters<MapboxMap["setStyle"]>[1],
       );
       map.once("style.load", () => {
+        ensureVeil(map); // under the field: the ground recedes, feeling doesn't
         mountField(map);
         try {
           if (!map.getLayer("precip")) {
@@ -267,6 +296,10 @@ export default function MapStage({
       const map = mapRef.current?.getMap();
       if (!map || !loaded.current) return;
       applyAtmosphereInk(map, atmosphere.current);
+      // The veil wears the same graded ground tone the ink just landed on.
+      if (map.getLayer("private-veil")) {
+        map.setPaintProperty("private-veil", "background-color", atmosphereInk(atmosphere.current).bg);
+      }
     };
     const iv = setInterval(apply, SOLAR.updateMs);
     document.addEventListener("visibilitychange", apply);
@@ -311,6 +344,18 @@ export default function MapStage({
         if (Math.abs(viewMix.current - target) < 0.004) viewMix.current = target;
       }
       const trailOn = viewMix.current > 0.01;
+
+      // THE QUIET GROUND: the base city recedes as the journal comes
+      // forward — the veil's opacity rides the same crossfade (and the
+      // gallery dissolve, so a look swap mid-private never flashes the
+      // full-strength public grid).
+      const veil =
+        viewMix.current *
+        (worldFromUrl() === "paper" ? PRIVATE.veil.paper : PRIVATE.veil.night);
+      if (veil !== veilApplied.current && map.getLayer("private-veil")) {
+        veilApplied.current = veil;
+        map.setPaintProperty("private-veil", "background-opacity", veil);
+      }
 
       // Hand the atmosphere to the field — in-place mutation, no allocation.
       // CONSTITUTION RULE 2: only the WIND (the field's living flow) and the
@@ -521,6 +566,7 @@ export default function MapStage({
           // A shader-compile failure (seen once: driver returned a null
           // info log) must degrade to a city without weather — it must
           // never take the whole screen down (design-review finding).
+          ensureVeil(map); // under the field: the ground recedes, feeling doesn't
           mountField(map);
           // Falling weather, above the field (still under the deck labels).
           try {

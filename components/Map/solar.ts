@@ -304,8 +304,11 @@ export function applyAtmosphereInk(map: MapboxMap, a: AtmosphereState): void {
   // The road network's presence follows the paper: hairlines on ink,
   // an Apple-Maps-bright web on the day page. Same zoom ramps as the
   // style itself — only the landing alpha breathes.
-  const boost = 1 + (SOLAR.dayRoadBoost - 1) * a.paper;
-  const widen = 1 + (SOLAR.dayRoadWiden - 1) * a.paper;
+  // The paper WORLD softened its presence 07-17 (the grid read harsh);
+  // the parked daylight mode keeps the original Apple-Maps-bright dials.
+  const paperWorld = worldFromUrl() === "paper";
+  const boost = 1 + ((paperWorld ? SOLAR.paperRoadBoost : SOLAR.dayRoadBoost) - 1) * a.paper;
+  const widen = 1 + ((paperWorld ? SOLAR.paperRoadWiden : SOLAR.dayRoadWiden) - 1) * a.paper;
   for (const [id, fade, alpha, width, lift] of ROADS) {
     if (!map.getLayer(id)) continue;
     if (firstTouch) {

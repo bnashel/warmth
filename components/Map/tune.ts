@@ -706,9 +706,11 @@ export const SOLAR = {
    *  paperDusk on the ember. paperNight.bg stays ≥ ~0x40 luminance: the
    *  pigment multiply needs a light-enough ground; the slate-hours
    *  luminance pass carries the rest. */
-  paperNoon: { bg: "#EAE3D3", water: "#C2C8C6", park: "#E0DCC6", building: "#DFD7C4", road: "#2E2B25" },
-  paperDusk: { bg: "#C9B2AE", water: "#9E979E", park: "#BFAC9E", building: "#C2ABA4", road: "#382B26" },
-  paperNight: { bg: "#42464F", water: "#2F323A", park: "#3E4340", building: "#464B55", road: "#14161B" },
+  // Road ink softened 2026-07-17 (Eli: the paper grid read too dark and
+  // too harsh) — warm-black pens traded for gentle graphites at every hour.
+  paperNoon: { bg: "#EAE3D3", water: "#C2C8C6", park: "#E0DCC6", building: "#DFD7C4", road: "#4E483D" },
+  paperDusk: { bg: "#C9B2AE", water: "#9E979E", park: "#BFAC9E", building: "#C2ABA4", road: "#55463F" },
+  paperNight: { bg: "#42464F", water: "#2F323A", park: "#3E4340", building: "#464B55", road: "#232630" },
   /** Master dial: 0 kills the effect entirely, 1 = full. */
   strength: 1,
   /** Sun elevation (deg) across which night becomes day. Starts at civil
@@ -748,6 +750,12 @@ export const SOLAR = {
    *  mid-zoom on paper a 1.5px 83%-white line dissolves — the "bridge
    *  disappears" dead zone. Day mass, night hairlines, same curve. */
   dayRoadWiden: 1.55,
+  /** THE PAPER WORLD's own road presence (softened 2026-07-17, Eli: the
+   *  ink grid read too dark and too harsh). Paper runs at a forced
+   *  paper=1, so these land as constants there; the parked daylight mode
+   *  keeps the original dayRoadBoost/Widen above, untouched. */
+  paperRoadBoost: 2.4,
+  paperRoadWiden: 1.4,
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -925,9 +933,26 @@ export const PAPER: CandidatePalette = {
   building: "#DFD7C4", // settled mass, one step below the sheet
   buildingAlpha: 0.5,
   plateBase: 0, // the sheet is gapless bone; no plates
-  boundary: "rgba(44,41,36,0.09)", // hand-drawn ink seams
+  // Softened 2026-07-17 (Eli: the lines and grid read too dark and too
+  // harsh): the seams breathe lighter, the pen trades warm-black for a
+  // soft warm graphite. Still ink, never a UI line.
+  boundary: "rgba(44,41,36,0.055)",
   boundaryWidth: 1.0,
-  road: "#2E2B25", // real ink, warm-black
+  road: "#4E483D", // soft warm graphite — a pencil that pressed gently
   roadAlpha: { ...INK.roadAlpha },
   roadWidth: { ...INK.roadWidth },
 };
+
+/* ------------------------------------------------------------------ */
+/* THE PRIVATE GROUND (private-mode redesign, 2026-07-17)              */
+/* ------------------------------------------------------------------ */
+export const PRIVATE = {
+  /** THE QUIET GROUND: crossing into the journal, the base city recedes
+   *  behind a veil of its own ground tone — roads, seams, and plates all
+   *  soften together, and the memories come forward. The veil is one
+   *  mapbox background layer whose opacity rides the public↔private
+   *  crossfade per frame (a single paint set — free). It rests at 0 in
+   *  public, so the public map is pixel-untouched. Per-world strength,
+   *  judged by eye. */
+  veil: { night: 0.52, paper: 0.4 },
+} as const;
