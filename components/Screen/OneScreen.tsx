@@ -28,6 +28,7 @@ import { WeatherPreview } from "@/components/Lab/WeatherPreview";
 import { MemoryCard } from "@/components/Trail/MemoryCard";
 import { TimeScrubber } from "@/components/Trail/TimeScrubber";
 import { journalTestMode, journalTestPoints } from "@/components/Trail/testJournal";
+import { setLens } from "@/lib/emotionLens";
 import {
   setWelcomeStage,
   welcomeStage,
@@ -181,6 +182,10 @@ export default function OneScreen() {
     return Date.now() - start > 86_400_000 ? start : null;
   }, [view, hasOwn]);
   const [onThisDay, setOnThisDay] = useState<Moment | null>(null);
+  // The lens belongs to the private view — leaving it always releases.
+  useEffect(() => {
+    if (view !== "private") setLens(null);
+  }, [view]);
   useEffect(() => {
     if (view !== "private") return;
     // Greet once per session, only when the journal actually has a memory
@@ -797,8 +802,10 @@ export default function OneScreen() {
           dropdown, live switches. Dev builds (or ?looks=1). */}
       {galleryOn && <LookGallery />}
       {/* THE LEGEND (07-14): five glowing dots, bottom-left — which color
-          is which feeling. Reads over night and paper alike. */}
-      <EmotionLegend />
+          is which feeling. Reads over night and paper alike. In private
+          it becomes THE EMOTION LENS (07-17): tap a feeling to see only
+          it — where does my calm live? — tap again to release. */}
+      <EmotionLegend interactive={view === "private"} />
 
       {/* THE FIRST HELLO (07-14): a one-time veil for brand-new users —
           three lines, tap to skip, the live city breathing underneath. */}

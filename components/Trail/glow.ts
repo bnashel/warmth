@@ -20,6 +20,7 @@ import { currentLook } from "@/components/Map/lookState";
 import { buildGalleryTrailLayers } from "./galleryGlow";
 import { buildLanternTrailLayers } from "./lanternGlow";
 import { applyTimeScrub } from "@/lib/timeScrub";
+import { applyEmotionLens } from "@/lib/emotionLens";
 import type { LivePoint } from "@/lib/momentsStore";
 import { GLOW, LAMP, TRAIL } from "@/components/Map/tune";
 
@@ -357,6 +358,12 @@ export function buildTrailLayers(
   const scrubbed = applyTimeScrub(data, version);
   data = scrubbed.data;
   version = scrubbed.version;
+  // THE EMOTION LENS (07-17): a chosen feeling holds full presence,
+  // the rest settle to a whisper. Chained after the scrub — you can
+  // ask "where was my joy last spring?" with both hands.
+  const lensed = applyEmotionLens(data, version);
+  data = lensed.data;
+  version = lensed.version;
   // THE ONE GALLERY (merge, 07-13): the active look chooses its journal —
   // and `?trail=` overrides it for judging (private redesign, 07-17).
   // Ben's forever-ember renders below; Eli's aurora THREAD and GARDEN in
