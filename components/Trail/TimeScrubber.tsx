@@ -16,10 +16,23 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, animate } from "framer-motion";
 import { SPRING } from "@/lib/theme";
-import { scrubTo } from "@/lib/timeScrub";
+import { scrubTime, scrubTo } from "@/lib/timeScrub";
 
-/** Within this fraction of the right edge the release means "back to now". */
+/** Within this fraction of the right edge the thumb means "now" (live). */
 const NOW_SNAP = 0.97;
+/** Releasing a drag this close to the edge springs the rest of the way
+ *  home — a generous band, so "almost now" never strands the journal a
+ *  breath in the past (design review blocker). */
+const HOME_BAND = 0.94;
+
+/** Where the thumb stands for the CURRENT scrub state — the hand may
+ *  remount mid-scrub (a memory card hides it) and must pick up its
+ *  place in time, never silently reset it (code review). */
+function initFrac(startMs: number): number {
+  const t = scrubTime();
+  if (t === null) return 1;
+  return Math.min(1, Math.max(0, (t - startMs) / Math.max(1, Date.now() - startMs)));
+}
 
 function monthLabel(t: number): string {
   const d = new Date(t);
@@ -39,14 +52,23 @@ export function TimeScrubber({
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
   // 1 = now (live). Anything less = scrubbed into the past.
-  const [frac, setFrac] = useState(1);
-  const fracRef = useRef(1);
+  const [frac, setFrac] = useState(() => initFrac(startMs));
+  // The month under the thumb — derived in apply (never in render:
+  // the frac→time mapping reads the clock, which render must not).
+  const [label, setLabel] = useState(() =>
+    monthLabel(startMs + initFrac(startMs) * (Date.now() - startMs)),
+  );
+  const fracRef = useRef(frac);
   const homing = useRef<{ stop: () => void } | null>(null);
 
   const apply = (f: number) => {
-    fracRef.current = f;
-    setFrac(f);
-    scrubTo(f >= NOW_SNAP ? null : startMs + f * (Date.now() - startMs));
+    // Clamped: the homing spring overshoots by design and must never
+    // draw the thumb past the end of the line (code review).
+    const c = Math.min(1, Math.max(0, f));
+    fracRef.current = c;
+    setFrac(c);
+    setLabel(monthLabel(startMs + c * (Date.now() - startMs)));
+    scrubTo(c >= NOW_SNAP ? null : startMs + c * (Date.now() - startMs));
   };
 
   const fromClientX = (clientX: number) => {
@@ -66,11 +88,13 @@ export function TimeScrubber({
     });
   };
 
-  // Leaving the private view (unmount) always returns the journal to now.
+  // Unmount stops the spring but KEEPS the scrub state — a memory card
+  // hides the hand, and the user's place in time must survive it (code
+  // review). Leaving the private view clears the scrub (OneScreen owns
+  // that, alongside the lens).
   useEffect(
     () => () => {
       homing.current?.stop();
-      scrubTo(null);
     },
     [],
   );
@@ -87,6 +111,9 @@ export function TimeScrubber({
         cursor: "pointer",
       }}
       onPointerDown={(e) => {
+        // The "now" button owns its own tap — capturing here would
+        // retarget the click and kill it (design review blocker).
+        if ((e.target as HTMLElement).closest("button")) return;
         homing.current?.stop();
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
         setDragging(true);
@@ -96,8 +123,9 @@ export function TimeScrubber({
         if (dragging) apply(fromClientX(e.clientX));
       }}
       onPointerUp={() => {
+        if (!dragging) return;
         setDragging(false);
-        if (fracRef.current >= NOW_SNAP) goHome();
+        if (fracRef.current >= HOME_BAND) goHome();
       }}
       onPointerCancel={() => {
         setDragging(false);
@@ -160,7 +188,9 @@ export function TimeScrubber({
             transition={SPRING.settle}
             style={{
               position: "absolute",
-              left: `${Math.min(92, Math.max(8, frac * 100))}%`,
+              // Clamped short of the right end — the chip must never sit
+              // on the "now" label (design review; "now" also yields).
+              left: `${Math.min(84, Math.max(8, frac * 100))}%`,
               top: -16,
               x: "-50%",
               padding: "4px 11px",
@@ -176,7 +206,7 @@ export function TimeScrubber({
               pointerEvents: "none",
             }}
           >
-            {monthLabel(startMs + frac * (Date.now() - startMs))}
+            {label}
           </motion.span>
         )}
       </AnimatePresence>
@@ -187,13 +217,14 @@ export function TimeScrubber({
         onClick={goHome}
         style={{
           position: "absolute",
-          right: -12,
-          top: -14,
-          padding: "6px 12px",
+          right: -14,
+          top: -18,
+          padding: "10px 14px",
           border: "none",
           background: "transparent",
           color: ink,
-          opacity: live ? 0.42 : 0.85,
+          // Yields while the month chip drifts near its corner.
+          opacity: !live && frac > 0.86 ? 0 : live ? 0.42 : 0.85,
           fontSize: 10.5,
           letterSpacing: "0.08em",
           cursor: "pointer",
@@ -201,6 +232,8 @@ export function TimeScrubber({
           touchAction: "manipulation",
         }}
       >
+        {/* Invisible reach: the label stays a whisper, the thumb gets 44px. */}
+        <span aria-hidden style={{ position: "absolute", inset: "-8px -6px" }} />
         now
       </button>
     </div>

@@ -85,6 +85,7 @@ export default function EmotionLegend({ interactive = false }: { interactive?: b
             aria-label={`show only ${e}`}
             onClick={() => setLens(active === e ? null : e)}
             style={{
+              position: "relative",
               display: "flex",
               alignItems: "center",
               gap: 8,
@@ -98,6 +99,9 @@ export default function EmotionLegend({ interactive = false }: { interactive?: b
               transition: "background 300ms ease",
             }}
           >
+            {/* Invisible reach (the house pattern): the row stays a
+                whisper, the thumb gets closer to 44px. */}
+            <span aria-hidden style={{ position: "absolute", inset: "-6px -8px" }} />
             {row}
           </button>
         ) : (

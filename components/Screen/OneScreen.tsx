@@ -1,7 +1,7 @@
 "use client";
 
 import { devUnlocked } from "@/lib/dev";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Inter } from "next/font/google";
 import { AnimatePresence, motion, useMotionValue, useTransform } from "framer-motion";
 import type { Map as MapboxMap } from "mapbox-gl";
@@ -29,6 +29,7 @@ import { MemoryCard } from "@/components/Trail/MemoryCard";
 import { TimeScrubber } from "@/components/Trail/TimeScrubber";
 import { journalTestMode, journalTestPoints } from "@/components/Trail/testJournal";
 import { setLens } from "@/lib/emotionLens";
+import { scrubTo } from "@/lib/timeScrub";
 import {
   setWelcomeStage,
   welcomeStage,
@@ -172,19 +173,36 @@ export default function OneScreen() {
   // THE TIME SCRUBBER's span: the journal's first day → now. Needs at
   // least two moments to be a journey; test-journal aware so judging
   // sessions replay too. Re-derived on view entry / first entry.
-  const scrubStart = useMemo(() => {
-    if (view !== "private") return null;
-    const pts = journalTestMode() ? journalTestPoints() : momentsStore.ownPoints;
-    if (pts.length < 2) return null;
-    let start = Infinity;
-    for (const p of pts) start = Math.min(start, p.createdAt);
-    // A journey shorter than a day has nothing to scrub through.
-    return Date.now() - start > 86_400_000 ? start : null;
+  const [scrubStart, setScrubStart] = useState<number | null>(null);
+  useEffect(() => {
+    // Deferred a beat (the set-state-in-effect rule; same pattern as the
+    // intro veil) — the scrubber arriving one frame late is invisible.
+    const id = window.setTimeout(() => {
+      if (view !== "private") {
+        setScrubStart(null);
+        return;
+      }
+      const pts = journalTestMode() ? journalTestPoints() : momentsStore.ownPoints;
+      if (pts.length < 2) {
+        setScrubStart(null);
+        return;
+      }
+      let start = Infinity;
+      for (const p of pts) start = Math.min(start, p.createdAt);
+      // A journey shorter than a day has nothing to scrub through.
+      setScrubStart(Date.now() - start > 86_400_000 ? start : null);
+    }, 0);
+    return () => window.clearTimeout(id);
   }, [view, hasOwn]);
   const [onThisDay, setOnThisDay] = useState<Moment | null>(null);
-  // The lens belongs to the private view — leaving it always releases.
+  // The lens and the scrub belong to the private view — leaving it always
+  // releases both. (The scrubber itself keeps its state across remounts,
+  // e.g. while a memory card hides it — this is the one true reset.)
   useEffect(() => {
-    if (view !== "private") setLens(null);
+    if (view !== "private") {
+      setLens(null);
+      scrubTo(null);
+    }
   }, [view]);
   useEffect(() => {
     if (view !== "private") return;
@@ -417,13 +435,17 @@ export default function OneScreen() {
             mapRef.current = m;
           }}
           onEntryTap={(id) => {
+            // Only real journal entries open a card — a ?journal=test
+            // lantern has no store row, and a card that renders nothing
+            // would silently eat the screen (review: the dead-end trap).
+            const entry = momentsStore.journalEntry(id);
+            if (!entry) return;
             setEditingId(id);
             // The camera breathes toward the memory as its card opens —
             // the spot rises to the upper third so the card never covers
             // the lantern you just touched (private redesign, 07-17).
-            const entry = momentsStore.journalEntry(id);
             const m = mapRef.current;
-            if (entry && m) {
+            if (m) {
               m.easeTo({
                 center: [entry.lng, entry.lat],
                 offset: [0, -Math.round(m.getContainer().clientHeight * 0.16)],

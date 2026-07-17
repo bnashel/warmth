@@ -97,6 +97,11 @@ export const LABELS = {
   /** White alpha per tier (0-255). Whisper, not shout — and always
    *  quieter than the dimmest glow (the brightness law). */
   alpha: [132, 100, 78],
+  /** THE QUIET GROUND (private redesign, 07-17): in the journal the
+   *  names settle with the veil — label opacity scales by
+   *  1 − viewMix·privateDim, so no word outshines the dimmest lantern.
+   *  0 would leave labels untouched; public is always untouched. */
+  privateDim: 0.55,
   /**
    * Zoom at which each tier begins to appear (fades over ~0.8z).
    * NO neighborhood names at the rest view (Ben: cluttered) — the wide city

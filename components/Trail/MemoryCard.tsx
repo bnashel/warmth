@@ -63,10 +63,13 @@ function timeLabel(createdAt: number): string {
   return new Date(createdAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
-/** "3 weeks ago" — null for today (today needs no distance). */
+/** "3 weeks ago" — null for today (today needs no distance) and for
+ *  future timestamps (clock skew across devices must never whisper
+ *  "yesterday" about tomorrow — code review). */
 function agoWhisper(createdAt: number): string | null {
   const now = new Date();
   const then = new Date(createdAt);
+  if (createdAt > now.getTime()) return null;
   if (now.toDateString() === then.toDateString()) return null;
   const days = Math.max(1, Math.round((now.getTime() - createdAt) / 86_400_000));
   if (days === 1) return "yesterday";
@@ -75,12 +78,10 @@ function agoWhisper(createdAt: number): string | null {
     const w = Math.round(days / 7);
     return w === 1 ? "a week ago" : `${w} weeks ago`;
   }
-  if (days < 365) {
-    const m = Math.round(days / 30.44);
-    return m === 1 ? "a month ago" : `${m} months ago`;
-  }
+  const m = Math.round(days / 30.44);
+  if (m < 12) return m === 1 ? "a month ago" : `${m} months ago`;
   const y = Math.round(days / 365.25);
-  return y === 1 ? "a year ago" : `${y} years ago`;
+  return y <= 1 ? "a year ago" : `${y} years ago`;
 }
 
 const inputStyle: React.CSSProperties = {

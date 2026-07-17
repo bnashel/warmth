@@ -67,6 +67,7 @@ export default function MapStage({
     zoom: number;
     paper: number;
     dimsKey: string;
+    dim: number;
     layers: ReturnType<typeof buildLabelLayers>;
   } | null>(null);
   const dataVersion = useRef(-1);
@@ -103,6 +104,12 @@ export default function MapStage({
   const ensureVeil = (map: MapboxMap) => {
     try {
       if (map.getLayer("private-veil")) return;
+      // Stand at the CURRENT crossfade strength, not 0 — a world swap
+      // mid-private rebuilds the style, and even one unveiled frame
+      // would flash the full public grid (code review).
+      const now =
+        viewMix.current *
+        (worldFromUrl() === "paper" ? PRIVATE.veil.paper : PRIVATE.veil.night);
       map.addLayer({
         id: "private-veil",
         type: "background",
@@ -110,12 +117,12 @@ export default function MapStage({
           "background-color": atmosphereInk(atmosphere.current).bg,
           // The solar cadence re-tints it; ease like the rest of the ink.
           "background-color-transition": { duration: SOLAR.transitionMs, delay: 0 },
-          "background-opacity": 0,
+          "background-opacity": now,
           // The tick drives opacity per frame — mapbox must not double-ease.
           "background-opacity-transition": { duration: 0, delay: 0 },
         },
       });
-      veilApplied.current = 0;
+      veilApplied.current = now;
     } catch (err) {
       console.error("warmth: the private veil failed to stand", err);
     }
@@ -498,17 +505,22 @@ export default function MapStage({
       const dimsKey = dimsCache.key;
       // Labels re-ink when the camera moves OR the paperness drifts (dawn,
       // dusk, a preview jump) — graphite on paper, whisper-white on ink.
+      // In the journal the names settle with the veil — no word may
+      // outshine the dimmest lantern (design review; brightness law).
+      const labelDim = 1 - viewMix.current * LABELS.privateDim;
       const labelsStale =
         !labelCache.current ||
         Math.abs(labelCache.current.zoom - zoom) > 0.05 || // 07-14: was 0.02 = every frame mid-zoom
         Math.abs(labelCache.current.paper - inkWeight(atmo)) > 0.04 ||
+        Math.abs(labelCache.current.dim - labelDim) > 0.03 ||
         labelCache.current.dimsKey !== dimsKey;
       if (labelsStale) {
         labelCache.current = {
           zoom,
           paper: atmo.paper,
           dimsKey,
-          layers: buildLabelLayers(labelData.current, zoom, inkWeight(atmo), boroughDims),
+          dim: labelDim,
+          layers: buildLabelLayers(labelData.current, zoom, inkWeight(atmo), boroughDims, labelDim),
         };
       }
       // Trail dots breathe via a time uniform, so while visible they re-set

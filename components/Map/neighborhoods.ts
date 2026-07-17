@@ -116,7 +116,7 @@ function labelColor(alpha: number, paper: number): [number, number, number, numb
   return [mix(233, 52), mix(236, 58), mix(244, 70), mix(alpha, Math.min(255, alpha * 1.5))];
 }
 
-function buildBoroughLayer(zoom: number, paper: number, dims?: number[]) {
+function buildBoroughLayer(zoom: number, paper: number, dims?: number[], dim = 1) {
   const { from, to } = LABELS.boroughFadeOut;
   const t = Math.min(1, Math.max(0, (zoom - from) / (to - from)));
   // Fade out BOTH ways: up into neighborhoods, and down into the world —
@@ -125,7 +125,7 @@ function buildBoroughLayer(zoom: number, paper: number, dims?: number[]) {
   // the camera below the old minZoom).
   const fi = LABELS.boroughFadeIn;
   const ti = Math.min(1, Math.max(0, (zoom - fi.from) / (fi.to - fi.from)));
-  const opacity = (1 - t * t * (3 - 2 * t)) * (ti * ti * (3 - 2 * ti));
+  const opacity = (1 - t * t * (3 - 2 * t)) * (ti * ti * (3 - 2 * ti)) * dim;
   return new TextLayer<(typeof LABELS.boroughs)[number]>({
     id: "borough-labels",
     data: LABELS.boroughs,
@@ -176,8 +176,12 @@ export function buildLabelLayers(
   zoom: number,
   paper = 0,
   boroughDims?: number[],
+  /** THE QUIET GROUND (private redesign, 07-17): the veil's crossfade
+   *  also settles the names — in the journal, no word outshines the
+   *  dimmest lantern (brightness hierarchy). 1 = public, untouched. */
+  dim = 1,
 ) {
-  const g = globalOpacity(zoom);
+  const g = globalOpacity(zoom) * dim;
   const tierData = tiersOf(data);
   const tiers = [0, 1, 2].map((tier) => {
     const opacity = tierOpacity(zoom, LABELS.tierZoom[tier]) * g;
@@ -199,5 +203,5 @@ export function buildLabelLayers(
       parameters: { depthWriteEnabled: false },
     });
   });
-  return [buildBoroughLayer(zoom, paper, boroughDims), ...tiers];
+  return [buildBoroughLayer(zoom, paper, boroughDims, dim), ...tiers];
 }

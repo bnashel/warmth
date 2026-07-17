@@ -176,6 +176,7 @@ export function buildLanternTrailLayers(
   // sized by how many it holds; tap to descend.
   if (zoom < TRAIL.spark.cluster.belowZoom && data.length > 1) {
     const clusters = cachedClusters(data, version, zoom);
+    const clusterNight = 1 - paper;
     const light = lanternLight(fade);
     const shared = {
       data: clusters,
@@ -191,15 +192,23 @@ export function buildLanternTrailLayers(
       radiusScale: 1,
     };
     return [
-      new EmotionGlowLayer({
-        id: "journal-lantern-cluster-halo",
-        ...shared,
-        pickable: false,
-        radiusScale: L.halo.radiusFactor,
-        radiusMaxPixels: TRAIL.spark.cluster.maxRadiusPx * L.halo.radiusFactor,
-        light: light.halo,
-        parameters: ADDITIVE_LIGHT,
-      }),
+      // Halo only where added light is visible (the night worlds) — on
+      // bone it was a wasted draw call (code review). Tighter than the
+      // street-zoom halo: at world distance neighboring clusters must
+      // stay separate lamps, never one soft mass (design review).
+      ...(clusterNight > 0.01
+        ? [
+            new EmotionGlowLayer({
+              id: "journal-lantern-cluster-halo",
+              ...shared,
+              pickable: false,
+              radiusScale: L.halo.radiusFactor * 0.72,
+              radiusMaxPixels: TRAIL.spark.cluster.maxRadiusPx * L.halo.radiusFactor * 0.72,
+              light: { ...light.halo, gain: L.halo.gain * fade * 0.8 * clusterNight },
+              parameters: ADDITIVE_LIGHT,
+            }),
+          ]
+        : []),
       new EmotionGlowLayer({
         id: "journal-lantern-clusters",
         ...shared,
@@ -228,7 +237,7 @@ export function buildLanternTrailLayers(
             number,
           ],
         updateTriggers: { getColor: [version, Math.round(fade * 32)] },
-        getPixelOffset: (d: LanternCluster) => [0, -(getClusterRadius(d) + 8)] as [number, number],
+        getPixelOffset: (d: LanternCluster) => [0, -(getClusterRadius(d) + 11)] as [number, number],
         fontFamily: "Inter, system-ui, sans-serif",
         fontWeight: 500,
         fontSettings: { sdf: true, smoothing: 0.32 },
@@ -326,9 +335,15 @@ export function buildLanternTrailLayers(
           data,
           first: oldest,
           last: newest,
+          // The year joins once the journal spans two of them — "began
+          // July 14" is ambiguous across two Julys (code review).
           began: new Date(oldest.createdAt).toLocaleDateString(undefined, {
             month: "long",
             day: "numeric",
+            year:
+              new Date(oldest.createdAt).getFullYear() === new Date().getFullYear()
+                ? undefined
+                : "numeric",
           }),
         };
       }
@@ -367,12 +382,15 @@ export function buildLanternTrailLayers(
           data: remembered,
           getPosition: (d) => d.position,
           getRadius: (d) => getLanternRadius(d) * L.ring.radiusFactor,
+          // The ring follows its lantern's weight closely — a feeling
+          // dimmed by the lens must not wear jewelry brighter than its
+          // own body (design review).
           getLineColor: (d) =>
             [
               d.hue[0],
               d.hue[1],
               d.hue[2],
-              Math.round(L.ring.alpha * fade * (0.45 + 0.55 * d.weight)),
+              Math.round(L.ring.alpha * fade * (0.15 + 0.85 * d.weight)),
             ] as [number, number, number, number],
           updateTriggers: { getRadius: version, getLineColor: version },
           radiusUnits: "pixels" as const,

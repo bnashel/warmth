@@ -55,20 +55,50 @@ let scrubVersion = 1_000_000_000;
 /**
  * The journal as it stood at the scrub time. Passthrough when live.
  * Weights mirror the store's formula with `T` in place of now; entries
- * newly crossed into view get a ~600ms kindle ramp (rule: nothing pops).
+ * newly crossed into view get the arrival-length kindle ramp (rule:
+ * nothing pops) — and RETURNING TO NOW kindles too: entries the scrub
+ * was hiding ease in over the same ramp instead of appearing in one
+ * frame (design + code review: the homecoming must not pop).
  */
 export function applyTimeScrub(
   data: LivePoint[],
   version: number,
 ): { data: LivePoint[]; version: number } {
   const t = scrubT;
-  if (t === null) {
-    bornAt.clear();
-    cache = null;
-    return { data, version };
-  }
-  const bucket = Math.round(t / BUCKET_MS);
   const nowPerf = performance.now();
+  const kindleHomeMs = CHOREO.arrival.durationMs;
+  if (t === null) {
+    if (bornAt.size === 0) {
+      cache = null;
+      return { data, version };
+    }
+    // THE HOMECOMING: kindle in whatever the scrub was hiding, finish
+    // whatever was mid-kindle, then hand back the store's own arrays.
+    const out: LivePoint[] = [];
+    let settled = true;
+    for (const p of data) {
+      let born = bornAt.get(p.id);
+      if (born === undefined) {
+        born = nowPerf;
+        bornAt.set(p.id, born);
+      }
+      const kindle = smooth((nowPerf - born) / kindleHomeMs);
+      if (kindle < 1) settled = false;
+      out.push(kindle >= 1 ? p : { ...p, weight: p.weight * kindle });
+    }
+    if (settled) {
+      bornAt.clear();
+      cache = null;
+      return { data, version };
+    }
+    scrubVersion++;
+    cache = null; // settling frames rebuild every push by design
+    return { data: out, version: scrubVersion };
+  }
+  // Canonical bucket time: the cached frame must not depend on which raw
+  // T first landed in the bucket (code review).
+  const bucket = Math.round(t / BUCKET_MS);
+  const tc = bucket * BUCKET_MS;
   const stale =
     !cache ||
     cache.src !== data ||
@@ -83,7 +113,7 @@ export function applyTimeScrub(
   let kindling = false;
   const visible = new Set<string>();
   for (const p of data) {
-    if (p.createdAt > t) continue;
+    if (p.createdAt > tc) continue;
     visible.add(p.id);
     let born = bornAt.get(p.id);
     if (born === undefined) {
@@ -94,7 +124,7 @@ export function applyTimeScrub(
       bornAt.set(p.id, born);
     }
     const base = TRAIL.weightFloor + (1 - TRAIL.weightFloor) * ((p.intensity - 1) / 9);
-    const freshness = Math.max(TRAIL.emberFloor, 1 - (t - p.createdAt) / trailMs);
+    const freshness = Math.max(TRAIL.emberFloor, 1 - (tc - p.createdAt) / trailMs);
     const kindle = smooth((nowPerf - born) / kindleMs);
     if (kindle < 1) kindling = true;
     out.push({ ...p, weight: base * freshness * kindle });
