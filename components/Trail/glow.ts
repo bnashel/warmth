@@ -19,6 +19,7 @@ import { journalTestMode, journalTestPoints, JOURNAL_TEST_VERSION } from "./test
 import { currentLook } from "@/components/Map/lookState";
 import { buildGalleryTrailLayers } from "./galleryGlow";
 import { buildLanternTrailLayers } from "./lanternGlow";
+import { applyTimeScrub } from "@/lib/timeScrub";
 import type { LivePoint } from "@/lib/momentsStore";
 import { GLOW, LAMP, TRAIL } from "@/components/Map/tune";
 
@@ -350,6 +351,12 @@ export function buildTrailLayers(
     data = journalTestPoints();
     version = JOURNAL_TEST_VERSION;
   }
+  // THE TIME SCRUBBER (private redesign, 07-17): while scrubbing, every
+  // renderer draws the journal as it stood at the scrub time — applied
+  // here, after the test swap, so real and judging journals both replay.
+  const scrubbed = applyTimeScrub(data, version);
+  data = scrubbed.data;
+  version = scrubbed.version;
   // THE ONE GALLERY (merge, 07-13): the active look chooses its journal —
   // and `?trail=` overrides it for judging (private redesign, 07-17).
   // Ben's forever-ember renders below; Eli's aurora THREAD and GARDEN in

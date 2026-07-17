@@ -1,7 +1,7 @@
 "use client";
 
 import { devUnlocked } from "@/lib/dev";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Inter } from "next/font/google";
 import { AnimatePresence, motion, useMotionValue, useTransform } from "framer-motion";
 import type { Map as MapboxMap } from "mapbox-gl";
@@ -26,6 +26,8 @@ import { atmosphere } from "@/lib/atmosphere";
 import { inkWeight } from "@/components/Map/solar";
 import { WeatherPreview } from "@/components/Lab/WeatherPreview";
 import { MemoryCard } from "@/components/Trail/MemoryCard";
+import { TimeScrubber } from "@/components/Trail/TimeScrubber";
+import { journalTestMode, journalTestPoints } from "@/components/Trail/testJournal";
 import {
   setWelcomeStage,
   welcomeStage,
@@ -166,6 +168,18 @@ export default function OneScreen() {
   }, []);
   // The journal: which spark's memory is open, and today's resurfaced moment.
   const [editingId, setEditingId] = useState<string | null>(null);
+  // THE TIME SCRUBBER's span: the journal's first day → now. Needs at
+  // least two moments to be a journey; test-journal aware so judging
+  // sessions replay too. Re-derived on view entry / first entry.
+  const scrubStart = useMemo(() => {
+    if (view !== "private") return null;
+    const pts = journalTestMode() ? journalTestPoints() : momentsStore.ownPoints;
+    if (pts.length < 2) return null;
+    let start = Infinity;
+    for (const p of pts) start = Math.min(start, p.createdAt);
+    // A journey shorter than a day has nothing to scrub through.
+    return Date.now() - start > 86_400_000 ? start : null;
+  }, [view, hasOwn]);
   const [onThisDay, setOnThisDay] = useState<Moment | null>(null);
   useEffect(() => {
     if (view !== "private") return;
@@ -619,6 +633,32 @@ export default function OneScreen() {
           onCommit={handleCommit}
         />
       </motion.div>
+
+      {/* THE TIME SCRUBBER (private redesign, 07-17): drag back through
+          your year and watch the journal replay — lanterns kindle as
+          their moments arrive, the month whispers above your finger.
+          Hidden while a memory card is open or the welcome is telling. */}
+      <AnimatePresence>
+        {view === "private" && scrubStart && !editingId && !hintsMuted && (
+          <motion.div
+            key="time-scrubber"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 6 }}
+            transition={SPRING.settle}
+            style={{
+              position: "absolute",
+              left: 26,
+              right: 26,
+              bottom: `calc(env(safe-area-inset-bottom, 0px) + ${ORB.bottomOffset + 96}px)`,
+              height: 40,
+              zIndex: 10,
+            }}
+          >
+            <TimeScrubber startMs={scrubStart} ink={paperText(0.9)} />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* The journal: tap a spark, hold the moment. */}
       <AnimatePresence>
