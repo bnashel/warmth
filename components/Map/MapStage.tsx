@@ -324,7 +324,7 @@ export default function MapStage({
       let lookDim = 1;
       const swap = lookSwap.current;
       if (swap) {
-        const tDown = (now - swap.start) / 180;
+        const tDown = (now - swap.start) / 240;
         if (tDown < 1) {
           lookDim = 1 - tDown;
         } else if (!swap.swapped) {
@@ -332,7 +332,7 @@ export default function MapStage({
           applyLookSwap(map);
           lookDim = 0;
         } else {
-          const tUp = (now - swap.start - 180) / 220;
+          const tUp = (now - swap.start - 240) / 320;
           lookDim = Math.min(1, tUp);
           if (tUp >= 1) lookSwap.current = null;
         }
@@ -455,7 +455,7 @@ export default function MapStage({
       // dusk, a preview jump) — graphite on paper, whisper-white on ink.
       const labelsStale =
         !labelCache.current ||
-        Math.abs(labelCache.current.zoom - zoom) > 0.02 ||
+        Math.abs(labelCache.current.zoom - zoom) > 0.05 || // 07-14: was 0.02 = every frame mid-zoom
         Math.abs(labelCache.current.paper - inkWeight(atmo)) > 0.04 ||
         labelCache.current.dimsKey !== dimsKey;
       if (labelsStale) {

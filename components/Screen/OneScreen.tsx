@@ -15,6 +15,9 @@ import { Atmosphere, MissingToken } from "@/components/Map/Atmosphere";
 import { Lightning } from "@/components/Map/Lightning";
 import MapStage from "@/components/Map/MapStage";
 import { LookGallery, galleryEnabled } from "@/components/Lab/LookGallery";
+import IntroVeil from "@/components/Screen/IntroVeil";
+import { COPY } from "@/lib/copy";
+import EmotionLegend from "@/components/Map/EmotionLegend";
 import { ambientSeedMoments } from "@/components/Map/ambientSeed";
 import { fetchPublicField, subscribePublicField, markSelfCommit } from "@/lib/publicField";
 import { CAMERA, CHOREO, MOTION } from "@/components/Map/tune";
@@ -53,10 +56,10 @@ function gapLabel(ms: number): string {
 }
 
 const VIEWS = [
-  { key: "public", label: "public", caption: "the whole city, feeling together" },
+  { key: "public", label: COPY.viewPublic, caption: COPY.viewPublicCaption },
   // The journal must read cold: whose it is, what the marks are, and that
   // they're one story through time (Eli, 2026-07-08 clarity pass).
-  { key: "private", label: "private", caption: "only you can see this" },
+  { key: "private", label: COPY.viewPrivate, caption: COPY.viewPrivateCaption },
 ] as const;
 type ViewKey = (typeof VIEWS)[number]["key"];
 
@@ -739,6 +742,13 @@ export default function OneScreen() {
           Eli's nine, Ben's four pond looks, and the PAPER WORLD — one
           dropdown, live switches. Dev builds (or ?looks=1). */}
       {galleryOn && <LookGallery />}
+      {/* THE LEGEND (07-14): five glowing dots, bottom-left — which color
+          is which feeling. Reads over night and paper alike. */}
+      <EmotionLegend />
+
+      {/* THE FIRST HELLO (07-14): a one-time veil for brand-new users —
+          three lines, tap to skip, the live city breathing underneath. */}
+      <IntroVeil />
     </div>
   );
 }
