@@ -2,7 +2,7 @@
 *Read this at the start of every session.*
 
 ## Right now
-**Phase 3 backend: proven (`scripts/backend-proof`, 28 green) AND linked — project restored, keys in .env.local + Vercel, the wall is live. Two human steps left (docs/backend-launch.md): Ben runs `npx supabase db push`, then the two-device test = done.**
+**Phase 3 backend: LIVE — all 3 migrations applied and verified end-to-end on the real database (harness 28 green + live probes; see docs/backend-launch.md). One step left: the two-device test = done.**
 Update this line as we move through phases (full plan in /docs). Whatever this line says is your top priority.
 
 ## What we're building

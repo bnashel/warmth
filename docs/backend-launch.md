@@ -18,25 +18,14 @@
 - **Photo sync is complete** (sweep at sign-in, delete-means-gone, no orphan
   on replace).
 
-## Step 1 — one more push (one command)
+## Step 1 — DONE (2026-08-04)
 
-Two of the three migrations are live (`public_and_journal`,
-`public_read_realtime_triggers` — verified end-to-end against the real
-database: the EWKT insert parses on real PostGIS, the RPC returns the
-coarsened cell centre, raw rows and the journal are sealed to anon). The
-third — `field_read_cap`, the payload cap plus the future-date guards that
-close a confirmed spam-eviction attack — is still pending:
-
-```bash
-cd ~/warmth && npx supabase db push
-```
-
-The CLI will list exactly one migration (`20260804163547`). Until it runs,
-the live field query is uncapped and future-dated rows are accepted — fine
-behind the wall today, not fine to launch with.
-
-(The permission system treats a live-database schema change as
-human-approved, which is why this stays yours.)
+All three migrations are applied and verified end-to-end against the live
+database: the client's EWKT insert parses on real PostGIS; the RPC returns
+the coarsened cell centre (grid math matches the client to 1e-9); raw rows
+and the journal are sealed to anon; a future-dated insert is refused while
+backdating (offline replay) still works; the capped field query is live.
+The table was left empty — every probe row was deleted after the check.
 
 ## Step 2 — the two-device test (the phase's definition of done)
 
