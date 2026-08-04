@@ -2,7 +2,7 @@
 *Read this at the start of every session.*
 
 ## Right now
-**The Aesthetic Pass (branch `night-pass`): six phases — constitution, night+sky, base city, public field, lights, orb — proof required per phase.**
+**Phase 3 backend: PROVEN on real Postgres (`scripts/backend-proof` — 24 green: RLS, privacy grid, broadcast). Blocked on linking the real Supabase project (access token → `npx supabase db push` → env vars), then the two-device test = done.**
 Update this line as we move through phases (full plan in /docs). Whatever this line says is your top priority.
 
 ## What we're building
