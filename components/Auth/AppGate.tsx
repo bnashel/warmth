@@ -7,7 +7,7 @@ import OneScreen from "@/components/Screen/OneScreen";
 import { AuthOverlay } from "@/components/Auth/AuthOverlay";
 import { AccountChip } from "@/components/Auth/AccountChip";
 import { initAuth, onAuthChange, isSignedIn, currentUserId, useSession } from "@/lib/auth";
-import { claimLocalJournal, hydrateJournalFromCloud } from "@/lib/journalSync";
+import { claimLocalJournal, hydrateJournalFromCloud, syncLocalPhotos } from "@/lib/journalSync";
 import { WelcomeGate } from "@/components/Welcome/WelcomeGate";
 
 /**
@@ -49,6 +49,10 @@ export default function AppGate() {
       void (async () => {
         await claimLocalJournal();
         await hydrateJournalFromCloud();
+        // Rows first, then bytes: photos that exist only on this device
+        // (attached pre-sign-in, or a failed upload) go up and their paths
+        // land in the rows the other devices will hydrate.
+        await syncLocalPhotos();
       })();
     };
     sync(); // already signed in? (session restored)

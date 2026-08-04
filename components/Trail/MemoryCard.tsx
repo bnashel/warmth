@@ -15,7 +15,12 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { momentsStore, type Memory } from "@/lib/momentsStore";
 import { EMOTION_HUES, SPRING, type Emotion } from "@/lib/theme";
-import { uploadMemoryPhoto, signedPhotoUrl } from "@/lib/photos";
+import {
+  uploadMemoryPhoto,
+  signedPhotoUrl,
+  deleteMemoryPhoto,
+  tombstoneRowPhoto,
+} from "@/lib/photos";
 import { isSignedIn } from "@/lib/auth";
 import { isSupabaseConfigured } from "@/lib/supabase";
 
@@ -84,6 +89,19 @@ function agoWhisper(createdAt: number): string | null {
   return y <= 1 ? "a year ago" : `${y} years ago`;
 }
 
+/** Per-ENTRY photo epochs, module-scoped so they survive the card
+ *  unmounting: every pick/remove bumps its entry's epoch, and an upload
+ *  only counts if the epoch hasn't moved while it was in flight. A
+ *  per-mount ref version of this let close-card → reopen → remove race a
+ *  still-in-flight upload into resurrecting a removed photo (review). */
+const photoEpochs = new Map<string, number>();
+const photoEpoch = (id: string) => photoEpochs.get(id) ?? 0;
+const bumpPhotoEpoch = (id: string) => {
+  const next = photoEpoch(id) + 1;
+  photoEpochs.set(id, next);
+  return next;
+};
+
 const inputStyle: React.CSSProperties = {
   width: "100%",
   background: "rgba(233,236,244,0.06)",
@@ -108,28 +126,34 @@ export function MemoryCard({ entryId, onClose }: { entryId: string; onClose: () 
   // Dirty-gated: a card that was only OPENED never writes or claims "kept"
   // (StrictMode's double-mount ran the unmount flush and flashed a phantom
   // confirmation — design review).
+  //
+  // PARTIAL payloads only (2026-08-04 review): each writer sends just the
+  // keys it owns — keystrokes send {description}, photo actions their photo
+  // keys — and the store merges. Full-object payloads let a slow keystroke
+  // flush clobber a photoPath that landed mid-debounce (a confirmed
+  // photo-loss race).
   const dirty = useRef(false);
-  const save = (next: Memory) => {
+  const pending = useRef<Memory>({});
+  const save = (partial: Memory) => {
     dirty.current = true;
-    setMemory(next);
+    setMemory((s) => ({ ...s, ...partial }));
+    pending.current = { ...pending.current, ...partial };
     window.clearTimeout(saveTimer.current);
-    saveTimer.current = window.setTimeout(() => flush(next), 600);
+    saveTimer.current = window.setTimeout(flushPending, 600);
   };
-  const flush = (next: Memory) => {
+  const flushPending = () => {
     window.clearTimeout(saveTimer.current);
     if (!dirty.current) return;
+    const partial = pending.current;
+    pending.current = {};
     // Honest confirmation: "kept" only when storage really took the words.
-    const ok = momentsStore.setMemory(entryId, next);
+    const ok = momentsStore.setMemory(entryId, partial);
     if (ok) dirty.current = false;
+    else pending.current = { ...partial, ...pending.current }; // retry on next flush
     setKept(ok ? "kept" : "full");
     window.clearTimeout(keptTimer.current);
     if (ok) keptTimer.current = window.setTimeout(() => setKept(null), 1600);
   };
-  const memoryRef = useRef(memory);
-  useEffect(() => {
-    memoryRef.current = memory;
-  }, [memory]);
-
   // Photo: LOCAL-FIRST (instant, offline — a downscaled data URL kept with
   // the entry) AND synced to Storage when signed in (so it appears on your
   // other devices). The device that took it shows its own copy; another
@@ -158,20 +182,65 @@ export function MemoryCard({ entryId, onClose }: { entryId: string; onClose: () 
     // Instant + offline: shrink on-device and keep it with the entry.
     const dataUrl = await shrinkPhoto(file);
     if (!dataUrl) return;
-    save({ ...memoryRef.current, photo: dataUrl });
+    const myEpoch = bumpPhotoEpoch(entryId);
+    // The old photoPath stays in the row until the replacement has actually
+    // landed — remote devices keep showing the old photo instead of nothing.
+    const replaced = momentsStore.journalEntry(entryId)?.memory?.photoPath;
+    save({ photo: dataUrl });
     // Cross-device: upload the original to Storage when signed in. A failed
-    // upload is harmless — the local copy is already kept.
+    // upload is harmless — the local copy is already kept, and the sign-in
+    // photo sweep (journalSync) retries from the data URL later.
     if (canSyncPhoto) {
       setPhotoBusy(true);
       const { path } = await uploadMemoryPhoto(entryId, file);
       setPhotoBusy(false);
-      if (path) flush({ ...memoryRef.current, photo: dataUrl, photoPath: path });
+      if (!path) return;
+      if (photoEpoch(entryId) !== myEpoch) {
+        // Removed or re-picked while uploading: this object is already
+        // stale — delete it rather than strand it in the bucket.
+        void deleteMemoryPhoto(path);
+        return;
+      }
+      // The sign-in sweep may have raced us and recorded its own upload for
+      // this entry; capture it so the loser's bytes are cleaned up too.
+      const prior = momentsStore.journalEntry(entryId)?.memory?.photoPath;
+      // Record the path DIRECTLY (store merge + state), never through the
+      // dirty-gated flush: uploads usually outlast the 600ms debounce, and
+      // the gate silently dropped the path (review: confirmed critical).
+      momentsStore.setMemory(entryId, { photoPath: path });
+      setMemory((s) => ({ ...s, photoPath: path }));
+      // Only now is every superseded object unreferenced — safe to delete.
+      for (const old of new Set([replaced, prior])) {
+        if (old && old !== path) void deleteMemoryPhoto(old);
+      }
     }
   };
 
   const removePhoto = () => {
+    bumpPhotoEpoch(entryId);
+    // Read the CURRENT path from the store, not this card's mount snapshot —
+    // the sign-in sweep may have attached one while the card sat open.
+    const removed = momentsStore.journalEntry(entryId)?.memory?.photoPath;
+    // The armed debounce may still carry this photo's {photo} partial — a
+    // fire after this removal would resurrect the deleted photo locally AND
+    // (via the sweep) back into the cloud. Strip the photo keys; words keep
+    // their pending save.
+    delete pending.current.photo;
+    delete pending.current.photoPath;
     setRemoteUrl(null);
-    save({ ...memoryRef.current, photo: undefined, photoPath: undefined });
+    setMemory((s) => ({ ...s, photo: undefined, photoPath: undefined }));
+    void (async () => {
+      // Divergent-row rescue: if this device's store lost the path (quota
+      // fail + reload) the SERVER may still know it — tombstone it before
+      // the row below is nulled, or the bytes orphan forever.
+      if (!removed && canSyncPhoto) await tombstoneRowPhoto(entryId);
+      // Commit the dereference immediately (no debounce): if we crash in
+      // the next second the row must not point at bytes we're deleting.
+      momentsStore.setMemory(entryId, { photo: undefined, photoPath: undefined });
+      // A removed photo must be GONE, not just unreferenced (private
+      // diary). deleteMemoryPhoto tombstones on failure, so this converges.
+      if (removed) void deleteMemoryPhoto(removed);
+    })();
   };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -180,7 +249,7 @@ export function MemoryCard({ entryId, onClose }: { entryId: string; onClose: () 
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
-      flush(memoryRef.current); // never lose words to a close
+      flushPending(); // never lose words to a close
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -264,8 +333,8 @@ export function MemoryCard({ entryId, onClose }: { entryId: string; onClose: () 
           value={memory.description ?? ""}
           maxLength={MAX_DESCRIPTION}
           rows={3}
-          onChange={(e) => save({ ...memory, description: e.target.value })}
-          onBlur={() => flush(memoryRef.current)}
+          onChange={(e) => save({ description: e.target.value })}
+          onBlur={flushPending}
           style={inputStyle}
         />
 

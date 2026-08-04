@@ -16,6 +16,11 @@
 import { supabase } from "@/lib/supabase";
 import { currentUserId, isSignedIn } from "@/lib/auth";
 import { momentsStore, type Moment } from "@/lib/momentsStore";
+import {
+  uploadMemoryPhotoFromDataUrl,
+  deleteMemoryPhoto,
+  drainPhotoTombstones,
+} from "@/lib/photos";
 import type { Emotion } from "@/lib/theme";
 
 function claimedFlag(uid: string) {
@@ -67,6 +72,70 @@ export async function claimLocalJournal(): Promise<void> {
   if (!error) markClaimed(uid);
   else if (process.env.NODE_ENV !== "production") {
     console.warn(`warmth journalSync: claim failed — ${error.message}`);
+  }
+}
+
+/** Upload photo bytes that exist only on this device.
+ *
+ *  A photo attached before sign-in (or while an upload was failing) lives
+ *  solely as a data URL in localStorage: the claim pushes its journal row
+ *  with photo_path NULL, and the memory arrives on every other device
+ *  photo-less, forever. This sweep closes that hole — each such photo is
+ *  uploaded and its path written back through setMemory (which persists
+ *  locally and pushes the row update).
+ *
+ *  Deliberately NOT behind the once-per-account claim flag: an upload that
+ *  fails today (offline, quota) is simply retried at the next sign-in.
+ *  Idempotent — anything with a photoPath is skipped.
+ *
+ *  Guardrails (2026-08-04 review — each was a found, confirmed defect):
+ *  • Sweep ONLY entries whose journal row exists, is MINE, and lacks a
+ *    photo. The local trail is device-scoped, not account-scoped: on a
+ *    shared device another account's photos must never upload under this
+ *    uid, and an entry whose row was never claimed (created offline after
+ *    the one-time claim) must not upload bytes its row can't reference.
+ *  • Re-read the entry AFTER every await. The user can remove or replace
+ *    the photo mid-sweep; a stale snapshot would upload a removed photo
+ *    (fetch(undefined) even uploads the 404 page) or re-attach its path.
+ *  • If the path fails to land — or a concurrent sweep/pick recorded a
+ *    different one — delete this upload rather than strand it. */
+export async function syncLocalPhotos(): Promise<void> {
+  if (!supabase || !isSignedIn()) return;
+
+  // First, finish any pending deletes (removed photos must converge on GONE).
+  await drainPhotoTombstones();
+
+  const { data, error } = await supabase.from("journal_mine").select("id, photo_path");
+  if (error || !data) return;
+  const needsPhoto = new Set(
+    (data as { id: string; photo_path: string | null }[])
+      .filter((r) => !r.photo_path)
+      .map((r) => r.id),
+  );
+
+  for (const m of momentsStore.ownEntries()) {
+    if (!needsPhoto.has(m.id)) continue; // not my row / row missing / has bytes
+    const cur = momentsStore.journalEntry(m.id)?.memory;
+    if (!cur?.photo || cur.photoPath) continue; // removed or already recorded
+
+    // Sequential on purpose: photos are ≤~120 KB, and a gentle drip beats a
+    // burst of parallel uploads on a phone connection right at sign-in.
+    const { path, error: upErr } = await uploadMemoryPhotoFromDataUrl(m.id, cur.photo);
+    if (!path) {
+      if (upErr && process.env.NODE_ENV !== "production") {
+        console.warn(`warmth journalSync: photo sweep (${m.id}) — ${upErr}`);
+      }
+      continue;
+    }
+
+    const latest = momentsStore.journalEntry(m.id)?.memory;
+    if (!latest?.photo || latest.photoPath) {
+      void deleteMemoryPhoto(path); // removed/replaced while we uploaded
+      continue;
+    }
+    momentsStore.setMemory(m.id, { photoPath: path });
+    const recorded = momentsStore.journalEntry(m.id)?.memory?.photoPath;
+    if (recorded !== path) void deleteMemoryPhoto(path); // lost a race — no orphan
   }
 }
 

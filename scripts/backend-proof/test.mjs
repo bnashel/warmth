@@ -383,3 +383,17 @@ test("storage: owner-only path prefix on the memories bucket", async () => {
   const mine = await asRole(db, "authenticated", USER_B, () => db.query("select name from storage.objects"));
   assert.equal(mine.rows.length, 0, "B sees none of A's photos");
 });
+
+test("storage: delete is owner-only too (removePhoto really removes, nobody else can)", async () => {
+  // B cannot delete A's object — the RLS delete arm filters it out silently.
+  const theft = await asRole(db, "authenticated", USER_B, () =>
+    db.query("delete from storage.objects where bucket_id = 'memories'"));
+  assert.equal(theft.affectedRows ?? 0, 0, "B must delete nothing of A's");
+  assert.equal(await superCount("storage.objects"), 1, "A's photo survives");
+
+  // A deletes A's own — gone.
+  const own = await asRole(db, "authenticated", USER_A, () =>
+    db.query("delete from storage.objects where bucket_id = 'memories'"));
+  assert.equal(own.affectedRows ?? 0, 1, "A deletes exactly own object");
+  assert.equal(await superCount("storage.objects"), 0, "the bytes are gone");
+});
