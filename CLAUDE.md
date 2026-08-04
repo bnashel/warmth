@@ -2,7 +2,7 @@
 *Read this at the start of every session.*
 
 ## Right now
-**Phase 3 backend: LIVE — all 3 migrations applied and verified end-to-end on the real database (harness 28 green + live probes; see docs/backend-launch.md). One step left: the two-device test = done.**
+**Phase 3 is DONE (two-device test passed 2026-08-04: a feeling committed on one phone bloomed on another account's screen, coarsened to the privacy grid). Next phase: Ben + Eli pick — see docs/build-plan.md Phase 4.**
 Update this line as we move through phases (full plan in /docs). Whatever this line says is your top priority.
 
 ## What we're building
