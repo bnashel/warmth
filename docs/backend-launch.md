@@ -18,21 +18,25 @@
 - **Photo sync is complete** (sweep at sign-in, delete-means-gone, no orphan
   on replace).
 
-## Step 1 — push the schema (one command)
+## Step 1 — one more push (one command)
 
-The permission system rightly treats a live-database schema change as
-human-approved, so this one is yours:
+Two of the three migrations are live (`public_and_journal`,
+`public_read_realtime_triggers` — verified end-to-end against the real
+database: the EWKT insert parses on real PostGIS, the RPC returns the
+coarsened cell centre, raw rows and the journal are sealed to anon). The
+third — `field_read_cap`, the payload cap plus the future-date guards that
+close a confirmed spam-eviction attack — is still pending:
 
 ```bash
 cd ~/warmth && npx supabase db push
 ```
 
-It applies, in order: `public_and_journal` (tables + RLS + bucket, PostGIS
-for real this time), `public_read_realtime_triggers` (the aggregate RPC +
-broadcast trigger), `field_read_cap` (the cap + future-date guards).
+The CLI will list exactly one migration (`20260804163547`). Until it runs,
+the live field query is uncapped and future-dated rows are accepted — fine
+behind the wall today, not fine to launch with.
 
-If it asks for a database password: dashboard → Project Settings → Database
-→ Reset database password, then re-run with the new one.
+(The permission system treats a live-database schema change as
+human-approved, which is why this stays yours.)
 
 ## Step 2 — the two-device test (the phase's definition of done)
 
