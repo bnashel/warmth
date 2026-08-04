@@ -15,7 +15,6 @@ import { Atmosphere, MissingToken } from "@/components/Map/Atmosphere";
 import { Lightning } from "@/components/Map/Lightning";
 import MapStage from "@/components/Map/MapStage";
 import { LookGallery, galleryEnabled } from "@/components/Lab/LookGallery";
-import IntroVeil from "@/components/Screen/IntroVeil";
 import { COPY } from "@/lib/copy";
 import EmotionLegend from "@/components/Map/EmotionLegend";
 import { ambientSeedMoments } from "@/components/Map/ambientSeed";
@@ -829,9 +828,10 @@ export default function OneScreen() {
           it — where does my calm live? — tap again to release. */}
       <EmotionLegend interactive={view === "private"} />
 
-      {/* THE FIRST HELLO (07-14): a one-time veil for brand-new users —
-          three lines, tap to skip, the live city breathing underneath. */}
-      <IntroVeil />
+      {/* THE FIRST HELLO is now Ben's welcome film (Eli's call, 07-27):
+          WELCOME_DEFAULT in Welcome/script.ts auto-plays it for first
+          visits via AppGate's WelcomeGate. The three-line IntroVeil is
+          retired from this slot — component kept for possible reuse. */}
     </div>
   );
 }

@@ -17,8 +17,13 @@ export type WelcomeVersion = "slides" | "film";
  * judging previews. When Ben picks the winner, its key lands here and the
  * welcome plays on every first visit (skippable, replayable); the loser is
  * deleted (the ember-vs-splat rule).
+ *
+ * THE FILM WINS (Eli's call, 2026-07-27): the live-map cinematic greets
+ * every first visit. The slides stay judgeable via ?welcome=slides until
+ * Ben confirms; Eli's three-line IntroVeil retired from the first-run
+ * slot the same day (component kept, unmounted in OneScreen).
  */
-export const WELCOME_DEFAULT: WelcomeVersion | null = null;
+export const WELCOME_DEFAULT: WelcomeVersion | null = "film";
 
 export type WelcomeStep = {
   id: "welcome" | "public" | "private" | "orb" | "yours";
