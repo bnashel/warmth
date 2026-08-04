@@ -8,6 +8,7 @@ import type { Map as MapboxMap } from "mapbox-gl";
 import { MAPBOX_TOKEN } from "@/lib/map";
 import { momentsStore, type Moment } from "@/lib/momentsStore";
 import { armLocation, currentFix } from "@/lib/location";
+import { useSession } from "@/lib/auth";
 import { panic, unlockAudio } from "@/lib/sound";
 import { ORB } from "@/components/Orb/feel";
 import { EMOTION_HUES as EMOTION_HUES_SAFE, SPRING, type Emotion } from "@/lib/theme";
@@ -148,6 +149,10 @@ export default function OneScreen() {
   // The trail rehydrates from localStorage when the store module loads —
   // by first render the diary already knows if it has entries.
   const [hasOwn, setHasOwn] = useState(() => momentsStore.ownPoints.length > 0);
+  // The live broadcast channel is private (authenticated-only receive), so
+  // the subscription below waits for the session instead of burning rejoin
+  // retries against a closed door while the wall is up.
+  const { userId } = useSession();
   // THE WELCOME's stage contract: the walkthrough may switch the view, move
   // the camera, and fade the orb island while its ghost performs in place.
   // OneScreen never knows whether a welcome is playing — it just registers
@@ -249,10 +254,19 @@ export default function OneScreen() {
   // the DB). If the database is empty or unreachable, the ambient seed city
   // stands in so the map is never blank — and it replenishes on the 24h
   // window like before. Realtime keeps the real field live thereafter.
+  //
+  // Keyed on userId so the snapshot is re-read the moment a session lands:
+  // the wall can stand for minutes (or a tab can sit signed-out overnight),
+  // and everything the city felt in that time would otherwise be invisible
+  // until a manual reload — it is in neither the pre-auth snapshot nor the
+  // broadcast. Live attaches FIRST (the channel is private, so only with a
+  // session) but is held until the snapshot settles: a cell that is already
+  // inside the snapshot's aggregate would otherwise be counted twice and
+  // burn at double brightness.
   useEffect(() => {
     let cancelled = false;
     let replenish: number | undefined;
-    let stopLive: (() => void) | undefined;
+    let ready = false;
 
     momentsStore.clearTest();
     let fallback = false;
@@ -271,6 +285,15 @@ export default function OneScreen() {
       typeof window !== "undefined" &&
       new URLSearchParams(window.location.search).get("field") === "seed";
 
+    // Live: others' feelings arrive as coarsened blooms. Joined before the
+    // snapshot request goes out so nothing that lands mid-flight is missed,
+    // and gated on `ready` so nothing already inside the snapshot doubles.
+    const stopLive = userId
+      ? subscribePublicField((cell) => {
+          if (ready) momentsStore.ingestLivePublic(cell);
+        })
+      : undefined;
+
     void (forceSeed ? Promise.resolve([]) : fetchPublicField()).then((cells) => {
       if (cancelled) return;
       if (cells.length > 0) {
@@ -281,10 +304,9 @@ export default function OneScreen() {
         seed();
         replenish = window.setInterval(seed, 30 * 60_000);
       }
-      // Live: others' feelings arrive as coarsened blooms (no-op without a
-      // client). Both modes — a fallback map still goes live the moment a
-      // real feeling lands.
-      stopLive = subscribePublicField((cell) => momentsStore.ingestLivePublic(cell));
+      // From here the channel is the only source of new public light — a
+      // fallback (seed) map still blooms the moment a real feeling lands.
+      ready = true;
     });
 
     // Sounds must never survive the tab losing focus; a returning fallback
@@ -300,7 +322,7 @@ export default function OneScreen() {
       stopLive?.();
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, []);
+  }, [userId]);
 
   // While a finger is on the orb, the city holds still — a second finger
   // must never pan the map out from under the tube mid-rating.

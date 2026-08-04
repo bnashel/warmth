@@ -4,9 +4,9 @@
  * Everything here is already COARSENED by the server (a ~330 m privacy grid):
  * no raw coordinate, no id, no user ever reaches the client (CLAUDE.md:
  * never expose raw individual locations). The initial snapshot comes from the
- * public_field_recent() RPC; the live path (subscribePublicField) lands in a
- * later slice. No client, or an empty DB, yields [] — the caller falls back
- * to the ambient seed city.
+ * public_field_recent() RPC; the live path is subscribePublicField (below),
+ * attached by OneScreen once a session exists. No client, or an empty DB,
+ * yields [] — the caller falls back to the ambient seed city.
  */
 import { supabase } from "@/lib/supabase";
 import { EMOTION_HUES, type Emotion } from "@/lib/theme";
@@ -96,10 +96,17 @@ type LivePayload = {
 
 function toLiveCell(p: LivePayload): PublicCell | null {
   if (!isEmotion(p.emotion) || !Number.isFinite(p.lng) || !Number.isFinite(p.lat)) return null;
+  // Re-snap to the grid before anything renders. The DB already sends cell
+  // centres, so this is a no-op for legitimate payloads — but it means the
+  // map can NEVER paint a raw coordinate, even if something upstream one day
+  // gained the ability to publish onto this topic. Cheap belt to the DB's
+  // braces (CLAUDE.md: never expose raw individual locations).
+  const lng = Math.floor((p.lng as number) / GRID_LNG) * GRID_LNG + GRID_LNG / 2;
+  const lat = Math.floor((p.lat as number) / GRID_LAT) * GRID_LAT + GRID_LAT / 2;
   return {
     cellId: p.cell_id ?? "live",
-    lng: p.lng as number,
-    lat: p.lat as number,
+    lng,
+    lat,
     emotion: p.emotion,
     n: 1,
     avgIntensity: Math.min(10, Math.max(1, p.intensity ?? 5)),
@@ -115,6 +122,14 @@ function toLiveCell(p: LivePayload): PublicCell | null {
  * animation frame so a burst can't cost frames, and my own echoes are
  * skipped. Returns an unsubscribe; a no-op without a client.
  */
+// Joining "public_field" while a previous instance of the SAME topic is
+// still leaving hands back the leaving channel: .subscribe() no-ops, the
+// pending leave then closes it, and the field goes silent forever with no
+// error. React runs cleanup before the next setup in one commit, so an
+// account switch (or a Fast Refresh save) hits this every time. Chaining
+// each join behind the previous removal makes that impossible.
+let lastRemoval: Promise<unknown> = Promise.resolve();
+
 export function subscribePublicField(onCell: (c: PublicCell) => void): () => void {
   const client = supabase;
   if (!client) return () => {};
@@ -125,18 +140,24 @@ export function subscribePublicField(onCell: (c: PublicCell) => void): () => voi
     const batch = buffer.splice(0);
     for (const c of batch) onCell(c);
   };
-  const channel = client
-    .channel("public_field", { config: { private: true } })
-    .on("broadcast", { event: "moment" }, (msg: { payload?: LivePayload }) => {
-      const c = toLiveCell(msg.payload ?? {});
-      if (!c) return;
-      if (consumeSelf(publicCellKey(c.lng, c.lat, c.emotion))) return;
-      buffer.push(c);
-      if (!raf) raf = requestAnimationFrame(flush);
-    })
-    .subscribe();
+  let disposed = false;
+  let channel: ReturnType<typeof client.channel> | null = null;
+  void lastRemoval.then(() => {
+    if (disposed) return;
+    channel = client
+      .channel("public_field", { config: { private: true } })
+      .on("broadcast", { event: "moment" }, (msg: { payload?: LivePayload }) => {
+        const c = toLiveCell(msg.payload ?? {});
+        if (!c) return;
+        if (consumeSelf(publicCellKey(c.lng, c.lat, c.emotion))) return;
+        buffer.push(c);
+        if (!raf) raf = requestAnimationFrame(flush);
+      })
+      .subscribe();
+  });
   return () => {
+    disposed = true;
     if (raf) cancelAnimationFrame(raf);
-    void client.removeChannel(channel);
+    if (channel) lastRemoval = client.removeChannel(channel).catch(() => {});
   };
 }
