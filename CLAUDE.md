@@ -2,7 +2,7 @@
 *Read this at the start of every session.*
 
 ## Right now
-**Phase 3 backend: PROVEN on real Postgres (`scripts/backend-proof` — 24 green: RLS, privacy grid, broadcast). Blocked on linking the real Supabase project (access token → `npx supabase db push` → env vars), then the two-device test = done.**
+**Phase 3 backend: proven (`scripts/backend-proof`, 28 green) AND linked — project restored, keys in .env.local + Vercel, the wall is live. Two human steps left (docs/backend-launch.md): Ben runs `npx supabase db push`, then the two-device test = done.**
 Update this line as we move through phases (full plan in /docs). Whatever this line says is your top priority.
 
 ## What we're building
