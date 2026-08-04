@@ -5,11 +5,11 @@
  * points. A Mapbox custom layer (raw WebGL2 in the map's own context):
  *
  *   prerender  — every moment splats a coreless meters-scaled kernel into a
- *                half-res offscreen target: 6 per-emotion intensity fields
+ *                half-res offscreen target: one intensity field per emotion
  *                across two RGBA16F attachments (MRT), additively pooled.
  *   render     — one fullscreen resolve: pooled weight → brightness through
  *                a filmic knee (never clips to white); hue = dominance-
- *                weighted OKLab mix of the six emotion hues (the mud rule:
+ *                weighted OKLab mix of the emotion hues (the mud rule:
  *                hues are mixed by local dominance, never summed — many
  *                emotions piled up can not gray out). Then the streetlight
  *                pass multiplies the same field onto the base map.
@@ -17,9 +17,10 @@
  * All look-tunables live in tune.ts (FIELD); this file is the machinery.
  */
 import mapboxgl, { type CustomLayerInterface, type Map as MapboxMap } from "mapbox-gl";
-import { EMOTION_HUES, EMOTIONS } from "@/lib/theme";
+import { EMOTIONS } from "@/lib/theme";
 import type { LivePoint } from "@/lib/momentsStore";
-import { FIELD } from "./tune";
+import { CAMERA, DEFAULT_LOOK, FIELD, LOOKS, PIGMENT, WEATHER, WOVEN, isLowTierDevice, PERF } from "./tune";
+import { emotionHue, worldFromUrl } from "./solar";
 
 /* ---------------- OKLab (Björn Ottosson, via components/Orb/oklch.ts) --- */
 
@@ -27,7 +28,7 @@ function srgbToLinear(c: number): number {
   return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
 }
 
-/** hex → OKLab [L, a, b] — the six hue anchors, computed once on CPU. */
+/** hex → OKLab [L, a, b] — the per-emotion hue anchors, computed once on CPU. */
 function hexToOklab(hex: string): [number, number, number] {
   const n = parseInt(hex.slice(1), 16);
   const r = srgbToLinear(((n >> 16) & 255) / 255);
@@ -45,14 +46,18 @@ function hexToOklab(hex: string): [number, number, number] {
 
 /* ---------------- shaders ---------------- */
 
+/** One accumulation channel per emotion, spread across two RGBA targets
+ *  (up to 6 supported; the count flows from the canonical EMOTIONS list). */
+const NE = EMOTIONS.length;
+
 /* Kernel splat: instanced quads in mercator space, radius pre-clamped on
  * CPU per frame. Each instance writes its weight × falloff into exactly one
- * of six channels across two render targets. */
+ * per-emotion channel across two render targets. */
 const ACCUM_VS = /* glsl */ `#version 300 es
 precision highp float;
 layout(location=0) in vec2 corner;         // quad: ±1
 layout(location=1) in vec3 inst;           // mercX, mercY, radiusMerc
-layout(location=2) in vec2 instWC;         // weight, channel(0..5)
+layout(location=2) in vec2 instWC;         // weight, channel (one per emotion)
 uniform mat4 uMatrix;
 out vec2 vUv;
 out float vWeight;
@@ -61,6 +66,12 @@ void main() {
   vUv = corner;
   vWeight = instWC.x;
   vChannel = int(instWC.y + 0.5);
+  // Invisible kernels (faded seeds, dying moments) collapse off-clip here:
+  // a zero-weight splat still costs full fill at ONE,ONE blend otherwise.
+  if (vWeight < 0.0015) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    return;
+  }
   vec2 pos = inst.xy + corner * inst.z;
   gl_Position = uMatrix * vec4(pos, 0.0, 1.0);
 }
@@ -72,8 +83,8 @@ in vec2 vUv;
 in float vWeight;
 flat in int vChannel;
 uniform float uSoftness;
-layout(location=0) out vec4 o0;            // joy, energy, love, awe
-layout(location=1) out vec4 o1;            // calm, reflective, -, -
+layout(location=0) out vec4 o0;            // joy, energy, love, gratitude
+layout(location=1) out vec4 o1;            // calm, -, -, -
 void main() {
   float t2 = dot(vUv, vUv);
   if (t2 >= 1.0) discard;
@@ -104,13 +115,55 @@ void main() {
 }
 `;
 
+/* BLOOM (v2): Kawase-style blur — 4 diagonal taps, widening offset per
+ * pass. The first pass subtracts a threshold so only the brighter feeling
+ * blooms, never the ambient wash. */
+const BLUR_FS = /* glsl */ `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uSrc;
+uniform vec2 uTexel;
+uniform float uOffset;
+uniform float uThreshold;
+out vec4 fragColor;
+void main() {
+  vec2 off = uTexel * uOffset;
+  vec3 c = texture(uSrc, vUv + vec2( off.x,  off.y)).rgb
+         + texture(uSrc, vUv + vec2(-off.x,  off.y)).rgb
+         + texture(uSrc, vUv + vec2( off.x, -off.y)).rgb
+         + texture(uSrc, vUv + vec2(-off.x, -off.y)).rgb;
+  c *= 0.25;
+  // Soft luminance knee (round 2, item 2a): the old hard subtract cut a
+  // clean iso-contour ring into every bloom at exactly the threshold.
+  if (uThreshold > 0.0) {
+    float l = dot(c, vec3(0.299, 0.587, 0.114));
+    c *= smoothstep(uThreshold * 0.55, uThreshold * 1.65, l);
+  }
+  fragColor = vec4(c, 1.0);
+}
+`;
+
+/* Bloom composite: the halo, added over the night city. */
+const COMPOSITE_FS = /* glsl */ `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uSrc;
+uniform float uGain;
+out vec4 fragColor;
+void main() {
+  fragColor = vec4(texture(uSrc, vUv).rgb * uGain, 0.0);
+}
+`;
+
 const RESOLVE_FS = /* glsl */ `#version 300 es
 precision highp float;
 in vec2 vUv;
 uniform sampler2D uField0;
 uniform sampler2D uField1;
-uniform vec3 uHueLab[6];
+uniform vec3 uHueLab[${NE}];
 uniform float uExposure;
+uniform vec2 uFloor;   // darkness budget: pooled-total smoothstep (from, to)
+uniform vec3 uDomLow;  // low-density dominance: (power, rampFrom, rampTo)
 uniform float uDominance;
 uniform float uChromaFloor;
 uniform float uGain;
@@ -118,7 +171,82 @@ uniform float uTimeSec;
 uniform float uBreathPeriod;
 uniform float uBreathAmp;
 uniform int uMode;
+// THE SHAPE OF FEELING: domain-warp the field lookup so blooms stop being
+// circles. x=warp amplitude (uv), y=noise scale, z=drift speed,
+// w=streak (anisotropy along the flow axis).
+uniform vec4 uFlow;       // warp (mercator units), 1/cell (mercator), drift, streak
+uniform float uFlowTime;  // the flow clock — uTimeSec × FIELD.tempo (held breath)
+uniform vec2 uMercInvDx;  // uv per mercator-x (inverse frame affine)
+uniform vec2 uMercInvDy;  // uv per mercator-y
+uniform vec4 uRipple;     // living-water: amp, rings, speed, 0
+// THE PULSE OF ARRIVAL — up to 8 live rings: xy = mercator center,
+// z = age 0..1, w = gain. Hue rides along so a ring crossing dark land
+// still carries its feeling's color.
+uniform int uArrN;
+uniform vec4 uDrop;      // ink drop: fill gain (0=night), rim gain, spare, labPull
+uniform vec4 uArr[8];
+uniform vec3 uArrLab[8];
+uniform vec2 uArrShape;   // span (mercator), 1/width (mercator)
+uniform vec3 uBreathVar;  // 1/cell (mercator), amp, base period s
+uniform float uBand;   // aurora curtains: brightness modulation (0 = off)
+uniform float uAspect; // target width / height, so the flow isn't squashed
+// THE LIVING ATMOSPHERE (lib/atmosphere.ts, eased): the flow axis follows
+// the real wind — the field's own living motion. CONSTITUTION RULE 2: the
+// sky may not grade the emotion's light; cloud/wet/snow no longer reach
+// this shader at all.
+uniform vec2 uAxis;    // direction the air flows toward (unit-ish)
+// LAND MASK: the field inherits the coastline (rivers/harbor stay void).
+// Screen → mercator is a plain affine at pitch 0, built on the CPU from
+// three unprojections (the camera matrix itself is PERSPECTIVE even flat,
+// so inverting it at one clip plane samples the wrong plane — review
+// finding: that collapsed the whole field when the center sat on water).
+uniform sampler2D uMask;
+uniform float uMaskOn;
+uniform vec4 uMaskRect;   // mercX0, mercY0, 1/width, 1/height
+uniform vec2 uMercOrigin; // mercator at vUv (0,0) — screen bottom-left
+uniform vec2 uMercDx;     // mercator delta across vUv.x (bottom-left → bottom-right)
+uniform vec2 uMercDy;     // mercator delta across vUv.y (bottom-left → top-left)
+uniform float uWaterAtten;
+// THE LUMINOUS HEART: density peaks lift toward light (OKLab L), capped
+// far below white — aurora, never fog.
+uniform vec3 uHeart;      // from, to, lift
+// THE WOVEN WASH (Eli's silk+pigment merge, 2026-07-08 — tune.ts WOVEN):
+uniform vec2 uWeave;      // thread interleave at fronts: amp, scale
+uniform float uShimmer;   // hue flow along the wind (max OKLab rotation)
+uniform vec4 uTiers;      // matte layers: count, rim, richen, crawl
+uniform float uTierKeep;  // tiering over the live wash beneath (0..1)
+uniform vec2 uOverlap;    // genuine-overlap gate: smoothstep from, to
+// CLOSE-ZOOM GRAIN: geographic texture (mercator-anchored — meters, not
+// pixels) that resolves as you approach. amp arrives pre-gated by zoom.
+uniform vec2 uGrain;      // amp (zoom-gated), 1/cell in mercator units
+// THE PAPER WORLD pigment (all zero/inert in the night world):
+uniform vec4 uPig;        // OKLab L, chroma push, stain cap, stain slope
+uniform vec2 uGranP;      // granulation amp (zoom-gated), 1/cell (mercator)
+uniform vec4 uGranEdge;   // wet-edge band: in.from, in.to, out.from, out.to
+uniform vec2 uMercAnchor; // fixed NYC anchor — keeps fbm args small/stable
 out vec4 fragColor;
+
+// Value-noise fbm, 3 octaves — cheap enough for a half-res target.
+float vhash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(vhash(i), vhash(i + vec2(1, 0)), u.x),
+             mix(vhash(i + vec2(0, 1)), vhash(i + vec2(1, 1)), u.x), u.y);
+}
+float fbm(vec2 p) {
+  float a = 0.5;
+  float s = 0.0;
+  for (int i = 0; i < 3; i++) {
+    s += a * vnoise(p);
+    p = p * 2.03 + 17.7;
+    a *= 0.5;
+  }
+  return s;
+}
 
 vec3 oklabToLinear(vec3 lab) {
   float l_ = lab.x + 0.3963377774 * lab.y + 0.2158037573 * lab.z;
@@ -140,13 +268,73 @@ vec3 linearToSrgb(vec3 c) {
 }
 
 void main() {
-  vec4 f0 = texture(uField0, vUv);
-  vec2 f1 = texture(uField1, vUv).xy;
-  float I[6];
-  I[0] = f0.x; I[1] = f0.y; I[2] = f0.z; I[3] = f0.w; I[4] = f1.x; I[5] = f1.y;
+  // THE PIXEL'S WORLD POSITION, first — every organic domain below (flow
+  // warp, weave, shimmer, crawl, curtains, grain) is anchored in MERCATOR
+  // space, so the texture belongs to the CITY: zooming scales it with the
+  // streets instead of sliding it under them (Eli: "zoom looks weird" —
+  // the old screen-space noise stayed put while the city moved).
+  vec2 merc = uMercOrigin + uMercDx * vUv.x + uMercDy * vUv.y;
+  // Geographic noise coords: flow cells are METERS, not screen fractions.
+  vec2 gq = (merc - uMercAnchor) * uFlow.y;
+  vec2 axis = normalize(uAxis);
 
-  float total = I[0] + I[1] + I[2] + I[3] + I[4] + I[5];
-  if (total < 0.002) discard;
+  // Free-flowing edges: pull each lookup through slowly-drifting fbm warp.
+  // warp 0 (bloom mode) short-circuits to the original circles.
+  vec2 uv = vUv;
+  if (uFlow.x > 0.0) {
+    vec2 q = gq;
+    // Streak stretches the noise domain along the axis (ribbons), and the
+    // drift crawls the domain over time so the weather is alive, not stuck.
+    vec2 along = axis * dot(q, axis);
+    q = mix(q, along, uFlow.w * 0.72);
+    q += uFlowTime * uFlow.z * vec2(1.0, -0.6);
+    vec2 w = vec2(fbm(q), fbm(q + 31.416)) - 0.5;
+    // Warp mostly across the axis when streaked — edges feather sideways.
+    vec2 across = vec2(-axis.y, axis.x);
+    vec2 wStreak = across * dot(w, across) * 1.8;
+    // The warp offset is a GROUND distance (uFlow.x, mercator units) —
+    // converted to a texture offset through the frame's inverse affine,
+    // so its physical size is zoom-true.
+    vec2 dm = mix(w, wStreak, uFlow.w) * uFlow.x;
+    uv += uMercInvDx * dm.x + uMercInvDy * dm.y;
+  }
+  vec4 f0 = texture(uField0, uv);
+  vec2 f1 = texture(uField1, uv).xy;
+  float I[${NE}];
+  ${["f0.x", "f0.y", "f0.z", "f0.w", "f1.x", "f1.y", "f1.z", "f1.w"]
+    .slice(0, NE)
+    .map((src, i) => `I[${i}] = ${src};`)
+    .join(" ")}
+
+  float total = 0.0;
+  for (int i = 0; i < ${NE}; i++) total += I[i];
+
+  // Arrival rings first: they must live even over land the darkness
+  // budget keeps night — a raindrop is visible on still water.
+  float ringSum = 0.0;
+  float ringFill = 0.0;
+  float ringRim = 0.0;
+  vec3 ringLab = vec3(0.0);
+  for (int i = 0; i < 8; i++) {
+    if (i >= uArrN) break;
+    vec4 rp = uArr[i];
+    float front = rp.z * uArrShape.x;
+    float dw = (length(merc - rp.xy) - front) * uArrShape.y;
+    float fade2 = (1.0 - rp.z) * (1.0 - rp.z);
+    float ring = exp(-dw * dw) * fade2 * rp.w;
+    ringSum += ring;
+    ringLab += ring * uArrLab[i];
+    // THE INK DROP (pigment world only — uDrop zeroed at night): a filled
+    // blot spreading BEHIND the front, drying as it ages, and a darker wet
+    // rim pooling just ahead of it. Real watercolor arrival physics.
+    if (uDrop.x > 0.0) {
+      float fill = (1.0 - smoothstep(-1.5, 0.5, dw)) * fade2 * rp.w;
+      ringFill += fill;
+      ringRim += exp(-pow(dw - 0.9, 2.0) * 2.2) * fade2 * rp.w;
+      ringLab += fill * uDrop.w * uArrLab[i];
+    }
+  }
+  if (total < 0.002 && ringSum + ringFill < 0.004) discard;
 
   // THE MUD RULE: hues mix by dominance share (I^p), never sum. Any local
   // majority snaps the area to its hue and fronts blend over a narrow band.
@@ -158,8 +346,43 @@ void main() {
   float anchorChroma = 0.0;
   int top = 0;
   float topW = -1.0;
-  for (int i = 0; i < 6; i++) {
-    float w = pow(I[i], uDominance);
+  // Screen-space noise domain shared by the woven-wash passes below.
+  vec2 nq = gq; // every organic domain shares the geographic coords
+
+  // THE GENUINE-OVERLAP GATE (Eli, 2026-07-08: colors interact ONLY where
+  // feelings truly share ground in the data). Measured, not decorative:
+  // the runner-up emotion's pooled intensity as a share of the leader's,
+  // AT THIS PIXEL. A blob alone gates to 0 — its hue holds perfectly
+  // still; a real meeting of feelings opens the gate to 1.
+  float top1 = 0.0;
+  float top2 = 0.0;
+  for (int i = 0; i < ${NE}; i++) {
+    if (I[i] > top1) { top2 = top1; top1 = I[i]; }
+    else if (I[i] > top2) { top2 = I[i]; }
+  }
+  float overlap = smoothstep(uOverlap.x, uOverlap.y, top2 / max(top1, 1e-5));
+
+  // DENSITY-ADAPTIVE DOMINANCE (round 2, item 2b): in thin connective
+  // tissue the winner takes the pixel (high power — the local emotion
+  // stays NAMEABLE, no averaged soup); where feeling genuinely pools the
+  // woven blend takes over (uDominance). Low-density mud was two small
+  // near-equal weights averaging through olive/brown midpoints.
+  float dom = mix(uDomLow.x, uDominance, smoothstep(uDomLow.y, uDomLow.z, total));
+
+  for (int i = 0; i < ${NE}; i++) {
+    float w = pow(I[i], dom);
+    // THE WEAVE (from silk): where feelings GENUINELY meet, threads of
+    // each interleave through the front — per-emotion bands of slow noise
+    // tilt the local vote, so neighbors meld as woven strands, never a
+    // hard seam and never one averaged smear. Gated by the overlap above
+    // (belt to its by-construction suspenders: with one emotion present,
+    // tilting its own vote is a no-op anyway).
+    // The flow clock is brisk ON PURPOSE: the overlap gate holds every
+    // lone feeling perfectly still, so speed here only animates genuine
+    // meetings (measured 2026-07-08: at 0.025 the interaction was lost
+    // under the breath's noise floor).
+    float band = vnoise(nq * uWeave.y + float(i) * 17.31 + uFlowTime * 0.08);
+    w *= 1.0 + uWeave.x * (band - 0.5) * 2.0 * overlap;
     lab += w * uHueLab[i];
     anchorChroma += w * length(uHueLab[i].yz);
     wsum += w;
@@ -177,15 +400,153 @@ void main() {
   // asymptotically — never white. The low end is linear: the long fade.
   float b = 1.0 - exp(-uExposure * total);
 
+  // THE DARKNESS BUDGET (round 2): below uFloor.x pooled feeling the land
+  // stays night; full presence by uFloor.y. Most of the city is dark —
+  // feelings are distinct luminous islands, at every zoom. Applied to b
+  // (not a discard) so the edge of an island is still a smooth exhale.
+  b *= smoothstep(uFloor.x, uFloor.y, total);
+
+  // LIVING WATER (bake-off look): the city wears one connected sheet of
+  // dark water; feeling disturbs it. Slow rings ride the CONTOURS of
+  // pooled density — so where two feelings' pools merge, their contours
+  // (and therefore their waves) genuinely interfere. Zero extra texture
+  // work: the wave phase IS the field.
+  if (uRipple.x > 0.0) {
+    float wave = sin(6.2831853 * (b * uRipple.y - uFlowTime * uRipple.z));
+    b *= 1.0 + uRipple.x * wave * smoothstep(0.03, 0.2, b);
+  }
+
+  // THE LAND MASK — geography shapes the feeling: the field dies over
+  // water so rivers and harbor stay pure void and every silhouette
+  // inherits the coastline.
+  if (uMaskOn > 0.5) {
+    vec2 muv = vec2((merc.x - uMaskRect.x) * uMaskRect.z,
+                    (merc.y - uMaskRect.y) * uMaskRect.w);
+    float land = smoothstep(0.12, 0.82, texture(uMask, muv).r);
+    b *= mix(uWaterAtten, 1.0, land);
+    ringSum *= mix(uWaterAtten, 1.0, land); // rings drown in the rivers too
+  }
+
+  // ---- THE WOVEN WASH (Eli's silk+pigment merge, 2026-07-08) ----------
+  // From SILK — the hue flows: a slow OKLab rotation riding the wind.
+  // GATED BY GENUINE OVERLAP (Eli's correctness rule): a lone feeling's
+  // hue is a fact and holds still; only where two feelings truly share
+  // ground does the color visibly flow between them.
+  {
+    float along = dot(nq, axis);
+    float rot = (fbm(vec2(along * 5.0 - uFlowTime * 0.12, 4.7)) - 0.5) * 2.0 * uShimmer * overlap;
+    float cr = cos(rot);
+    float sr = sin(rot);
+    lab.yz = mat2(cr, -sr, sr, cr) * lab.yz;
+  }
+  // From PIGMENT — layered matte depth: pooled feeling settles into
+  // translucent tiers, pigment pools a breath darker along each contour
+  // (watercolor edge), deep pools carry more pigment (richer and a touch
+  // deeper — matte, never glassy). The contours crawl slowly, like paint
+  // still deciding where to dry — and the live wash beneath keeps the
+  // tiers reading as stacked layers, not posterization.
+  // Round 2, item 2a: the tiers were drawing literal concentric rings —
+  // 70% of each step dead flat, a dark Gaussian rim at every contour.
+  // Now: the step transition spans most of the level (terraces, not
+  // cliffs), the rim is a whisper, and the contours WANDER (crawl up)
+  // so no ring closes on itself as a circle. The heart below rides the
+  // smooth pre-tier b, so its lift is never stepped.
+  float bSmooth = b;
+  {
+    float crawl = (fbm(nq * 3.0 + uFlowTime * 0.01) - 0.5) * uTiers.w;
+    float lv = clamp(b + crawl, 0.0, 1.0) * uTiers.x;
+    float f = fract(lv);
+    float soft = smoothstep(0.12, 0.88, f);
+    float b2 = (floor(lv) + soft) / uTiers.x;
+    float rim = exp(-pow((f - 0.5) / 0.11, 2.0));
+    b = mix(b, b2 * (1.0 - uTiers.y * rim), uTierKeep);
+    lab.yz *= 1.0 + uTiers.z * b2;
+    lab.x -= 0.04 * uTiers.z * b2;
+  }
+
+  // CLOSE-ZOOM GRAIN (2026-07-08): fine pigment mottle anchored in the
+  // WORLD, not the screen — zooming in resolves finer structure the way
+  // paper grain emerges as you lean into a painting. Zoom-gated on the
+  // CPU (amp 0 at the wide view keeps the quilt smooth); scaled by b so
+  // the skirt stays clean; matte modulation only, never sparkle.
+  if (uGrain.x > 0.0) {
+    float g = fbm((merc - uMercAnchor) * uGrain.y);
+    b *= 1.0 + uGrain.x * (g - 0.5) * 2.0 * smoothstep(0.04, 0.28, b);
+  }
+
+  // THE LUMINOUS HEART: where pooled feeling peaks, the hue itself lifts
+  // toward light — bright AND saturated, capped well below white. Rides
+  // the SMOOTH b (pre-tier), so the lift never steps at a contour.
+  lab.x += uHeart.z * smoothstep(uHeart.x, uHeart.y, bSmooth);
+
+  // THE NEVER-WHITE CEILING (Eli, 2026-07-07): no matter how much feeling
+  // pools — saturated knee, heart lift, the palest anchor (lilac) — the
+  // field's lightness is hard-capped. Dusty at its very brightest; the
+  // color must always still read as COLOR.
+  lab.x = min(lab.x, 0.8);
+
   // The living tide: a slow, subtle breath, phase-varied across hues.
-  float phase = fract(lab.y * 3.7 + lab.z * 5.3);
-  b *= 1.0 + uBreathAmp * sin(6.2831853 * (uTimeSec / uBreathPeriod + phase));
+  // POOLS BREATHE SOLO: rhythm seeded by WHERE the pool is — each island
+  // on its own slow clock (0.7-2.2× the base period), out of phase, so at
+  // any moment some pool visibly swells while its neighbors rest.
+  float bSeed = vnoise((merc - uMercAnchor) * uBreathVar.x);
+  float bPeriod = uBreathVar.z * mix(0.7, 2.2, bSeed);
+  b *= 1.0 + uBreathVar.y * sin(6.2831853 * (uTimeSec / bPeriod + bSeed * 7.31));
+
+  // THE PULSE OF ARRIVAL lands on top: the ring adds its light and pulls
+  // the local hue toward its feeling's color while it passes.
+  if (ringSum + ringFill > 0.0005) {
+    float ringW = ringSum + uDrop.x * ringFill;
+    b += ringW;
+    lab = mix(lab, ringLab / max(ringSum + uDrop.w * ringFill, 1e-4), clamp(ringW / (ringW + max(b - ringW, 0.02)), 0.0, 0.85));
+    lab.x = min(lab.x, 0.8);
+  }
+
+  // Aurora curtains: slow luminous banding across the flow axis — hanging
+  // in the CITY's space, swaying on the flow clock. Modulation only —
+  // never to zero, so the field's coverage is untouched.
+  if (uBand > 0.0) {
+    float across = dot(nq, vec2(-axis.y, axis.x));
+    float curtain = fbm(vec2(across * 2.2, uFlowTime * 0.05));
+    b *= 1.0 + uBand * (curtain - 0.5) * 1.6;
+  }
+
+  // CONSTITUTION RULE 2: the sky's weight no longer touches the field —
+  // the emotion layer renders identically in every weather. (The old
+  // overcast dim, rain streak, snow hush, and snow sparkle lived here.)
 
   // Dither so the long tail never bands on 8-bit output.
   float n = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
   b += (n - 0.5) * 0.004;
 
-  vec3 color = linearToSrgb(oklabToLinear(lab)) * max(b, 0.0) * uGain;
+  // uMode 2 — WATERCOLOR PIGMENT (the light "paper" day): instead of adding
+  // light, stain the paper. Caller blends ZERO/SRC_COLOR (true multiply);
+  // uGain carries paperness × fade as stain strength. Pigment is the same
+  // OKLab hue, dropped to pigment depth so it reads saturated on white.
+  if (uMode == 2) {
+    // THE PAPER WORLD's pigment (uPig: L, chroma, cap, slope — tune.ts
+    // PIGMENT). Depth is capped on purpose: heavily-pooled spots read as
+    // deeper watercolor, never a bruise.
+    // GRANULATION: real watercolor granules — the same mercator-anchored
+    // fbm trick as uGrain above, finer cells (uGranP.y), loudest at the
+    // wash's WET EDGE (the band where b passes from skirt to body) and
+    // rising as you approach (uGranP.x rides the grain zoom smoothstep).
+    float gp = fbm((merc - uMercAnchor) * uGranP.y);
+    float wetEdge = smoothstep(uGranEdge.x, uGranEdge.y, b) * (1.0 - smoothstep(uGranEdge.z, uGranEdge.w, b));
+    float gran = 1.0 + uGranP.x * (gp - 0.5) * 2.0 * mix(0.3, 1.0, wetEdge);
+    vec3 pig = linearToSrgb(oklabToLinear(vec3(uPig.x, lab.y * uPig.y, lab.z * uPig.y)));
+    // The wet rim pools DEEPER than the standing cap (pigment gathers at
+    // the drop's edge), hard-clamped well short of a bruise.
+    float stain = min(min(uPig.z, max(b, 0.0) * uPig.w * gran) + uDrop.y * ringRim, 0.85) * uGain;
+    fragColor = vec4(mix(vec3(1.0), pig, stain), 1.0);
+    return;
+  }
+
+  // Brightness scales LIGHT, not code (round 2, items 2b/2c): b×gain
+  // multiplies the LINEAR color before sRGB encoding. The old gamma-space
+  // multiply literally turned every dim warm pixel olive-brown — the mud
+  // between hearts and the close-zoom stain were this one line.
+  vec3 color = linearToSrgb(oklabToLinear(lab) * (max(b, 0.0) * uGain));
   // uMode 0: alpha 0 under mapbox's premultiplied blend == pure additive.
   // uMode 1: caller sets blendFunc(DST_COLOR, ONE) — color multiplies the
   //          base map, so streets inside the field catch its light.
@@ -199,6 +560,7 @@ const CHANNEL: Record<string, number> = Object.fromEntries(
   EMOTIONS.map((e, i) => [e, i]),
 );
 const FLOATS_PER_INSTANCE = 5; // mercX, mercY, radiusMerc, weight, channel
+
 
 function compile(gl: WebGL2RenderingContext, vsSrc: string, fsSrc: string): WebGLProgram {
   const sh = (type: number, src: string) => {
@@ -229,12 +591,53 @@ export class FieldLayer implements CustomLayerInterface {
    *  whole field (accumulation included) costs nothing. Set from MapStage. */
   fade = 1;
 
+  /** THE SHAPE OF FEELING — plain uniform values, geographic units
+   *  (warpM/cellM are METERS: the texture belongs to the city). One of
+   *  the LOOKS presets (bake-off, 2026-07-09); atmosphere nudges live. */
+  look: {
+    warpM: number;
+    cellM: number;
+    drift: number;
+    streak: number;
+    band: number;
+    shimmer: number;
+    weaveAmp: number;
+    ripple: { amp: number; rings: number; speed: number };
+  } = structuredClone(LOOKS[DEFAULT_LOOK]);
+
+  /** 0 = dark ink night (glow), 1 = light paper day (pigment). Set from
+   *  MapStage every frame from the atmosphere; crossfades the two ways of
+   *  painting. */
+  paper = 0;
+
+  /** THE PAPER WORLD: the sun (0..1) — drives the slate-hours pigment
+   *  luminance; set from MapStage each tick. */
+  sunLight = 0;
+  private paperWorld = worldFromUrl() === "paper";
+
+
+  /** THE LIVING ATMOSPHERE — plain fields mutated in place from MapStage
+   *  every push (no allocation): the sky's weight on the light. */
+  /** What the sky may still hand the field: the wind axis (its living
+   *  flow), fog (dims the STREETLIGHT catch only), wet (the glisten).
+   *  Cloud/snow no longer cross this boundary — constitution rule 2. */
+  weather = { wet: 0, fog: 0, axisX: 0.94, axisY: 0.33 };
+
   private map: MapboxMap | null = null;
   private gl: WebGL2RenderingContext | null = null;
   private accumProgram: WebGLProgram | null = null;
   private resolveProgram: WebGLProgram | null = null;
+  private blurProgram: WebGLProgram | null = null;
+  private compositeProgram: WebGLProgram | null = null;
   private fbo: WebGLFramebuffer | null = null;
+  private fbo2: WebGLFramebuffer | null = null; // single-attachment passes
   private tex: [WebGLTexture | null, WebGLTexture | null] = [null, null];
+  private fieldColorTex: WebGLTexture | null = null;
+  private bloomTex: [WebGLTexture | null, WebGLTexture | null] = [null, null];
+  private bloomW = 0;
+  private bloomH = 0;
+  private timeSec = 0;
+  private bloomReady = false;
   private texW = 0;
   private texH = 0;
   private halfFloat = false;
@@ -245,17 +648,51 @@ export class FieldLayer implements CustomLayerInterface {
   private count = 0;
   private uploaded = false;
   private epoch = 0;
-  private hueLab = new Float32Array(18);
+  private hueLab = new Float32Array(NE * 3);
+  private maskTex: WebGLTexture | null = null;
+  private maskReady = false;
+  private maskRect: [number, number, number, number] = [0, 0, 1, 1];
+  /** Screen→mercator affine (pitch 0): origin at screen bottom-left plus
+   *  the two screen-edge deltas, rebuilt each frame from unproject. */
+  private mercFrame = { ox: 0, oy: 0, dxx: 0, dxy: 0, dyx: 0, dyy: 0, ok: false };
+  /** Grain geometry: fixed NYC anchor (keeps shader fbm args small and
+   *  stable) + 1/cell in mercator units. Set once in onAdd. */
+  private mercAnchor: [number, number] = [0, 0];
+  private grainScale = 0;
+  private meterMerc = 1e-8; // meters → mercator units at the NYC anchor
+  /** THE PULSE OF ARRIVAL — live rings (≤8): real commits auto-ripple on
+   *  new-id detection; the ambient city re-pulses via addRippleLngLat. */
+  private ripples: { x: number; y: number; start: number; ch: number; s: number }[] = [];
+  private knownIds = new Set<string>();
+
+  get ripplesActive(): boolean {
+    return this.ripples.length > 0;
+  }
+
+  addRippleLngLat(lng: number, lat: number, emotion: string, strength = 1) {
+    const mc = mapboxgl.MercatorCoordinate.fromLngLat({ lng, lat });
+    const now = performance.now();
+    this.ripples = this.ripples.filter((r) => now - r.start < FIELD.ripple.lifeMs);
+    if (this.ripples.length >= 8) this.ripples.shift();
+    this.ripples.push({ x: mc.x, y: mc.y, start: now, ch: CHANNEL[emotion] ?? 0, s: strength });
+    this.map?.triggerRepaint();
+  }
 
   constructor() {
     EMOTIONS.forEach((e, i) => {
-      const [, a, b] = hexToOklab(EMOTION_HUES[e]);
+      // THE PAPER WORLD wears its own joy (Eli, 07-13): the brand lemon
+      // reads muddy as pigment on bone — on paper, joy is true sun-yellow
+      // (#F2C010). solar.emotionHue is the ONE source of truth (PIGMENT.hues);
+      // a fresh engine is built per world swap, so construction-time is safe.
+      const hex = emotionHue(e);
+      const [, a, b] = hexToOklab(hex);
       // Equal feeling = equal light: anchors share one OKLab lightness
-      // (raw hues span L .62–.87, which made Awe glow half as bright as
-      // Joy for the same intensity). Hue/chroma stay the brand's.
+      // (raw hues span a wide L range, which made cooler hues glow dimmer
+      // than Joy for the same intensity). Hue stays the brand's; chroma
+      // carries the anchorChroma push (pop, never neon — Eli, 2026-07-08).
       this.hueLab[i * 3] = FIELD.anchorL;
-      this.hueLab[i * 3 + 1] = a;
-      this.hueLab[i * 3 + 2] = b;
+      this.hueLab[i * 3 + 1] = a * FIELD.anchorChroma;
+      this.hueLab[i * 3 + 2] = b * FIELD.anchorChroma;
     });
   }
 
@@ -267,25 +704,53 @@ export class FieldLayer implements CustomLayerInterface {
         Math.max(64, n * 2) * FLOATS_PER_INSTANCE,
       );
       this.floorPx = new Float32Array(Math.max(64, n * 2));
+      this.isSeed = new Uint8Array(Math.max(64, n * 2));
     }
     const d = this.instanceData;
     for (let i = 0; i < n; i++) {
       const p = points[i];
-      // The lonely-commit floor is for real feelings; the seed sheet keeps
-      // its geographic scale (small floor) so it can't pool into blobs.
-      this.floorPx[i] = p.seed ? FIELD.seedMinRadiusPx : FIELD.minRadiusPx;
+      // TWO LAYERS, ONE FIELD (2026-07-08): entries (commits + pocket
+      // seeds) are TIGHT, defined, pinned to their place. The wash
+      // lattice keeps the wide dim skirt that carries the between-space,
+      // so zoomed out the city is one continuous glow. The entry floor
+      // scales with intensity: at middle distance everything sits on its
+      // pixel floor, and one flat floor turned the city into uniform
+      // polka dots (the medium-zoom valley, Eli 2026-07-08).
+      this.floorPx[i] = p.wash
+        ? FIELD.wash.minRadiusPx
+        : FIELD.minRadiusPx * (0.78 + 0.055 * (p.intensity - 1));
+      // Only the WASH thins with zoom (it's a city-scale impression);
+      // pocket seeds are stand-ins for real entries and must intensify on
+      // approach exactly as commits do — the density payoff (2026-07-08).
+      this.isSeed[i] = p.wash ? 1 : 0;
       const mc = mapboxgl.MercatorCoordinate.fromLngLat({
         lng: p.position[0],
         lat: p.position[1],
       });
-      const radiusM =
-        FIELD.radiusM + FIELD.radiusPerIntensityM * (p.intensity - 1);
+      const radiusM = p.wash
+        ? FIELD.wash.radiusM
+        : FIELD.radiusM + FIELD.radiusPerIntensityM * (p.intensity - 1);
       const o = i * FLOATS_PER_INSTANCE;
       d[o] = mc.x;
       d[o + 1] = mc.y;
       d[o + 2] = radiusM * mc.meterInMercatorCoordinateUnits();
       d[o + 3] = p.weight;
       d[o + 4] = CHANNEL[p.emotion] ?? 0;
+      // A REAL feeling arriving right now sends its ring (seeds re-pulse
+      // via the ambient timer instead — placeholder life, clearly labeled).
+      if (!this.knownIds.has(p.id)) {
+        this.knownIds.add(p.id);
+        if (!p.seed && performance.now() - p.born < 600) {
+          // In the paper world a real commit is THE INK DROP — it hits
+          // the sheet harder than any ambient pulse.
+          this.addRippleLngLat(
+            p.position[0],
+            p.position[1],
+            p.emotion,
+            this.paperWorld ? PIGMENT.drop.own : 1,
+          );
+        }
+      }
     }
     this.count = n;
     this.uploaded = false;
@@ -297,6 +762,8 @@ export class FieldLayer implements CustomLayerInterface {
     this.halfFloat = gl.getExtension("EXT_color_buffer_half_float") !== null;
     this.accumProgram = compile(gl, ACCUM_VS, ACCUM_FS);
     this.resolveProgram = compile(gl, RESOLVE_VS, RESOLVE_FS);
+    this.blurProgram = compile(gl, RESOLVE_VS, BLUR_FS);
+    this.compositeProgram = compile(gl, RESOLVE_VS, COMPOSITE_FS);
 
     // Quad geometry + instance buffer.
     this.quadVao = gl.createVertexArray();
@@ -322,11 +789,61 @@ export class FieldLayer implements CustomLayerInterface {
     this.resolveVao = gl.createVertexArray(); // fullscreen triangle: no attribs
     gl.bindVertexArray(null);
     this.fbo = gl.createFramebuffer();
+    this.fbo2 = gl.createFramebuffer();
+
+    // THE LAND MASK — the coastline as a mercator-space texture (built by
+    // scripts/build-landmask.mjs). Loads async; until then (or on failure)
+    // the field simply doesn't clip — never a blocker.
+    const [[west, south], [east, north]] = CAMERA.maxBounds;
+    const tl = mapboxgl.MercatorCoordinate.fromLngLat({ lng: west, lat: north });
+    const br = mapboxgl.MercatorCoordinate.fromLngLat({ lng: east, lat: south });
+    this.maskRect = [tl.x, tl.y, 1 / (br.x - tl.x), 1 / (br.y - tl.y)];
+    // Grain anchor + scale (mercator units per meter is ~constant citywide).
+    const anchor = mapboxgl.MercatorCoordinate.fromLngLat({
+      lng: CAMERA.initial.longitude,
+      lat: CAMERA.initial.latitude,
+    });
+    this.mercAnchor = [anchor.x, anchor.y];
+    this.meterMerc = anchor.meterInMercatorCoordinateUnits();
+    this.grainScale = 1 / (FIELD.grain.cellM * this.meterMerc);
+    const img = new Image();
+    img.onload = () => {
+      if (!this.gl) return;
+      const g = this.gl;
+      this.maskTex = g.createTexture();
+      g.bindTexture(g.TEXTURE_2D, this.maskTex);
+      g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MIN_FILTER, g.LINEAR);
+      g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MAG_FILTER, g.LINEAR);
+      g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_S, g.CLAMP_TO_EDGE);
+      g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_T, g.CLAMP_TO_EDGE);
+      g.texImage2D(g.TEXTURE_2D, 0, g.R8, g.RED, g.UNSIGNED_BYTE, img);
+      this.maskReady = true;
+      this.map?.triggerRepaint();
+    };
+    img.onerror = () => console.error("warmth: land mask failed to load");
+    img.src = FIELD.landMask.url;
+  }
+
+  /** Make (or remake on resize) a plain RGBA8 linear-clamped texture. */
+  private makeTex(gl: WebGL2RenderingContext, w: number, h: number): WebGLTexture {
+    const t = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    return t;
   }
 
   private ensureTargets(gl: WebGL2RenderingContext) {
-    const w = Math.max(2, Math.round(gl.drawingBufferWidth * FIELD.resolutionScale));
-    const h = Math.max(2, Math.round(gl.drawingBufferHeight * FIELD.resolutionScale));
+    // PERF (2026-07-14): weak phones take the buffers a notch lower —
+    // the accum targets hold soft bells the resolve upsamples bilinearly,
+    // so the cut is invisible; only buffer resolution ever reads the tier.
+    const scale =
+      FIELD.resolutionScale * (isLowTierDevice(gl) ? PERF.lowTierFieldScale : 1);
+    const w = Math.max(2, Math.round(gl.drawingBufferWidth * scale));
+    const h = Math.max(2, Math.round(gl.drawingBufferHeight * scale));
     if (w === this.texW && h === this.texH && this.tex[0]) return;
     this.texW = w;
     this.texH = h;
@@ -356,22 +873,63 @@ export class FieldLayer implements CustomLayerInterface {
       this.tex[i] = t;
     }
     gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+
+    // Bloom targets: field-res color + two blur ping-pongs at bloom scale.
+    if (this.fieldColorTex) gl.deleteTexture(this.fieldColorTex);
+    for (const t of this.bloomTex) if (t) gl.deleteTexture(t);
+    this.fieldColorTex = this.makeTex(gl, w, h);
+    this.bloomW = Math.max(2, Math.round(w * WEATHER.bloom.scale));
+    this.bloomH = Math.max(2, Math.round(h * WEATHER.bloom.scale));
+    this.bloomTex = [
+      this.makeTex(gl, this.bloomW, this.bloomH),
+      this.makeTex(gl, this.bloomW, this.bloomH),
+    ];
   }
 
   /** Offscreen accumulation — mapbox's sanctioned hook for FBO work. */
   prerender(gl: WebGL2RenderingContext, matrix: number[]) {
+    this.bloomReady = false;
     if (!this.accumProgram || !this.map || this.fade < 0.01) return;
+    // Empty field: render() early-returns on count === 0, so the clear,
+    // the unprojections, and the target (re)build are all dead work here
+    // (perf pass, 2026-07-14 — the pre-data frames cost nothing now).
+    if (this.count === 0) return;
+    // One frame stamp per prerender: render() skips re-uploading the ~40
+    // shared resolve uniforms when the bloom path already set them this
+    // frame (uniforms are program state — mapbox can't touch ours).
+    this.frameStamp++;
+    // One clock per frame, shared by every pass — the bloom's halo must
+    // warp in perfect sync with the sharp field beneath it.
+    if (this.epoch === 0) this.epoch = performance.now();
+    this.timeSec = (performance.now() - this.epoch) / 1000;
+    // Land mask sampling needs screen → mercator. With pitch locked at 0
+    // that map is an exact affine; three unprojections define it. (Never
+    // invert the camera matrix here — it is perspective even when flat,
+    // and a one-plane inversion collapses the field: review finding.)
+    try {
+      const w = this.map.getContainer().clientWidth;
+      const h = this.map.getContainer().clientHeight;
+      const bl = mapboxgl.MercatorCoordinate.fromLngLat(this.map.unproject([0, h]));
+      const br = mapboxgl.MercatorCoordinate.fromLngLat(this.map.unproject([w, h]));
+      const tl = mapboxgl.MercatorCoordinate.fromLngLat(this.map.unproject([0, 0]));
+      this.mercFrame = {
+        ox: bl.x,
+        oy: bl.y,
+        dxx: br.x - bl.x,
+        dxy: br.y - bl.y,
+        dyx: tl.x - bl.x,
+        dyy: tl.y - bl.y,
+        ok: true,
+      };
+    } catch {
+      this.mercFrame.ok = false;
+    }
     this.ensureTargets(gl);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
     gl.viewport(0, 0, this.texW, this.texH);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    if (this.count === 0) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-      return;
-    }
 
     gl.useProgram(this.accumProgram);
     gl.bindVertexArray(this.quadVao);
@@ -390,10 +948,18 @@ export class FieldLayer implements CustomLayerInterface {
         this.clamped = new Float32Array(src.length);
       }
       this.clamped.set(src.subarray(0, n * FLOATS_PER_INSTANCE));
+      // The ambient wash is a city-scale impression: it thins to a quiet
+      // floor as you zoom into a neighborhood (real commits stay). Smooth-
+      // step, so the fade is continuous with the camera — and never zero:
+      // no place reads as a void at street level (Eli, 2026-07-08).
+      const sf = FIELD.seedZoomFade;
+      const zt = Math.min(1, Math.max(0, (zoom - sf.from) / (sf.to - sf.from)));
+      const seedFade = 1 - (1 - sf.floor) * zt * zt * (3 - 2 * zt);
       for (let i = 0; i < n; i++) {
         const o = i * FLOATS_PER_INSTANCE + 2;
         const minMerc = this.floorPx[i] * mercPerCssPx;
         this.clamped[o] = Math.min(maxMerc, Math.max(minMerc, src[o]));
+        if (this.isSeed[i]) this.clamped[o + 1] = src[o + 1] * seedFade;
       }
       gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceBuf);
       gl.bufferData(gl.ARRAY_BUFFER, this.clamped.subarray(0, n * FLOATS_PER_INSTANCE), gl.DYNAMIC_DRAW);
@@ -401,83 +967,359 @@ export class FieldLayer implements CustomLayerInterface {
       this.clampScale = mercPerCssPx;
     }
 
-    gl.uniformMatrix4fv(
-      gl.getUniformLocation(this.accumProgram, "uMatrix"),
-      false,
-      matrix,
-    );
+    // Locations via the cache — getUniformLocation is a per-frame driver
+    // string lookup otherwise (perf pass, 2026-07-14).
+    gl.uniformMatrix4fv(this.loc(gl, this.accumProgram, "acc", "uMatrix"), false, matrix);
     gl.uniform1f(
-      gl.getUniformLocation(this.accumProgram, "uSoftness"),
+      this.loc(gl, this.accumProgram, "acc", "uSoftness"),
+      // One softness in every sky (constitution rule 2).
       FIELD.kernelSoftness,
     );
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE);
     gl.disable(gl.DEPTH_TEST);
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, this.count);
-
     gl.bindVertexArray(null);
+
+    // BLOOM (v2, night only): resolve the field into a color texture, blur
+    // it wide (Kawase ×2, thresholded so only bright feeling blooms), and
+    // let render() add the halo. All FBO work stays in this sanctioned hook.
+    const night = 1 - this.paper;
+    if (WEATHER.bloom.gain > 0 && night > 0.01 && this.fbo2) {
+      gl.disable(gl.BLEND);
+      // 1) the field's own color, full resolve, into fieldColorTex.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo2);
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.fieldColorTex, 0,
+      );
+      gl.viewport(0, 0, this.texW, this.texH);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      this.bindResolve(gl);
+      gl.uniform1i(this.loc(gl, this.resolveProgram!, "res", "uMode"), 0);
+      gl.uniform1f(this.loc(gl, this.resolveProgram!, "res", "uGain"), FIELD.gain);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      // 2) blur down into bloomTex[0] (thresholded), then widen into [1].
+      gl.useProgram(this.blurProgram!);
+      const passes: [WebGLTexture | null, WebGLTexture | null, number, number, number, number][] = [
+        [this.fieldColorTex, this.bloomTex[0], 1 / this.texW, 1 / this.texH, 1.5, WEATHER.bloom.threshold],
+        [this.bloomTex[0], this.bloomTex[1], 1 / this.bloomW, 1 / this.bloomH, 2.5, 0],
+      ];
+      for (const [src, dst, tx, ty, offset, threshold] of passes) {
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dst, 0);
+        gl.viewport(0, 0, this.bloomW, this.bloomH);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, src);
+        gl.uniform1i(this.loc(gl, this.blurProgram!, "blur", "uSrc"), 0);
+        gl.uniform2f(this.loc(gl, this.blurProgram!, "blur", "uTexel"), tx, ty);
+        gl.uniform1f(this.loc(gl, this.blurProgram!, "blur", "uOffset"), offset);
+        gl.uniform1f(this.loc(gl, this.blurProgram!, "blur", "uThreshold"), threshold);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
+      gl.bindVertexArray(null);
+      this.bloomReady = true;
+    }
+
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
   }
   private clamped = new Float32Array(0);
   private clampScale = -1;
   private floorPx = new Float32Array(0);
+  private isSeed = new Uint8Array(0);
   private uniformCache = new Map<string, WebGLUniformLocation | null>();
+  /** Frame bookkeeping (perf pass, 2026-07-14): prerender bumps the stamp;
+   *  bindResolve uploads its ~40 uniforms once per stamp — the second call
+   *  in the same frame (bloom path + render) rebinds only program/VAO/
+   *  textures, since uniform values are program state and frame-constant. */
+  private frameStamp = 0;
+  private resolveStamp = -1;
+  /** Preallocated ripple uniform scratch (≤8 rings — vec4[8] / vec3[8]);
+   *  was two fresh Float32Arrays per frame while any ring lived. */
+  private rippleArr = new Float32Array(32);
+  private rippleLab = new Float32Array(24);
 
-  render(gl: WebGL2RenderingContext) {
-    if (!this.resolveProgram || this.count === 0 || this.fade < 0.01) return;
-    if (this.epoch === 0) this.epoch = performance.now();
-    const periodSec = FIELD.breath.periodMs / 1000;
-    const timeSec = ((performance.now() - this.epoch) / 1000) % periodSec;
+  /** Uniform-location cache across our four programs. */
+  private loc(
+    gl: WebGL2RenderingContext,
+    prog: WebGLProgram,
+    tag: string,
+    name: string,
+  ): WebGLUniformLocation | null {
+    const key = `${tag}:${name}`;
+    let l = this.uniformCache.get(key);
+    if (l === undefined) {
+      l = gl.getUniformLocation(prog, name);
+      this.uniformCache.set(key, l);
+    }
+    return l;
+  }
 
-    gl.useProgram(this.resolveProgram);
+  /** Program + VAO + every shared resolve uniform (mode/gain per pass). */
+  private bindResolve(gl: WebGL2RenderingContext) {
+    gl.useProgram(this.resolveProgram!);
     gl.bindVertexArray(this.resolveVao);
-    const u = (name: string) => {
-      let loc = this.uniformCache.get(name);
-      if (loc === undefined) {
-        loc = gl.getUniformLocation(this.resolveProgram!, name);
-        this.uniformCache.set(name, loc);
-      }
-      return loc;
-    };
+    const u = (name: string) => this.loc(gl, this.resolveProgram!, "res", name);
+    // Texture UNITS are context state — mapbox and the bloom blur rebind
+    // them between our passes, so these rebind every call…
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.tex[0]);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.tex[1]);
+    const mfBind = this.mercFrame;
+    if (this.maskReady && mfBind.ok) {
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
+    }
+    // …but uniform VALUES are program state and frame-constant: skip the
+    // ~40 re-uploads when the bloom path already set them this frame.
+    if (this.resolveStamp === this.frameStamp) return;
+    this.resolveStamp = this.frameStamp;
     gl.uniform1i(u("uField0"), 0);
     gl.uniform1i(u("uField1"), 1);
     gl.uniform3fv(u("uHueLab"), this.hueLab);
     gl.uniform1f(u("uExposure"), FIELD.exposure);
+    gl.uniform2f(u("uFloor"), FIELD.floor.from, FIELD.floor.to);
+    gl.uniform3f(
+      u("uDomLow"),
+      FIELD.dominanceLow.p,
+      FIELD.dominanceLow.from,
+      FIELD.dominanceLow.to,
+    );
     gl.uniform1f(u("uDominance"), FIELD.dominance);
     gl.uniform1f(u("uChromaFloor"), FIELD.chromaFloor);
-    gl.uniform1f(u("uTimeSec"), timeSec);
-    gl.uniform1f(u("uBreathPeriod"), periodSec);
+    gl.uniform1f(u("uTimeSec"), this.timeSec);
+    gl.uniform1f(u("uBreathPeriod"), FIELD.breath.periodMs / 1000);
     gl.uniform1f(u("uBreathAmp"), FIELD.breath.amp);
+    const lk = this.look;
+    gl.uniform2f(u("uWeave"), lk.weaveAmp, WOVEN.weave.scale);
+    gl.uniform1f(u("uShimmer"), lk.shimmer);
+    gl.uniform4f(u("uTiers"), WOVEN.tiers.count, WOVEN.tiers.rim, WOVEN.tiers.richen, WOVEN.tiers.crawl);
+    gl.uniform1f(u("uTierKeep"), WOVEN.tiers.keep);
+    gl.uniform2f(u("uOverlap"), WOVEN.overlap.from, WOVEN.overlap.to);
+    // THE HELD BREATH: one master tempo on every flow clock (the breath
+    // keeps its own unscaled clock).
+    gl.uniform1f(u("uFlowTime"), this.timeSec * FIELD.tempo);
+    // Solo breathing + the arrival rings.
+    gl.uniform3f(
+      u("uBreathVar"),
+      1 / (FIELD.breath.cellM * this.meterMerc),
+      FIELD.breath.amp,
+      FIELD.breath.periodMs / 1000,
+    );
+    const nowR = performance.now();
+    // Expire in place + pack into preallocated scratch — this ran every
+    // frame, and .filter() + two fresh Float32Arrays were steady GC food
+    // on low-end phones (perf pass, 2026-07-14).
+    let live = 0;
+    for (let i = 0; i < this.ripples.length; i++) {
+      const r = this.ripples[i];
+      if (nowR - r.start < FIELD.ripple.lifeMs) {
+        if (live !== i) this.ripples[live] = r;
+        live++;
+      }
+    }
+    if (live !== this.ripples.length) this.ripples.length = live;
+    gl.uniform1i(u("uArrN"), live);
+    if (live) {
+      const arr = this.rippleArr;
+      const labArr = this.rippleLab;
+      for (let i = 0; i < live; i++) {
+        const r = this.ripples[i];
+        arr[i * 4] = r.x;
+        arr[i * 4 + 1] = r.y;
+        arr[i * 4 + 2] = (nowR - r.start) / FIELD.ripple.lifeMs;
+        arr[i * 4 + 3] = FIELD.ripple.gain * r.s;
+        labArr[i * 3] = this.hueLab[r.ch * 3];
+        labArr[i * 3 + 1] = this.hueLab[r.ch * 3 + 1];
+        labArr[i * 3 + 2] = this.hueLab[r.ch * 3 + 2];
+      }
+      // Full-size upload (vec4[8]/vec3[8]) — entries past uArrN are never
+      // read by the shader loop, so stale floats are harmless.
+      gl.uniform4fv(u("uArr"), arr);
+      gl.uniform3fv(u("uArrLab"), labArr);
+    }
+    gl.uniform2f(
+      u("uArrShape"),
+      FIELD.ripple.spanM * this.meterMerc,
+      1 / (FIELD.ripple.widthM * this.meterMerc),
+    );
+    // THE INK DROP dials — all zero in the night world (bit-identical path).
+    gl.uniform4f(
+      u("uDrop"),
+      this.paperWorld ? PIGMENT.drop.fill : 0,
+      this.paperWorld ? PIGMENT.drop.rim : 0,
+      0,
+      this.paperWorld ? PIGMENT.drop.labPull : 0,
+    );
+    gl.uniform4f(u("uRipple"), lk.ripple.amp, lk.ripple.rings, lk.ripple.speed, 0);
+    gl.uniform1f(u("uBand"), lk.band);
+    gl.uniform1f(u("uAspect"), this.texW / Math.max(1, this.texH));
+    const w = this.weather;
+    gl.uniform2f(u("uAxis"), w.axisX, w.axisY);
+    // Screen → world (shared by the land mask, the grain, and the FLOW —
+    // the whole organic domain is geographic now); features gate off when
+    // the frame isn't derivable.
+    const mf = this.mercFrame;
+    if (mf.ok) {
+      gl.uniform2f(u("uMercOrigin"), mf.ox, mf.oy);
+      gl.uniform2f(u("uMercDx"), mf.dxx, mf.dxy);
+      gl.uniform2f(u("uMercDy"), mf.dyx, mf.dyy);
+      // Inverse frame affine (uv per mercator) + geographic flow units.
+      const det = mf.dxx * mf.dyy - mf.dyx * mf.dxy;
+      if (det !== 0) {
+        gl.uniform2f(u("uMercInvDx"), mf.dyy / det, -mf.dxy / det);
+        gl.uniform2f(u("uMercInvDy"), -mf.dyx / det, mf.dxx / det);
+      }
+      gl.uniform4f(
+        u("uFlow"),
+        lk.warpM * this.meterMerc,
+        1 / Math.max(1e-12, lk.cellM * this.meterMerc),
+        lk.drift,
+        lk.streak,
+      );
+    } else {
+      gl.uniform4f(u("uFlow"), 0, 1, 0, 0); // no frame: circles, never junk
+      gl.uniform4f(u("uRipple"), 0, 0, 0, 0);
+    }
+    // The coastline (off until the mask texture lands — never a blocker).
+    // The TEXTURE2 bind itself happens above, before the once-per-frame gate.
+    const maskOn = this.maskReady && mf.ok;
+    gl.uniform1f(u("uMaskOn"), maskOn ? 1 : 0);
+    if (maskOn) {
+      gl.uniform1i(u("uMask"), 2);
+      gl.uniform4f(u("uMaskRect"), ...this.maskRect);
+      gl.uniform1f(u("uWaterAtten"), FIELD.landMask.waterAtten);
+    }
+    // Close-zoom grain: amp fades in as the camera commits to a place.
+    const gz = FIELD.grain.zoomIn;
+    const zNow = this.map?.getZoom() ?? 0;
+    const gt = Math.min(1, Math.max(0, (zNow - gz.from) / (gz.to - gz.from)));
+    const grainAmp = mf.ok ? FIELD.grain.amp * gt * gt * (3 - 2 * gt) : 0;
+    gl.uniform2f(u("uGrain"), grainAmp, this.grainScale);
+    gl.uniform2f(u("uMercAnchor"), this.mercAnchor[0], this.mercAnchor[1]);
+    gl.uniform3f(u("uHeart"), FIELD.heart.from, FIELD.heart.to, FIELD.heart.lift);
+    // THE PAPER WORLD pigment: granulation rides the SAME zoom smoothstep
+    // as the grain (the block-by-block soak on approach comes free); the
+    // whole group is inert unless the pigment pass runs (paper > 0.01).
+    const gAmp = PIGMENT.gran.amp * (1 + (PIGMENT.gran.zoomBoost - 1) * gt * gt * (3 - 2 * gt));
+    gl.uniform4f(u("uPig"), PIGMENT.L, PIGMENT.chroma, PIGMENT.cap, PIGMENT.slope);
+    gl.uniform2f(u("uGranP"), mf.ok ? gAmp : 0, 1 / (PIGMENT.gran.cellM * this.meterMerc));
+    gl.uniform4f(
+      u("uGranEdge"),
+      PIGMENT.gran.edgeIn[0],
+      PIGMENT.gran.edgeIn[1],
+      PIGMENT.gran.edgeOut[0],
+      PIGMENT.gran.edgeOut[1],
+    );
+  }
+
+  render(gl: WebGL2RenderingContext) {
+    if (!this.resolveProgram || this.count === 0 || this.fade < 0.01) return;
+    this.bindResolve(gl);
+    const u = (name: string) => this.loc(gl, this.resolveProgram!, "res", name);
     gl.enable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
 
+    // THE ZOOM NARRATIVE: close up, the field thins into breathing ambient
+    // light (never zero) so the city shows through. The streetlight pass is
+    // deliberately NOT thinned — it is the city glowing through.
+    const zt = FIELD.zoomThin;
+    const zoom = this.map?.getZoom() ?? 0;
+    const zx = Math.min(1, Math.max(0, (zoom - zt.from) / (zt.to - zt.from)));
+    const thin = 1 - (1 - zt.floor) * zx * zx * (3 - 2 * zx);
+
+    // By day (paper → 1) the glow passes hand off to the pigment pass:
+    // light added to a light map is invisible, so feeling stains instead.
+    const night = 1 - this.paper;
+    const w = this.weather;
+    // CONSTITUTION RULE 2: fog may dim what the STREETS catch (the base
+    // map's response) but never the emotion passes themselves.
+    const fogStreet = 1 - WEATHER.fogStreetDim * w.fog;
+
+    // Pass 0 — watercolor pigment onto the paper (true multiply; the
+    // parked day — inert while paper is clamped to 0).
+    if (this.paper > 0.01) {
+      gl.uniform1i(u("uMode"), 2);
+      gl.uniform1f(u("uGain"), this.paper * this.fade);
+      gl.blendFunc(gl.ZERO, gl.SRC_COLOR);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+      // SLATE HOURS (paper world only): on the deep-slate sheet the
+      // multiply alone goes mute — the pigments pick up a faint
+      // luminance, crossfaded by how deep the night is. Screen blend:
+      // asymptotic toward white, never reaching it (rule 3 holds).
+      const slate = this.paperWorld ? 1 - this.sunLight : 0;
+      if (slate > 0.01) {
+        gl.uniform1i(u("uMode"), 0);
+        gl.uniform1f(u("uGain"), FIELD.gain * this.fade * PIGMENT.slateLum * slate);
+        gl.blendFunc(gl.ONE_MINUS_DST_COLOR, gl.ONE);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
+    }
+
     // Pass 1 — streetlight: field × base map (dst is the pure ink city).
-    if (FIELD.streetlightGain > 0) {
+    // Gated past half-paper: brightening a light ground is invisible, so
+    // twilight never pays for three full passes (design-review flag).
+    // Wet streets catch more of the light — the rain's glisten.
+    if (FIELD.streetlightGain > 0 && night > 0.01 && this.paper <= 0.5) {
       gl.uniform1i(u("uMode"), 1);
-      gl.uniform1f(u("uGain"), FIELD.streetlightGain * this.fade);
+      gl.uniform1f(
+        u("uGain"),
+        FIELD.streetlightGain * this.fade * night * fogStreet * (1 + WEATHER.glistenGain * w.wet),
+      );
       gl.blendFunc(gl.DST_COLOR, gl.ONE);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
 
-    // Pass 2 — the field itself, additive (alpha 0 under premultiplied).
-    gl.uniform1i(u("uMode"), 0);
-    gl.uniform1f(u("uGain"), FIELD.gain * this.fade);
-    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    // Pass 2 — the field itself. SCREEN blend, not raw addition: light
+    // saturates asymptotically toward its own hue and the pass stack can
+    // never sum to pure white on the map (constitution rule 3 — review
+    // blocker: five pooled commits used to clip to rgb(253,253,253)).
+    // Over the near-black base, screen ≈ additive; only the top end bends.
+    if (night > 0.01) {
+      gl.uniform1i(u("uMode"), 0);
+      gl.uniform1f(u("uGain"), FIELD.gain * this.fade * night * thin);
+      gl.blendFunc(gl.ONE_MINUS_DST_COLOR, gl.ONE);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
+    // Pass 3 — BLOOM: the halo of feeling, added over the night city.
+    // (Prepared in prerender; the sky never grades it — rule 2.)
+    if (this.bloomReady && this.compositeProgram) {
+      gl.useProgram(this.compositeProgram);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.bloomTex[1]);
+      gl.uniform1i(this.loc(gl, this.compositeProgram, "comp", "uSrc"), 0);
+      // The halo bows out on approach (bloom.closeFade): zoomed in, the
+      // pooled interior beats the threshold everywhere and halo-over-field
+      // converged the screen toward white (Eli's veto).
+      const bf = WEATHER.bloom.closeFade;
+      const bz = Math.min(1, Math.max(0, (zoom - bf.from) / (bf.to - bf.from)));
+      gl.uniform1f(
+        this.loc(gl, this.compositeProgram, "comp", "uGain"),
+        WEATHER.bloom.gain * this.fade * night * thin * (1 - bz * bz * (3 - 2 * bz)),
+      );
+      // Screen, like the field pass: the halo brightens what is dim and
+      // asymptotes over what is already lit — never white (rule 3).
+      gl.blendFunc(gl.ONE_MINUS_DST_COLOR, gl.ONE);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
 
     gl.bindVertexArray(null);
   }
 
   onRemove(_map: MapboxMap, gl: WebGL2RenderingContext) {
+    if (this.maskTex) gl.deleteTexture(this.maskTex);
     for (const t of this.tex) if (t) gl.deleteTexture(t);
+    for (const t of this.bloomTex) if (t) gl.deleteTexture(t);
+    if (this.fieldColorTex) gl.deleteTexture(this.fieldColorTex);
     if (this.fbo) gl.deleteFramebuffer(this.fbo);
+    if (this.fbo2) gl.deleteFramebuffer(this.fbo2);
     if (this.accumProgram) gl.deleteProgram(this.accumProgram);
     if (this.resolveProgram) gl.deleteProgram(this.resolveProgram);
+    if (this.blurProgram) gl.deleteProgram(this.blurProgram);
+    if (this.compositeProgram) gl.deleteProgram(this.compositeProgram);
     this.map = null;
     this.gl = null;
   }

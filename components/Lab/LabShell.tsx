@@ -15,7 +15,9 @@ const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
  * else is light on darkness.
  */
 export default function LabShell() {
-  const [muted, setMutedState] = useState(false);
+  // Lazy init — the lab is client-only, so the sound module's mute state is
+  // readable at first render (no post-mount setState cascade).
+  const [muted, setMutedState] = useState(isMuted);
   // 0 = idle chrome, 1 = mid-gesture (chrome fades to gestureOpacity).
   const gestureDepth = useMotionValue(0);
   const chromeOpacity = useTransform(
@@ -25,7 +27,6 @@ export default function LabShell() {
   );
 
   useEffect(() => {
-    setMutedState(isMuted());
     // Sounds must never survive the tab losing focus mid-gesture.
     const onHide = () => {
       if (document.hidden) panic();

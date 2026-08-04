@@ -28,19 +28,29 @@ floating above it.
 
 /components
   Screen/   the one screen — composes map + orb + public/private tabs
-  Map/      the city & THE FIELD (public view): base style, glow shaders,
-            neighborhoods, ambient seed, and tune.ts (every map look-knob)
+  Map/      the city & THE FIELD (public view): base style, two field
+            engines (FieldLayer = Ben's pond/paper, GalleryFieldLayer =
+            Eli's gallery), looks.ts + lookState.ts (THE VERSION GALLERY:
+            every look from both trunks, live-switchable), neighborhoods,
+            ambient seed, and the dial books — tune.ts (live knobs) +
+            galleryTune.ts (frozen snapshot for the preserved looks)
   Orb/      THE SLIDER (the signature): orb, gesture flow, burst,
             and feel.ts (every orb feel-knob)
-  Trail/    THE DIARY (private view): your commits as precise glowing dots
-  Lab/      workshop-only harnesses & test seed data — never ships
+  Trail/    THE DIARY (private view): your commits as glowing marks —
+            ember, thread, or garden (the active look picks the pairing)
+  Welcome/  THE WELCOME (first-run walkthrough): two versions in a bake-off
+            (slides / film) behind ?welcome=…; the sequencer, the stage
+            contract into the product, the ghost hand, the axes figure
+  Lab/      dev-gated harnesses (look gallery, weather preview, labs) &
+            test seed data — never visible to real users
 
 /lib        shared plumbing: theme.ts (tokens — source of truth),
             momentsStore.ts (the live data both views render),
             map.ts, location.ts, sound.ts, supabase.ts
 
 /supabase   migrations (via Supabase CLI only)
-/docs       build plan, design system, parked ideas, map style history
+/docs       build plan, design system, parked ideas, map style history,
+            worlds.md (the map of every look/world + the switcher contract)
 ```
 
 Rule of thumb: **look-and-feel knobs live in `Map/tune.ts` and `Orb/feel.ts`**
@@ -53,7 +63,7 @@ Rule of thumb: **look-and-feel knobs live in `Map/tune.ts` and `Orb/feel.ts`**
 - **Branches:** `<name>/<thing>` (e.g. `ben/one-screen`). `main` is always the
   real product.
 - **Commits:** prefix with the area so history reads like a log of the product:
-  `orb:`, `map:`, `field:`, `screen:`, `trail:`, `store:`, `docs:`.
+  `orb:`, `map:`, `field:`, `screen:`, `trail:`, `store:`, `welcome:`, `docs:`.
 - Superseded ideas aren't deleted from memory — they're parked in
   [docs/later.md](./docs/later.md).
 

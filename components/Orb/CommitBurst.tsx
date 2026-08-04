@@ -66,6 +66,26 @@ export function CommitBurst({
         pointerEvents: "none",
       }}
     >
+      {/* THE HUE WASH (round 2, item 5): a translucent breath of the
+          committed color exhaling outward under the ring — the moment must
+          be unmistakable. Transform/opacity only; gone in one breath. */}
+      <motion.div
+        style={{
+          position: "absolute",
+          left: "50%",
+          top: "50%",
+          width: ORB.size * sizeScale,
+          height: ORB.size * sizeScale,
+          marginLeft: (-ORB.size * sizeScale) / 2,
+          marginTop: (-ORB.size * sizeScale) / 2,
+          borderRadius: "50%",
+          background: `radial-gradient(closest-side, rgba(${rgb},0.5) 0%, rgba(${rgb},0.28) 55%, rgba(${rgb},0) 95%)`,
+          willChange: "transform, opacity",
+        }}
+        initial={{ scale: 0.9, opacity: 0.6 }}
+        animate={{ scale: plan.ringScale * 1.35, opacity: 0 }}
+        transition={{ duration: (plan.ringMs * 1.25) / 1000, ease: BURST.ring.ease }}
+      />
       {/* Expanding ring — born at the committed orb's edge, washing outward. */}
       <motion.div
         style={{

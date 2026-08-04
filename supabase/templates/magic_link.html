@@ -1,0 +1,13 @@
+<!-- Code-only on purpose: no link for a mail app to prefetch (and thereby
+     burn the one-time token), nothing to open on the wrong device. The
+     code is typed into the wall on whichever device asked for it. -->
+<div style="background:#0A0B0F;padding:44px 24px;text-align:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  <p style="margin:0;font-size:22px;font-weight:500;letter-spacing:0.02em;color:#E9ECF4;">warmth</p>
+  <div style="height:3px;width:120px;margin:12px auto 26px;border-radius:2px;background:linear-gradient(90deg,#FFEE75,#F79A6E,#F695BC,#BCA8F5,#63D6BE);opacity:0.85;"></div>
+  <p style="margin:0 0 10px;font-size:15px;color:rgba(233,236,244,0.62);">your sign-in code</p>
+  <p style="margin:0;font-size:38px;font-weight:600;letter-spacing:0.28em;color:#E9ECF4;">{{ .Token }}</p>
+  <p style="margin:26px 0 0;font-size:13px;line-height:1.6;color:rgba(233,236,244,0.45);">
+    type it into warmth on the device you started from.<br>
+    it works for an hour; if you didn't ask for it, just ignore this.
+  </p>
+</div>

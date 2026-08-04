@@ -9,14 +9,15 @@ in prose. If they disagree, `lib/theme.ts` wins.
 - **60fps, always.** If a change risks jank, flag it and propose a lighter approach.
 
 ## Emotion hues
+The final five (2026-07-02: awe removed; reflective became gratitude;
+palette softened away from neon the same day).
 | Emotion | Hue |
 | --- | --- |
-| Joy | `#FFC24B` |
-| Energy | `#FF7A29` |
-| Love | `#FF6FB5` |
-| Awe | `#7B6CF6` |
-| Calm | `#35D0BA` |
-| Reflective | `#3E8EF7` |
+| Joy | `#FFEE75` lemon sun (re-picked 2026-07-08) |
+| Energy | `#F79A6E` peach coral |
+| Love | `#F695BC` petal rose |
+| Gratitude | `#BCA8F5` lilac veil |
+| Calm | `#63D6BE` mint aqua |
 
 ## Motion (Framer Motion)
 Nothing the user sees move is linear or instant — always spring.
@@ -32,3 +33,12 @@ Nothing the user sees move is linear or instant — always spring.
 ## The slider is sacred
 The emotion/intensity slider is the signature. Extra care, and a
 design-reviewer pass on any change.
+
+## Measuring performance (the 30fps fire drill, 2026-07-08)
+
+Always measure on AC power. Chrome's Energy Saver caps every page's
+requestAnimationFrame at ~30fps (a flat 33.3ms cadence) when the battery
+drops under 20 percent — every build, every view, even an empty page.
+Before blaming a commit: probe an empty tab's rAF cadence first; if it
+reads ~33ms, plug in. Reference numbers (M-series, 120Hz, animated pan,
+full field): mean ~8.3ms, zero frames over 16.7ms.

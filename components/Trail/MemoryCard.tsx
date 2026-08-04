@@ -1,0 +1,437 @@
+"use client";
+
+/**
+ * The memory card — tap a spark, hold the moment.
+ *
+ * A quiet glass card for one journal entry: when and what you felt, plus
+ * the memory you attach — one journaling prompt ("how did you feel?") and
+ * a photo. That is the complete set (Eli, 2026-07-08). The photo is
+ * local-first like the words: picked, downscaled on-device, stored with
+ * the entry; it uploads to Storage when the cloud lands. Saves are
+ * optimistic: every edit lands in the store (and localStorage) on blur or
+ * after a short pause, with a whispered "kept" as confirmation.
+ */
+import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { momentsStore, type Memory } from "@/lib/momentsStore";
+import { EMOTION_HUES, SPRING, type Emotion } from "@/lib/theme";
+import {
+  uploadMemoryPhoto,
+  signedPhotoUrl,
+  deleteMemoryPhoto,
+  tombstoneRowPhoto,
+} from "@/lib/photos";
+import { isSignedIn } from "@/lib/auth";
+import { isSupabaseConfigured } from "@/lib/supabase";
+
+const MAX_DESCRIPTION = 2000;
+
+/** Longest edge of the stored photo (px). Local-first storage rides
+ *  localStorage for now, so the photo is shrunk hard on-device: a 640px
+ *  JPEG (~60–120 KB) keeps years of entries inside the quota; the honest
+ *  "couldn't keep" path already covers the day it fills anyway. */
+const PHOTO_MAX_PX = 640;
+
+async function shrinkPhoto(file: File): Promise<string | null> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, PHOTO_MAX_PX / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close();
+    return canvas.toDataURL("image/jpeg", 0.72);
+  } catch {
+    return null; // unreadable file — the card simply stays photo-less
+  }
+}
+
+/** The WHEN is the emotional anchor of looking back (private redesign,
+ *  07-17): "wow — July 14th, 12:28pm, I was so grateful." The date leads,
+ *  written out; the clock and a quiet how-long-ago whisper follow. */
+function dateLabel(createdAt: number): string {
+  const d = new Date(createdAt);
+  return d.toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
+  });
+}
+
+function timeLabel(createdAt: number): string {
+  return new Date(createdAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+/** "3 weeks ago" — null for today (today needs no distance) and for
+ *  future timestamps (clock skew across devices must never whisper
+ *  "yesterday" about tomorrow — code review). */
+function agoWhisper(createdAt: number): string | null {
+  const now = new Date();
+  const then = new Date(createdAt);
+  if (createdAt > now.getTime()) return null;
+  if (now.toDateString() === then.toDateString()) return null;
+  const days = Math.max(1, Math.round((now.getTime() - createdAt) / 86_400_000));
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days} days ago`;
+  if (days < 35) {
+    const w = Math.round(days / 7);
+    return w === 1 ? "a week ago" : `${w} weeks ago`;
+  }
+  const m = Math.round(days / 30.44);
+  if (m < 12) return m === 1 ? "a month ago" : `${m} months ago`;
+  const y = Math.round(days / 365.25);
+  return y <= 1 ? "a year ago" : `${y} years ago`;
+}
+
+/** Per-ENTRY photo epochs, module-scoped so they survive the card
+ *  unmounting: every pick/remove bumps its entry's epoch, and an upload
+ *  only counts if the epoch hasn't moved while it was in flight. A
+ *  per-mount ref version of this let close-card → reopen → remove race a
+ *  still-in-flight upload into resurrecting a removed photo (review). */
+const photoEpochs = new Map<string, number>();
+const photoEpoch = (id: string) => photoEpochs.get(id) ?? 0;
+const bumpPhotoEpoch = (id: string) => {
+  const next = photoEpoch(id) + 1;
+  photoEpochs.set(id, next);
+  return next;
+};
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  background: "rgba(233,236,244,0.06)",
+  border: "1px solid rgba(233,236,244,0.1)",
+  borderRadius: 10,
+  padding: "9px 11px",
+  color: "rgba(233,236,244,0.92)",
+  fontSize: 13.5,
+  fontFamily: "inherit",
+  outline: "none",
+  resize: "none",
+};
+
+export function MemoryCard({ entryId, onClose }: { entryId: string; onClose: () => void }) {
+  const entry = momentsStore.journalEntry(entryId);
+  const [memory, setMemory] = useState<Memory>(() => ({ ...entry?.memory }));
+  const [kept, setKept] = useState<"kept" | "full" | null>(null);
+  const keptTimer = useRef<number | undefined>(undefined);
+  const saveTimer = useRef<number | undefined>(undefined);
+
+  // Optimistic save: debounce keystrokes, flush on blur/close/unmount.
+  // Dirty-gated: a card that was only OPENED never writes or claims "kept"
+  // (StrictMode's double-mount ran the unmount flush and flashed a phantom
+  // confirmation — design review).
+  //
+  // PARTIAL payloads only (2026-08-04 review): each writer sends just the
+  // keys it owns — keystrokes send {description}, photo actions their photo
+  // keys — and the store merges. Full-object payloads let a slow keystroke
+  // flush clobber a photoPath that landed mid-debounce (a confirmed
+  // photo-loss race).
+  const dirty = useRef(false);
+  const pending = useRef<Memory>({});
+  const save = (partial: Memory) => {
+    dirty.current = true;
+    setMemory((s) => ({ ...s, ...partial }));
+    pending.current = { ...pending.current, ...partial };
+    window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(flushPending, 600);
+  };
+  const flushPending = () => {
+    window.clearTimeout(saveTimer.current);
+    if (!dirty.current) return;
+    const partial = pending.current;
+    pending.current = {};
+    // Honest confirmation: "kept" only when storage really took the words.
+    const ok = momentsStore.setMemory(entryId, partial);
+    if (ok) dirty.current = false;
+    else pending.current = { ...partial, ...pending.current }; // retry on next flush
+    setKept(ok ? "kept" : "full");
+    window.clearTimeout(keptTimer.current);
+    if (ok) keptTimer.current = window.setTimeout(() => setKept(null), 1600);
+  };
+  // Photo: LOCAL-FIRST (instant, offline — a downscaled data URL kept with
+  // the entry) AND synced to Storage when signed in (so it appears on your
+  // other devices). The device that took it shows its own copy; another
+  // device fetches the Storage original via a signed URL.
+  const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const canSyncPhoto = isSupabaseConfigured && isSignedIn();
+
+  // No local copy but a synced path (another device) → fetch a viewable URL.
+  useEffect(() => {
+    let live = true;
+    const mem = entry?.memory;
+    if (mem?.photoPath && !mem.photo && isSupabaseConfigured) {
+      void signedPhotoUrl(mem.photoPath).then((u) => {
+        if (live) setRemoteUrl(u);
+      });
+    }
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const onPickPhoto = async (file: File | undefined) => {
+    if (!file) return;
+    // Instant + offline: shrink on-device and keep it with the entry.
+    const dataUrl = await shrinkPhoto(file);
+    if (!dataUrl) return;
+    const myEpoch = bumpPhotoEpoch(entryId);
+    // The old photoPath stays in the row until the replacement has actually
+    // landed — remote devices keep showing the old photo instead of nothing.
+    const replaced = momentsStore.journalEntry(entryId)?.memory?.photoPath;
+    save({ photo: dataUrl });
+    // Cross-device: upload the original to Storage when signed in. A failed
+    // upload is harmless — the local copy is already kept, and the sign-in
+    // photo sweep (journalSync) retries from the data URL later.
+    if (canSyncPhoto) {
+      setPhotoBusy(true);
+      const { path } = await uploadMemoryPhoto(entryId, file);
+      setPhotoBusy(false);
+      if (!path) return;
+      if (photoEpoch(entryId) !== myEpoch) {
+        // Removed or re-picked while uploading: this object is already
+        // stale — delete it rather than strand it in the bucket.
+        void deleteMemoryPhoto(path);
+        return;
+      }
+      // The sign-in sweep may have raced us and recorded its own upload for
+      // this entry; capture it so the loser's bytes are cleaned up too.
+      const prior = momentsStore.journalEntry(entryId)?.memory?.photoPath;
+      // Record the path DIRECTLY (store merge + state), never through the
+      // dirty-gated flush: uploads usually outlast the 600ms debounce, and
+      // the gate silently dropped the path (review: confirmed critical).
+      momentsStore.setMemory(entryId, { photoPath: path });
+      setMemory((s) => ({ ...s, photoPath: path }));
+      // Only now is every superseded object unreferenced — safe to delete.
+      for (const old of new Set([replaced, prior])) {
+        if (old && old !== path) void deleteMemoryPhoto(old);
+      }
+    }
+  };
+
+  const removePhoto = () => {
+    bumpPhotoEpoch(entryId);
+    // Read the CURRENT path from the store, not this card's mount snapshot —
+    // the sign-in sweep may have attached one while the card sat open.
+    const removed = momentsStore.journalEntry(entryId)?.memory?.photoPath;
+    // The armed debounce may still carry this photo's {photo} partial — a
+    // fire after this removal would resurrect the deleted photo locally AND
+    // (via the sweep) back into the cloud. Strip the photo keys; words keep
+    // their pending save.
+    delete pending.current.photo;
+    delete pending.current.photoPath;
+    setRemoteUrl(null);
+    setMemory((s) => ({ ...s, photo: undefined, photoPath: undefined }));
+    void (async () => {
+      // Divergent-row rescue: if this device's store lost the path (quota
+      // fail + reload) the SERVER may still know it — tombstone it before
+      // the row below is nulled, or the bytes orphan forever.
+      if (!removed && canSyncPhoto) await tombstoneRowPhoto(entryId);
+      // Commit the dereference immediately (no debounce): if we crash in
+      // the next second the row must not point at bytes we're deleting.
+      momentsStore.setMemory(entryId, { photo: undefined, photoPath: undefined });
+      // A removed photo must be GONE, not just unreferenced (private
+      // diary). deleteMemoryPhoto tombstones on failure, so this converges.
+      if (removed) void deleteMemoryPhoto(removed);
+    })();
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      flushPending(); // never lose words to a close
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (!entry) return null;
+  const hue = EMOTION_HUES[entry.emotion as Emotion];
+
+  return (
+    <>
+      {/* Tap-out veil. */}
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, zIndex: 14 }} />
+      <motion.div
+        initial={{ opacity: 0, y: 14, scale: 0.985 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 10, scale: 0.99 }}
+        transition={SPRING.settle}
+        style={{
+          position: "absolute",
+          left: "50%",
+          bottom: "max(env(safe-area-inset-bottom, 0px), 18px)",
+          // Framer owns the transform (it animates y/scale) — a static
+          // translateX would be discarded mid-animation (design review).
+          x: "-50%",
+          width: "min(400px, calc(100vw - 28px))",
+          zIndex: 15,
+          padding: "18px 18px 16px",
+          borderRadius: 20,
+          background: "rgba(10,11,15,0.78)",
+          border: "1px solid rgba(233,236,244,0.14)",
+          backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        {/* The moment. The WHEN leads — the date written out like a diary
+            page — then the feeling in its own color, the clock, and how
+            long ago it was. Landing here should feel like remembering. */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <span
+              style={{
+                fontSize: 16.5,
+                fontWeight: 500,
+                letterSpacing: "0.01em",
+                color: "rgba(233,236,244,0.95)",
+              }}
+            >
+              {dateLabel(entry.createdAt)}
+            </span>
+            {agoWhisper(entry.createdAt) && (
+              <span style={{ fontSize: 11, color: "rgba(233,236,244,0.38)", marginLeft: "auto" }}>
+                {agoWhisper(entry.createdAt)}
+              </span>
+            )}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            <span
+              aria-hidden
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: hue,
+                boxShadow: `0 0 10px 1px ${hue}99`,
+              }}
+            />
+            <span style={{ fontSize: 12.5, fontWeight: 500, color: hue, opacity: 0.95 }}>
+              {entry.emotion}
+            </span>
+            <span style={{ fontSize: 11.5, color: "rgba(233,236,244,0.45)" }}>
+              · {timeLabel(entry.createdAt)}
+            </span>
+          </div>
+        </div>
+
+        <textarea
+          aria-label="How did you feel?"
+          placeholder="how did you feel?"
+          value={memory.description ?? ""}
+          maxLength={MAX_DESCRIPTION}
+          rows={3}
+          onChange={(e) => save({ description: e.target.value })}
+          onBlur={flushPending}
+          style={inputStyle}
+        />
+
+        {/* The photo — a memory you can see again. Local-first; a small
+            "syncing…" whisper while it also uploads to your account. */}
+        {memory.photo || remoteUrl ? (
+          <div style={{ position: "relative" }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={memory.photo ?? remoteUrl ?? ""}
+              alt="Photo attached to this memory"
+              style={{
+                width: "100%",
+                maxHeight: 180,
+                objectFit: "cover",
+                borderRadius: 12,
+                display: "block",
+              }}
+            />
+            <button
+              type="button"
+              onClick={removePhoto}
+              style={{
+                position: "absolute",
+                top: 8,
+                right: 8,
+                border: "1px solid rgba(233,236,244,0.18)",
+                borderRadius: 999,
+                background: "rgba(10,11,15,0.66)",
+                color: "rgba(233,236,244,0.75)",
+                fontSize: 11,
+                padding: "3px 9px",
+                cursor: "pointer",
+              }}
+            >
+              remove
+            </button>
+            {photoBusy && (
+              <span
+                style={{
+                  position: "absolute",
+                  bottom: 8,
+                  left: 8,
+                  fontSize: 10.5,
+                  color: "rgba(233,236,244,0.7)",
+                  background: "rgba(10,11,15,0.6)",
+                  borderRadius: 999,
+                  padding: "2px 8px",
+                }}
+              >
+                syncing…
+              </span>
+            )}
+          </div>
+        ) : (
+          <label
+            style={{
+              ...inputStyle,
+              cursor: "pointer",
+              textAlign: "center",
+              color: "rgba(233,236,244,0.55)",
+              userSelect: "none",
+            }}
+          >
+            add a photo
+            <input
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                void onPickPhoto(file);
+                e.target.value = ""; // same file re-pickable after remove
+              }}
+            />
+          </label>
+        )}
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <AnimatePresence>
+            {kept && (
+              <motion.span
+                initial={{ opacity: 0 }}
+                animate={{ opacity: kept === "kept" ? 0.6 : 0.85 }}
+                exit={{ opacity: 0 }}
+                style={{
+                  fontSize: 11.5,
+                  color: kept === "kept" ? "rgba(233,236,244,0.9)" : "rgba(244,188,140,0.95)",
+                  marginLeft: "auto",
+                }}
+              >
+                {kept === "kept" ? "kept" : "couldn't keep, device storage is full"}
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </div>
+      </motion.div>
+    </>
+  );
+}

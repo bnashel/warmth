@@ -17,7 +17,29 @@
  * any weight/membership change — deck.gl updateTriggers keys).
  */
 import { CHOREO, FIELD, GLOW, RECENCY, TRAIL } from "@/components/Map/tune";
+import { currentLook } from "@/components/Map/lookState";
+import { emotionHue } from "@/components/Map/solar";
 import { EMOTION_HUES, type Emotion } from "@/lib/theme";
+import { pushMemoryToCloud, pushMomentToCloud } from "@/lib/sync";
+import type { PublicCell } from "@/lib/publicField";
+
+/** A memory counts once it carries any real content. */
+function hasMemoryContent(memory: Memory | undefined): boolean {
+  return Boolean(memory && (memory.description?.trim() || memory.photo || memory.photoPath));
+}
+
+/** The memory a journal entry can carry — all optional, editable forever.
+ *  The complete set (Eli, 2026-07-08): the journaling prompt + a photo.
+ *  (Song fields removed from the type; old localStorage/DB rows keeping
+ *  them are harmless — unknown keys ride the spread untouched.) */
+export type Memory = {
+  description?: string; // "how did you feel?" ≤2000
+  /** The photo, local-first: a downscaled data URL living with the entry
+   *  (same story as the words). Uploads to Storage when the cloud lands. */
+  photo?: string;
+  /** Supabase Storage path once photos sync; unused until the cloud lands. */
+  photoPath?: string;
+};
 
 export type Moment = {
   id: string;
@@ -26,12 +48,17 @@ export type Moment = {
   lng: number;
   lat: number;
   createdAt: number; // epoch ms
-  /** Committed on this device — joins the private trail (precise location). */
+  /** Committed on this device — joins the private journal (precise location). */
   own?: boolean;
   /** Ambient seed — the placeholder city until realtime lands. Public only. */
   seed?: boolean;
+  /** The under-wash lattice (subset of seed): wide dim skirt, never an
+   *  entry — the no-dead-space layer (2026-07-08). */
+  wash?: boolean;
   /** Lab seed data — swept before the real screen renders. */
   test?: boolean;
+  /** The journal memory attached to this entry (private view only). */
+  memory?: Memory;
 };
 
 export type LivePoint = {
@@ -45,7 +72,10 @@ export type LivePoint = {
   born: number; // performance.now() at entry — drives the arrival bloom
   own?: boolean;
   seed?: boolean;
+  wash?: boolean;
   test?: boolean;
+  /** A named star: this entry carries a memory (ring in the spark shader). */
+  hasMemory?: boolean;
 };
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -70,7 +100,36 @@ function arrivalEnvelope(t: number): number {
 /* ---- private-trail persistence (device-local; never sent anywhere) ---- */
 
 const OWN_KEY = "warmth-own-moments-v1";
-const OWN_CAP = 300;
+/** The journal keeps EVERYTHING (2026-07-07, Eli: "every entry ever") — the
+ *  cap is quota protection only, evicting oldest at ~2k entries (~5 years of
+ *  daily use). The old 7-day purge is gone: entries live until the user
+ *  deletes them or the cloud journal takes over persistence. */
+const OWN_CAP = 2000;
+
+/**
+ * Emotion-set migration (2026-07-02, Eli's call): the final five are
+ * joy/energy/love/gratitude/calm. reflective → gratitude; awe was removed
+ * with no successor, so persisted awe moments are DROPPED on load.
+ * localStorage has no rollback tooling — this is one-way by design.
+ */
+const LEGACY_EMOTION: Record<string, Emotion | null> = {
+  reflective: "gratitude",
+  awe: null, // dropped
+};
+
+/** Set when the last load remapped or dropped legacy rows — the caller
+ *  must rewrite storage so retired values (and their precise locations)
+ *  leave the device immediately, not at the next incidental save. */
+let legacyMigrated = false;
+
+function migrateLegacyEmotion(m: unknown): unknown {
+  if (typeof m !== "object" || m === null) return m;
+  const p = m as Record<string, unknown>;
+  if (typeof p.emotion !== "string" || !Object.hasOwn(LEGACY_EMOTION, p.emotion)) return m;
+  legacyMigrated = true;
+  const next = LEGACY_EMOTION[p.emotion];
+  return next === null ? null : { ...p, emotion: next };
+}
 
 function isPersistedMoment(m: unknown): m is Moment {
   if (typeof m !== "object" || m === null) return false;
@@ -78,7 +137,8 @@ function isPersistedMoment(m: unknown): m is Moment {
   return (
     typeof p.id === "string" &&
     typeof p.emotion === "string" &&
-    p.emotion in EMOTION_HUES &&
+    // hasOwn, not `in`: prototype-chain keys ("constructor") must not pass.
+    Object.hasOwn(EMOTION_HUES, p.emotion) &&
     // Bounds matter, not just types: Infinity/garbage numbers survive
     // JSON round-trips and would poison weights forever (review finding).
     Number.isFinite(p.intensity) &&
@@ -100,7 +160,11 @@ function loadPersistedOwn(): Moment[] {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     const now = Date.now();
-    return parsed.filter(isPersistedMoment).map((m) => ({
+    return parsed
+      .map(migrateLegacyEmotion)
+      .filter((m): m is unknown => m !== null)
+      .filter(isPersistedMoment)
+      .map((m) => ({
       ...m,
       own: true,
       intensity: Math.min(10, Math.max(1, m.intensity)),
@@ -132,16 +196,20 @@ class MomentsStore {
     // Rehydrate the trail; still-fresh moments rejoin the public field too.
     const persisted = loadPersistedOwn();
     for (const m of persisted) this.add(m, { quiet: true, persist: false });
-    // One rewrite now, so expired entries leave the device immediately —
-    // not only whenever the next commit happens to trigger a save.
-    if (persisted.length > this.ownRaw.length) this.persistOwn();
+    // One rewrite now, so expired entries — and rows the emotion migration
+    // remapped or dropped — leave the device immediately, not only whenever
+    // the next commit happens to trigger a save.
+    if (legacyMigrated || persisted.length > this.ownRaw.length) this.persistOwn();
   }
 
   private makePoint(m: Moment, quiet: boolean): LivePoint {
     return {
       id: m.id,
       position: [m.lng, m.lat],
-      hue: hexToRgb(EMOTION_HUES[m.emotion]),
+      // World-aware (solar.emotionHue): the trail's marks draw straight
+      // from this hue, and THE PAPER WORLD wears its own pigment hues
+      // (PIGMENT.hues — joy's lemon is sun-yellow #F2C010 on the sheet).
+      hue: hexToRgb(emotionHue(m.emotion)),
       // Born dark, raised by the arrival envelope — unless quiet (seed /
       // rehydration), where the light must simply already be standing.
       weight: 0,
@@ -151,20 +219,30 @@ class MomentsStore {
       born: quiet ? performance.now() - CHOREO.arrival.durationMs * 2 : performance.now(),
       own: m.own,
       seed: m.seed,
+      wash: m.wash,
       test: m.test,
+      hasMemory: hasMemoryContent(m.memory),
     };
   }
 
-  private persistOwn() {
-    if (typeof window === "undefined") return;
-    // Expired diary entries leave the device too — precise locations must
-    // never outlive the trail window in storage (review finding).
-    const cutoff = Date.now() - TRAIL.windowDays * 86400_000;
-    this.ownRaw = this.ownRaw.filter((m) => m.createdAt > cutoff).slice(-OWN_CAP);
+  private persistOwn(): boolean {
+    if (typeof window === "undefined") return false;
+    // The journal is forever (Eli, 2026-07-07): no age purge. The cap only
+    // protects the localStorage quota, evicting oldest-first at the extreme.
+    this.ownRaw = this.ownRaw.slice(-OWN_CAP);
     try {
       window.localStorage.setItem(OWN_KEY, JSON.stringify(this.ownRaw));
+      return true;
     } catch {
-      // Storage full or blocked — the map still works, the trail just won't survive reload.
+      // Quota: shed the oldest tenth once and retry — losing the distant
+      // past beats silently losing what the user just wrote (code review).
+      try {
+        this.ownRaw = this.ownRaw.slice(Math.ceil(this.ownRaw.length / 10));
+        window.localStorage.setItem(OWN_KEY, JSON.stringify(this.ownRaw));
+        return true;
+      } catch {
+        return false; // blocked entirely — callers must not claim "kept"
+      }
     }
   }
 
@@ -172,7 +250,7 @@ class MomentsStore {
    * Add a moment (idempotent by id — realtime echoes dedupe here).
    * `quiet` skips the arrival bloom (seed data, trail rehydration).
    */
-  add(m: Moment, opts?: { quiet?: boolean; persist?: boolean }): boolean {
+  add(m: Moment, opts?: { quiet?: boolean; persist?: boolean; fromCloud?: boolean }): boolean {
     const quiet = opts?.quiet ?? false;
     const isNew = !this.ids.has(m.id) && !this.ownIds.has(m.id);
     if (!isNew) return false;
@@ -192,21 +270,158 @@ class MomentsStore {
       this.version++;
     }
 
-    // Your trail: separate LivePoint (its freshness runs on the 7-day clock).
-    if (m.own && !m.test && Date.now() - m.createdAt < TRAIL.windowDays * 86400_000) {
+    // Your journal: every own entry, forever — no age gate (Eli, 2026-07-07).
+    if (m.own && !m.test) {
       this.ownPoints = [...this.ownPoints, this.makePoint(m, quiet)];
       this.ownIds.add(m.id);
       this.ownVersion++;
       this.ownRaw.push(m); // rehydration re-fills the in-memory mirror too
-      if (opts?.persist !== false) this.persistOwn();
+      if (opts?.persist !== false) {
+        this.persistOwn();
+        // Fresh commit (not rehydration/seed/cloud-hydrate): the dual write.
+        // One action, two destinations — anonymous public row + owned journal
+        // row. `fromCloud` entries are ALREADY on the server; caching them
+        // locally must not echo them back up.
+        if (!opts?.fromCloud) void pushMomentToCloud(m);
+      }
     }
     this.dirty = true;
     return true;
   }
 
-  /** The ambient placeholder city (until realtime): quiet, idempotent. */
+  /**
+   * Attach or edit the memory on a journal entry — optimistic: local state
+   * and storage update immediately; the cloud write follows when wired.
+   */
+  setMemory(id: string, memory: Memory): boolean {
+    const raw = this.ownRaw.find((m) => m.id === id);
+    if (!raw) return false;
+    raw.memory = { ...raw.memory, ...memory };
+    const point = this.ownPoints.find((p) => p.id === id);
+    if (point) point.hasMemory = hasMemoryContent(raw.memory);
+    this.ownVersion++;
+    this.dirty = true;
+    // "kept" must be TRUE: only claim success if the words actually landed
+    // in storage (quota failures were silently eaten before — code review).
+    const kept = this.persistOwn();
+    void pushMemoryToCloud(id, raw.memory);
+    return kept;
+  }
+
+  /** The full journal record for one entry (memory editor reads this). */
+  journalEntry(id: string): Moment | undefined {
+    return this.ownRaw.find((m) => m.id === id);
+  }
+
+  /** Every own journal entry (for the sign-in claim → cloud). A copy, so
+   *  callers can't mutate the store's array. */
+  ownEntries(): Moment[] {
+    return this.ownRaw.slice();
+  }
+
+  /**
+   * Merge one server journal row into the local trail — the pull half of
+   * sync (never re-pushes). A row not seen on this device is added; an
+   * existing BARE entry gets its memory filled from the cloud (so a memory
+   * written on another device appears here) — but a local edit is never
+   * clobbered. Full cross-device conflict resolution is a follow-up.
+   */
+  ingestCloudEntry(m: Moment): void {
+    if (!this.ownIds.has(m.id)) {
+      this.add(m, { fromCloud: true });
+      return;
+    }
+    const local = this.ownRaw.find((x) => x.id === m.id);
+    if (local && !hasMemoryContent(local.memory) && hasMemoryContent(m.memory)) {
+      local.memory = { ...m.memory };
+      const point = this.ownPoints.find((p) => p.id === m.id);
+      if (point) point.hasMemory = true;
+      this.ownVersion++;
+      this.dirty = true;
+      this.persistOwn();
+    }
+  }
+
+  /**
+   * "On this day" — journal entries from this calendar date in a previous
+   * month or year (at least 3 weeks old, so last Tuesday doesn't count as
+   * a memory). Newest first.
+   */
+  onThisDay(now = new Date()): Moment[] {
+    const cutoff = now.getTime() - 21 * 86400_000;
+    return this.ownRaw
+      .filter((m) => {
+        if (m.createdAt > cutoff) return false;
+        const d = new Date(m.createdAt);
+        return d.getDate() === now.getDate() && d.getMonth() === now.getMonth();
+      })
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  /** The ambient placeholder city (fallback when the DB is empty): quiet,
+   *  idempotent. */
   seedAmbient(moments: Moment[]) {
     for (const m of moments) this.add(m, { quiet: true });
+  }
+
+  /**
+   * The REAL public field, read from the database (coarsened to a privacy
+   * grid — every point sits on a cell centre). Density is recreated exactly
+   * like the seed: a cell of n feelings becomes min(n, 6) points stacked on
+   * the centre, so a busier cell glows brighter. seed:false — real feeling
+   * burns at full weight. Idempotent by id (stable per cell+emotion+copy).
+   */
+  ingestPublicField(cells: PublicCell[]): void {
+    for (const c of cells) {
+      const copies = Math.max(1, Math.min(6, c.n));
+      for (let k = 0; k < copies; k++) {
+        this.add(
+          {
+            id: `pf:${c.cellId}:${k}`,
+            emotion: c.emotion,
+            intensity: Math.min(10, Math.max(1, c.avgIntensity)),
+            lng: c.lng,
+            lat: c.lat,
+            createdAt: c.bucket,
+            seed: false,
+          },
+          { quiet: true },
+        );
+      }
+    }
+  }
+
+  /** A single LIVE public feeling (someone else, just now) — blooms on
+   *  arrival at the cell centre. Own echoes are filtered upstream. */
+  ingestLivePublic(cell: PublicCell): void {
+    this.add(
+      {
+        id: cell.eid ? `pf:live:${cell.eid}` : `pf:${cell.cellId}:live`,
+        emotion: cell.emotion,
+        intensity: Math.min(10, Math.max(1, cell.avgIntensity)),
+        lng: cell.lng,
+        lat: cell.lat,
+        createdAt: cell.bucket,
+        seed: false,
+      },
+      { quiet: false },
+    );
+  }
+
+  /**
+   * Re-tint every standing point for the CURRENT world (solar.emotionHue).
+   * Called when the gallery flips worlds live (night ↔ paper): hues are
+   * baked into points at add-time, so a flip must re-ink them or the
+   * journal's marks keep the old world's color. In-place mutation on the
+   * same arrays (no re-alloc); the version bumps re-key deck's color
+   * accessors and re-feed the field next tick.
+   */
+  retint(): void {
+    for (const p of this.points) p.hue = hexToRgb(emotionHue(p.emotion));
+    for (const p of this.ownPoints) p.hue = hexToRgb(emotionHue(p.emotion));
+    this.version++;
+    this.ownVersion++;
+    this.dirty = true;
   }
 
   /** Seed data is lab-only; the product screen sweeps it on mount. */
@@ -260,8 +475,15 @@ class MomentsStore {
       const base = GLOW.weightFloor + (1 - GLOW.weightFloor) * ((p.intensity - 1) / 9);
       const freshness = Math.min(1, Math.max(0, 1 - (epochNow - p.createdAt) / windowMs));
       const arrival = arrivalEnvelope((nowPerf - p.born) / arrivalMs);
-      // The ambient seed is a thin glaze; real feelings burn at full weight.
-      const w = base * freshness * arrival * (p.seed ? FIELD.seedGain : 1);
+      // The ambient seed is a thin glaze; real feelings burn at full
+      // weight — and the under-wash lattice is quieter still (the
+      // no-dead-space layer, never mistakable for an entry). The wash
+      // gain rides the live gallery look (re-derived every tick anyway).
+      const w =
+        base *
+        freshness *
+        arrival *
+        (p.wash ? currentLook().config.dials.washGain : p.seed ? FIELD.seedGain : 1);
       if (w !== p.weight) {
         p.weight = w;
         changed = true;
@@ -274,26 +496,22 @@ class MomentsStore {
     }
     if (changed || dead > 0) this.version++;
 
-    // The trail (7-day clock) — same envelope, longer memory, higher floor.
+    // The journal (forever): the last week burns brightest, then a spark
+    // settles to a steady ember — old feelings dim, but NEVER die. A journal
+    // that deletes your past isn't a journal (Eli, 2026-07-07).
     const trailMs = TRAIL.windowDays * 86400_000;
     let ownChanged = false;
-    let ownDead = 0;
     for (const p of this.ownPoints) {
       const base = TRAIL.weightFloor + (1 - TRAIL.weightFloor) * ((p.intensity - 1) / 9);
-      const freshness = Math.min(1, Math.max(0, 1 - (epochNow - p.createdAt) / trailMs));
+      const freshness = Math.max(TRAIL.emberFloor, 1 - (epochNow - p.createdAt) / trailMs);
       const arrival = arrivalEnvelope((nowPerf - p.born) / arrivalMs);
       const w = base * freshness * arrival;
       if (w !== p.weight) {
         p.weight = w;
         ownChanged = true;
       }
-      if (freshness <= 0) ownDead++;
     }
-    if (ownDead > 0) {
-      this.ownPoints = this.ownPoints.filter((p) => epochNow - p.createdAt < trailMs);
-      this.ownIds = new Set(this.ownPoints.map((p) => p.id));
-    }
-    if (ownChanged || ownDead > 0) this.ownVersion++;
+    if (ownChanged) this.ownVersion++;
 
     return animating;
   }

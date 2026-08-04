@@ -1,0 +1,175 @@
+/**
+ * lib/journalSync.ts — the journal's two-way reconciliation at sign-in.
+ *
+ *   claimLocalJournal()      — push on-device entries into the account (once
+ *                              per account/device). Journal table ONLY: a
+ *                              backfill must never pollute the anonymous
+ *                              public field.
+ *   hydrateJournalFromCloud()— pull the account's entries down and merge them
+ *                              into the local trail (entries from other
+ *                              devices appear; local edits aren't clobbered).
+ *
+ * Both no-op without a configured client and a real session, so dev (no keys)
+ * and the first-frame race are safe. Call order at sign-in: claim, then
+ * hydrate (local lands on the server, then the full set comes back).
+ */
+import { supabase } from "@/lib/supabase";
+import { currentUserId, isSignedIn } from "@/lib/auth";
+import { momentsStore, type Moment } from "@/lib/momentsStore";
+import {
+  uploadMemoryPhotoFromDataUrl,
+  deleteMemoryPhoto,
+  drainPhotoTombstones,
+} from "@/lib/photos";
+import type { Emotion } from "@/lib/theme";
+
+function claimedFlag(uid: string) {
+  return `warmth-claimed-${uid}`;
+}
+function alreadyClaimed(uid: string): boolean {
+  try {
+    return window.localStorage.getItem(claimedFlag(uid)) === "1";
+  } catch {
+    return false;
+  }
+}
+function markClaimed(uid: string) {
+  try {
+    window.localStorage.setItem(claimedFlag(uid), "1");
+  } catch {
+    /* private mode — we'll just re-attempt the (idempotent) claim next time */
+  }
+}
+
+/** One-time: adopt any on-device journal entries into the signed-in account. */
+export async function claimLocalJournal(): Promise<void> {
+  if (!supabase || !isSignedIn()) return;
+  const uid = currentUserId();
+  if (alreadyClaimed(uid)) return;
+
+  const entries = momentsStore.ownEntries();
+  if (entries.length === 0) {
+    markClaimed(uid);
+    return;
+  }
+  const rows = entries.map((m) => ({
+    id: m.id,
+    user_id: uid,
+    emotion: m.emotion,
+    intensity: Math.round(m.intensity),
+    location: `SRID=4326;POINT(${m.lng} ${m.lat})`,
+    created_at: new Date(m.createdAt).toISOString(),
+    description: m.memory?.description ?? null,
+    // Song columns still exist in the schema but are no longer written
+    // (Eli, 2026-07-08: the prompt + a photo is the complete set).
+    photo_path: m.memory?.photoPath ?? null,
+  }));
+  // Idempotent: entries already claimed (e.g. committed while signed in) are
+  // left untouched. JOURNAL ONLY — the public field is never backfilled.
+  const { error } = await supabase
+    .from("journal_entries")
+    .upsert(rows, { onConflict: "id", ignoreDuplicates: true });
+  if (!error) markClaimed(uid);
+  else if (process.env.NODE_ENV !== "production") {
+    console.warn(`warmth journalSync: claim failed — ${error.message}`);
+  }
+}
+
+/** Upload photo bytes that exist only on this device.
+ *
+ *  A photo attached before sign-in (or while an upload was failing) lives
+ *  solely as a data URL in localStorage: the claim pushes its journal row
+ *  with photo_path NULL, and the memory arrives on every other device
+ *  photo-less, forever. This sweep closes that hole — each such photo is
+ *  uploaded and its path written back through setMemory (which persists
+ *  locally and pushes the row update).
+ *
+ *  Deliberately NOT behind the once-per-account claim flag: an upload that
+ *  fails today (offline, quota) is simply retried at the next sign-in.
+ *  Idempotent — anything with a photoPath is skipped.
+ *
+ *  Guardrails (2026-08-04 review — each was a found, confirmed defect):
+ *  • Sweep ONLY entries whose journal row exists, is MINE, and lacks a
+ *    photo. The local trail is device-scoped, not account-scoped: on a
+ *    shared device another account's photos must never upload under this
+ *    uid, and an entry whose row was never claimed (created offline after
+ *    the one-time claim) must not upload bytes its row can't reference.
+ *  • Re-read the entry AFTER every await. The user can remove or replace
+ *    the photo mid-sweep; a stale snapshot would upload a removed photo
+ *    (fetch(undefined) even uploads the 404 page) or re-attach its path.
+ *  • If the path fails to land — or a concurrent sweep/pick recorded a
+ *    different one — delete this upload rather than strand it. */
+export async function syncLocalPhotos(): Promise<void> {
+  if (!supabase || !isSignedIn()) return;
+
+  // First, finish any pending deletes (removed photos must converge on GONE).
+  await drainPhotoTombstones();
+
+  const { data, error } = await supabase.from("journal_mine").select("id, photo_path");
+  if (error || !data) return;
+  const needsPhoto = new Set(
+    (data as { id: string; photo_path: string | null }[])
+      .filter((r) => !r.photo_path)
+      .map((r) => r.id),
+  );
+
+  for (const m of momentsStore.ownEntries()) {
+    if (!needsPhoto.has(m.id)) continue; // not my row / row missing / has bytes
+    const cur = momentsStore.journalEntry(m.id)?.memory;
+    if (!cur?.photo || cur.photoPath) continue; // removed or already recorded
+
+    // Sequential on purpose: photos are ≤~120 KB, and a gentle drip beats a
+    // burst of parallel uploads on a phone connection right at sign-in.
+    const { path, error: upErr } = await uploadMemoryPhotoFromDataUrl(m.id, cur.photo);
+    if (!path) {
+      if (upErr && process.env.NODE_ENV !== "production") {
+        console.warn(`warmth journalSync: photo sweep (${m.id}) — ${upErr}`);
+      }
+      continue;
+    }
+
+    const latest = momentsStore.journalEntry(m.id)?.memory;
+    if (!latest?.photo || latest.photoPath) {
+      void deleteMemoryPhoto(path); // removed/replaced while we uploaded
+      continue;
+    }
+    momentsStore.setMemory(m.id, { photoPath: path });
+    const recorded = momentsStore.journalEntry(m.id)?.memory?.photoPath;
+    if (recorded !== path) void deleteMemoryPhoto(path); // lost a race — no orphan
+  }
+}
+
+/** Pull the account's journal down and merge into the local trail. */
+export async function hydrateJournalFromCloud(): Promise<void> {
+  if (!supabase || !isSignedIn()) return;
+  // journal_mine is a security_invoker view: RLS scopes it to my rows, and it
+  // hands back lng/lat (not WKB) so there's nothing to parse.
+  const { data, error } = await supabase
+    .from("journal_mine")
+    .select("id, emotion, intensity, lng, lat, created_at, description, photo_path")
+    .order("created_at", { ascending: false });
+  if (error) {
+    if (process.env.NODE_ENV !== "production") {
+      console.warn(`warmth journalSync: hydrate failed — ${error.message}`);
+    }
+    return;
+  }
+  for (const row of data ?? []) {
+    const m: Moment = {
+      id: row.id as string,
+      emotion: row.emotion as Emotion,
+      intensity: row.intensity as number,
+      lng: row.lng as number,
+      lat: row.lat as number,
+      createdAt: new Date(row.created_at as string).getTime(),
+      own: true,
+      memory: {
+        description: (row.description as string) ?? undefined,
+        // `photo` (the local data URL) never lives server-side; another
+        // device fetches the Storage original from photoPath (signed URL).
+        photoPath: (row.photo_path as string) ?? undefined,
+      },
+    };
+    momentsStore.ingestCloudEntry(m);
+  }
+}

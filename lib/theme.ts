@@ -8,17 +8,26 @@ import type { Transition } from "framer-motion";
 /** Near-black base. Everything sits on this. */
 export const BASE = "#0A0B0F" as const;
 
-/** The six emotions users can drop. */
-export type Emotion = "joy" | "energy" | "love" | "awe" | "calm" | "reflective";
+/** The five emotions users can drop — final set (2026-07-02, Eli's call).
+ *  History: awe removed (no successor); reflective became gratitude. */
+export type Emotion = "joy" | "energy" | "love" | "gratitude" | "calm";
 
-/** Emotion → hue. On the map: hue = emotion. */
+/** Emotion → hue. On the map: hue = emotion. Object order = slider order.
+ *  Softened away from neon (Eli, 2026-07-02): rich but gentle — near-equal
+ *  lightness, moderated chroma, no electric edges. */
 export const EMOTION_HUES: Record<Emotion, string> = {
-  joy: "#FFC24B",
-  energy: "#FF7A29",
-  love: "#FF6FB5",
-  awe: "#7B6CF6",
-  calm: "#35D0BA",
-  reflective: "#3E8EF7",
+  // 2026-07-07 glow-perfection pass (Eli): each hue tuned to the color-
+  // psychology heart of its emotion, balanced so all five carry equal
+  // presence as LIGHT — rich enough to stop you, never enough to shout.
+  // "FIRST LIGHT" (Eli's pick, 2026-07-07 bake-off): airier and more
+  // luminous — the gentlest, most dreamlike of the candidates.
+  // Joy re-picked 2026-07-08: Eli's reference swatch, sampled exactly
+  // (#FFEE75, uniform across the image) — soft lemon sun, not mustard.
+  joy: "#FFEE75", // lemon sun
+  energy: "#F79A6E", // peach coral
+  love: "#F695BC", // petal rose
+  gratitude: "#BCA8F5", // lilac veil
+  calm: "#63D6BE", // mint aqua
 };
 
 export const EMOTIONS = Object.keys(EMOTION_HUES) as Emotion[];

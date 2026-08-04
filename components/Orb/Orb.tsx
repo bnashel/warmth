@@ -14,6 +14,7 @@ export function Orb({
   scale,
   scaleY,
   haloAlpha,
+  paper = 0,
 }: {
   /** "R,G,B" string (already OKLCH-mixed upstream). */
   rgb: MotionValue<string>;
@@ -23,28 +24,48 @@ export function Orb({
   scaleY?: MotionValue<number>;
   /** Halo strength 0..1 → alpha between rest and max reach. */
   haloAlpha: MotionValue<number>;
+  /** Solar day-weight 0..1: on paper the orb casts a soft contact shadow —
+   *  an object resting on the page, not light washed out by daylight. */
+  paper?: number;
 }) {
   const size = ORB.size;
 
+  // On paper, spilled light is GLARE: the halo pulls in and the white-hot
+  // core quiets so the orb reads as a colored object on the page, not a
+  // wash of brightness (Ben: "the blob is too much" at noon). Continuous
+  // on the same paper ramp as everything else; 0 at night = untouched.
+  const glare = 1 - 0.55 * paper;
+  const coreWhite = 1 - 0.35 * paper;
+
   // Gradient strings derived from the live color — recomputed off-render.
+  // THE INSTRUMENT (phase 5): closest-side gradients so every layer ENDS
+  // inside its own box — a crisp lamp with a tight halo, never a wash that
+  // reads as glow on the map beneath.
   const haloBg = useTransform(() => {
     const c = rgb.get();
-    const a = haloAlpha.get();
-    return `radial-gradient(circle, rgba(${c},${a.toFixed(3)}) 0%, rgba(${c},${(
-      a * 0.45
-    ).toFixed(3)}) 38%, rgba(${c},0) 68%)`;
+    const a = haloAlpha.get() * glare;
+    // Item 6: the halo hugs the glass — dead by 70% of its (already tight)
+    // box, so at rest it reads as a whisper of light, never a bloom.
+    return `radial-gradient(closest-side, rgba(${c},${a.toFixed(3)}) 0%, rgba(${c},${(
+      a * 0.35
+    ).toFixed(3)}) 42%, rgba(${c},0) 70%)`;
   });
   const midBg = useTransform(() => {
     const c = rgb.get();
-    return `radial-gradient(circle, rgba(${c},${GLOW.midAlpha}) 0%, rgba(${c},${
-      GLOW.midAlpha * 0.75
-    }) 42%, rgba(${c},0.05) 68%, rgba(${c},0) 74%)`;
+    // The ball itself: full-bodied to 88% of the radius, then a ~3px
+    // feather — a PORCELAIN edge, an instrument you could pick up.
+    return `radial-gradient(closest-side, rgba(${c},${GLOW.midAlpha}) 0%, rgba(${c},${(
+      GLOW.midAlpha * 0.96
+    ).toFixed(3)}) 72%, rgba(${c},${(GLOW.midAlpha * 0.88).toFixed(3)}) 88%, rgba(${c},0) 97%)`;
   });
   const coreBg = useTransform(() => {
     const c = rgb.get();
-    return `radial-gradient(circle, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.55) ${
-      GLOW.coreFrac * 100
-    }%, rgba(${c},0.28) 46%, rgba(${c},0) 62%)`;
+    // Crisp bright core, contained: the filament stops whitening by 16%
+    // and the interior settles to the body hue by 64% (item 6 — the wide
+    // white wash was the cotton ball).
+    return `radial-gradient(closest-side, rgba(255,255,255,${(0.95 * coreWhite).toFixed(3)}) 0%, rgba(255,255,255,${(
+      0.5 * coreWhite
+    ).toFixed(3)}) 16%, rgba(${c},0.26) 46%, rgba(${c},0) 64%)`;
   });
 
   return (
@@ -58,7 +79,27 @@ export function Orb({
         position: "relative",
       }}
     >
-      {/* Outer halo — the light that spills into the void. */}
+      {/* Floating shadow — ALWAYS on (phase 5: the orb clearly floats above
+          the map). Deeper on paper; at night it reads where streets and
+          parks pass beneath. Composited once, costs nothing. */}
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          left: "50%",
+          top: "50%",
+          width: size * 1.1,
+          height: size * 0.46,
+          transform: "translate(-50%, 34%)",
+          borderRadius: "50%",
+          background:
+            "radial-gradient(closest-side, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.35) 55%, rgba(0,0,0,0) 100%)",
+          opacity:
+            GLOW.shadowAlpha.night + (GLOW.shadowAlpha.paper - GLOW.shadowAlpha.night) * paper,
+          filter: "blur(6px)",
+        }}
+      />
+      {/* Tight halo — hugs the glass; never a wash on the city. */}
       <motion.div
         style={{
           position: "absolute",
@@ -72,16 +113,18 @@ export function Orb({
           willChange: "transform, opacity",
         }}
       />
-      {/* Mid body — this IS the visible ball. */}
+      {/* Mid body — this IS the visible ball: defined edge, thin glass rim. */}
       <motion.div
         style={{
           position: "absolute",
           left: "50%",
           top: "50%",
-          width: size * 1.5,
-          height: size * 1.5,
+          width: size * 1.06,
+          height: size * 1.06,
           x: "-50%",
           y: "-50%",
+          borderRadius: "50%",
+          boxShadow: `inset 0 0 0 1px rgba(255,255,255,${GLOW.rimAlpha})`,
           background: midBg,
           willChange: "transform, opacity",
         }}

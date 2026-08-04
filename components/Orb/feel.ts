@@ -29,17 +29,26 @@ export const ORB = {
   breath: { scaleMin: 1.0, scaleMax: 1.04, periodS: 2.5 },
 } as const;
 
-/* Glow construction — three stacked radial layers, transform/opacity only. */
+/* Glow construction — three stacked radial layers, transform/opacity only.
+ * THE INSTRUMENT, not data (phase 5): a crisp ~72px lamp with a defined
+ * edge and a TIGHT, contained halo. The old soft skirts read as a giant
+ * white bloom ON the map — gone. The orb must never read as map glow. */
 export const GLOW = {
   coreFrac: 0.2,
   midFrac: 0.6,
-  haloFrac: 1.15,
+  /** Halo reach as a fraction of orb size. 1.15 spilled a fist-sized wash
+   *  onto the city; 0.78 keeps the light hugging the glass. */
+  haloFrac: 0.78,
   /** Halo alpha at rest → at max intensity. Higher = louder room glow.
-   *  Rest is quiet on purpose: the orb now floats over the CITY, and its
+   *  Rest is quiet on purpose: the orb floats over the CITY, and its
    *  idle light must never fog the map (the brightness law) — the halo
    *  swells during the gesture, when drama is earned. */
-  haloAlpha: { rest: 0.07, max: 0.38 },
-  midAlpha: 0.85,
+  haloAlpha: { rest: 0.05, max: 0.38 },
+  midAlpha: 0.92,
+  /** Elevation: the floating shadow under the lamp (night + day) and the
+   *  thin glass rim that separates it from the city below. */
+  shadowAlpha: { night: 0.38, paper: 0.6 },
+  rimAlpha: 0.14,
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -78,8 +87,8 @@ export const WHEEL = {
   /** Arc width (deg) and radius (px). Wider/farther = grander, longer reach. */
   arcDegrees: 150,
   arcRadiusPx: 110,
-  /** Dot size, px. */
-  dotSizePx: 10,
+  /** Dot size, px. Raised 10→14 (phase 5): the choice should feel grabbable. */
+  dotSizePx: 14,
   /** Per-dot reveal stagger, s (fan-out only — never on select response). */
   dotStaggerS: 0.025,
   /** Active dot scale vs the dimmed rest. More contrast = clearer choice. */
@@ -156,10 +165,12 @@ export const BURST = {
   overshootScale: 1.15,
   /** Expanding ring: end scale, start opacity, duration, ease.
    *  opacityFrom must survive against the bright core — below ~0.5 it drowns. */
+  /** Ring pushed further + born brighter (round 2, item 5: the burst must
+   *  be unmistakable — the last build read nearly silent). */
   ring: {
-    scaleTo: 2.2,
-    opacityFrom: 0.65,
-    ms: 600,
+    scaleTo: 2.6,
+    opacityFrom: 0.78,
+    ms: 640,
     ease: [0.22, 1, 0.36, 1] as [number, number, number, number],
   },
   /** VARIABLE REWARD — jitter bounds. Wider = more chaos; too wide = broken. */
@@ -187,6 +198,9 @@ export const BURST = {
 /* ------------------------------------------------------------------ */
 export const TEXT = {
   label: { sizePx: 13, letterSpacing: "0.12em", opacity: 0.7, offsetPx: 24, fadeInMs: 120 },
+  /** Learning labels: during a user's first 3 commits every wheel dot
+   *  carries its name; after that, the active label alone (which is right). */
+  wheelNames: { sizePx: 11, opacity: 0.8, gapPx: 24 },
   hint: { sizePx: 13, opacity: 0.35, offsetPx: 16 },
   /** Mute glyph. Dims hard during gestures — chrome disappears. */
   chrome: { sizePx: 11, idleOpacity: 0.3, activeOpacity: 0.7, gestureOpacity: 0.12 },
@@ -233,9 +247,8 @@ export const SOUND = {
   /** Per-emotion swell root notes (C-major pentatonic). Reassign to taste. */
   emotionRootHz: {
     calm: 261.63, // C4
-    reflective: 293.66, // D4
+    gratitude: 293.66, // D4 (inherited from reflective)
     love: 329.63, // E4
-    awe: 392.0, // G4
     joy: 440.0, // A4
     energy: 523.25, // C5
   } satisfies Record<Emotion, number>,

@@ -1,0 +1,12 @@
+{
+  "name": "warmth-backend-proof",
+  "private": true,
+  "type": "module",
+  "description": "Executes the real supabase/migrations on a real Postgres (pglite, no Docker) and attacks every privacy promise. Self-contained: does not touch the app's dependencies.",
+  "scripts": {
+    "test": "node --test test.mjs"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.4"
+  }
+}

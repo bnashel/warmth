@@ -47,3 +47,7 @@ next-env.d.ts
 # playwright MCP session artifacts + local screenshots
 .playwright-mcp/
 /*.png
+
+# playwright session artifacts (review agents)
+.playwright-cli/
+.playwright-mcp/

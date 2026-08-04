@@ -53,6 +53,10 @@ function polar(deg: number, r: number = R): { x: number; y: number } {
 const DOT_POS = EMOTIONS.map((_, i) =>
   polar(START_DEG + (SWEEP_DEG / (EMOTIONS.length - 1)) * i),
 );
+/* Learning-label anchors: each name sits just beyond its dot, radially. */
+const NAME_POS = EMOTIONS.map((_, i) =>
+  polar(START_DEG + (SWEEP_DEG / (EMOTIONS.length - 1)) * i, R + TEXT.wheelNames.gapPx),
+);
 
 /** Finger position → param u∈[0,1] along the arc, by ANGLE around the orb
  *  center (true radial tracking — a half-circle finger path maps 1:1).
@@ -107,10 +111,21 @@ type Phase = "idle" | "wheel" | "bar" | "bursting";
  */
 export function OrbFlow({
   hintWord,
+  hintColor = "#FFFFFF",
+  paper = 0,
+  namesOn = false,
   gestureDepth,
   onCommit,
 }: {
   hintWord: string;
+  /** Hint ink — the screen passes graphite when the map is paper (day). */
+  hintColor?: string;
+  /** Solar day-weight 0..1 — the glass, label, and knob take graphite ink
+   *  as the map turns to paper (white on white is unreadable at noon). */
+  paper?: number;
+  /** Learning mode (a user's first 3 commits): every wheel dot carries its
+   *  emotion name. After that, the active label alone — which is right. */
+  namesOn?: boolean;
   gestureDepth: MotionValue<number>;
   /**
    * Fires the instant a feeling is committed (start of the burst, not the
@@ -125,14 +140,66 @@ export function OrbFlow({
 
   /* ---------- discrete React state ---------- */
   const [phase, setPhase] = useState<Phase>("idle");
+  // FIRST-USE HINT (07-14): a one-time whisper above the orb — how the
+  // gesture works. Gone forever after one successful drop or a tap-away
+  // (localStorage "warmth_orb_tutorial_seen").
+  const [hintOn, setHintOn] = useState(false);
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      try {
+        if (window.localStorage.getItem("warmth_orb_tutorial_seen") !== "1") setHintOn(true);
+      } catch { /* storage blocked: no hint, no harm */ }
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, []);
+  const hintOnRef = useRef(false);
+  useEffect(() => { hintOnRef.current = hintOn; }, [hintOn]);
+  const retireHint = () => {
+    try { window.localStorage.setItem("warmth_orb_tutorial_seen", "1"); } catch { /* ok */ }
+    setHintOn(false);
+  };
+  // Tap-away anywhere outside the orb retires it.
+  useEffect(() => {
+    if (!hintOn) return;
+    const away = (e: PointerEvent) => {
+      if (!(e.target as HTMLElement)?.closest?.("[data-orb-hit]")) retireHint();
+    };
+    // Armed only once the whisper is actually visible (~2.2s fade-in) —
+    // otherwise skipping the intro veil would retire it unseen.
+    const arm = window.setTimeout(() => window.addEventListener("pointerdown", away), 3400);
+    return () => {
+      window.clearTimeout(arm);
+      window.removeEventListener("pointerdown", away);
+    };
+     
+  }, [hintOn]);
+
+  // THE INVITE (07-14, discoverability): before anyone touches it, the
+  // orb visibly asks — two gentle swells shortly after mount (mobile has
+  // no hover), and a slight lift under the cursor on desktop. Idle-only:
+  // the moment a gesture starts, the invite never fights it.
+  useEffect(() => {
+    let cancelled = false;
+    const t = window.setTimeout(async () => {
+      if (cancelled || phaseRef.current !== "idle") return;
+      for (let i = 0; i < 2; i++) {
+        if (cancelled || phaseRef.current !== "idle") return;
+        await animate(baseScale, 1.07, spring(SPRINGS.settle));
+        if (cancelled || phaseRef.current !== "idle") return;
+        await animate(baseScale, 1, spring(SPRINGS.settle));
+      }
+    }, 1400);
+    return () => { cancelled = true; window.clearTimeout(t); };
+  }, []);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const [lockedEmotion, setLockedEmotion] = useState<Emotion | null>(null);
   const [burst, setBurst] = useState<{ seed: number; rgb: string; scale: number } | null>(
     null,
   );
-  const [hintDead, setHintDead] = useState(false);
   const [getHintFlag, setHintFlag] = useSessionFlag("warmth-lab-committed");
-  useEffect(() => setHintDead(getHintFlag()), [getHintFlag]);
+  // Lazy init reads the flag once at first render (the orb is client-only —
+  // no SSR mismatch, no post-mount setState cascade).
+  const [hintDead, setHintDead] = useState(getHintFlag);
 
   /* ---------- continuous motion values ---------- */
   const baseScale = useMotionValue(1); // orb size: pressed / continuous with v
@@ -179,6 +246,17 @@ export function OrbFlow({
   const phaseRef = useRef<Phase>("idle");
   phaseRef.current = phase;
 
+  // THE HUM GUARD: the charge hum lives in a module singleton and outlives
+  // this component — if the flow unmounts while a finger (real or synthetic)
+  // still owns a gesture, no pointer event can ever reach us again to stop
+  // it. Unmount mid-gesture must silence it unconditionally.
+  useEffect(
+    () => () => {
+      if (g.current.pointerId !== null) stopHum();
+    },
+    [],
+  );
+
   function driveScale(target: number, s: Transition) {
     scaleAnim.current?.stop();
     scaleAnim.current = animate(baseScale, target, s);
@@ -190,7 +268,12 @@ export function OrbFlow({
     const st = g.current;
     if (st.pointerId !== null) return; // one finger owns the gesture
     st.pointerId = e.pointerId;
-    e.currentTarget.setPointerCapture(e.pointerId);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // A pointer can vanish between the event and the capture (rare touch
+      // race; also synthetic test pointers). The gesture works uncaptured.
+    }
     unlockAudio();
     colorAnim.current?.stop(); // fast re-press: afterglow must not fight the new hue
 
@@ -369,6 +452,7 @@ export function OrbFlow({
 
   /* ---------- commit / cancel ---------- */
   function commit(emotion: Emotion) {
+    if (hintOnRef.current) retireHint(); // one real drop = lesson learned
     const st = g.current;
     st.pointerId = null;
     const committedRgb = rgb.get();
@@ -459,10 +543,24 @@ export function OrbFlow({
   const fillHex = lockedEmotion ? EMOTION_HUES[lockedEmotion] : ORB.restHue;
   // Hot filament color: the hue pulled 35% toward white (OKLCH, stays vivid).
   const coreRgb = mixHexRgbString(fillHex, "#FFFFFF", 0.35);
+  // Day ink: white chrome trades continuously for graphite as the map turns
+  // to paper — the same ramp the captions ride (nothing ever switches).
+  const inkCh = (a: number, b: number) => Math.round(a + (b - a) * paper);
+  const chromeInk = (alpha: number) =>
+    `rgba(${inkCh(255, 52)},${inkCh(255, 58)},${inkCh(255, 70)},${alpha})`;
 
   return (
     <div
+      data-orb-hit
       onPointerDown={onPointerDown}
+      onPointerEnter={(e) => {
+        if (e.pointerType === "mouse" && phaseRef.current === "idle")
+          animate(baseScale, 1.045, spring(SPRINGS.settle));
+      }}
+      onPointerLeave={(e) => {
+        if (e.pointerType === "mouse" && phaseRef.current === "idle")
+          animate(baseScale, 1, spring(SPRINGS.settle));
+      }}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerEnd}
       onPointerCancel={(e) => {
@@ -507,11 +605,12 @@ export function OrbFlow({
               </clipPath>
             </defs>
 
-            {/* THE GLASS TUBE — frosted translucent body + thin rim. */}
+            {/* THE GLASS TUBE — frosted translucent body + thin rim.
+                On paper the glass is ink-drawn: white glass vanishes at noon. */}
             <motion.path
               d={TUBE_D}
-              fill={`rgba(255,255,255,${BAR.tube.bodyAlpha})`}
-              stroke={`rgba(255,255,255,${BAR.tube.rimAlpha})`}
+              fill={chromeInk(BAR.tube.bodyAlpha)}
+              stroke={chromeInk(BAR.tube.rimAlpha * (1 + 0.9 * paper))}
               strokeWidth={1}
               style={{ opacity: tubeOpacity }}
             />
@@ -563,7 +662,9 @@ export function OrbFlow({
             marginTop: -BAR.knobPx / 2,
             borderRadius: "50%",
             background: "#FFFFFF",
-            boxShadow: `0 0 14px 2px ${fillHex}`,
+            // On paper the white bead takes a graphite hairline so it reads
+            // as an object, not a hole in the light.
+            boxShadow: `0 0 0 1px rgba(52,58,70,${(0.45 * paper).toFixed(3)}), 0 0 14px 2px ${fillHex}`,
             x: knobX,
             y: knobY,
             scale: knobScale,
@@ -620,9 +721,58 @@ export function OrbFlow({
           })}
       </AnimatePresence>
 
-      {/* One lowercase word — the only reading on screen. */}
+      {/* Learning names — the first 3 commits only: every dot says who it
+          is, just beyond its dot along the radius. Then they retire. */}
       <AnimatePresence>
-        {label && (
+        {showDots &&
+          namesOn &&
+          NAME_POS.map((pos, i) => (
+            <motion.span
+              key={`name-${EMOTIONS[i]}`}
+              style={{
+                position: "absolute",
+                left: "50%",
+                top: "50%",
+                pointerEvents: "none",
+                willChange: "transform, opacity",
+              }}
+              initial={{ x: pos.x * 0.85, y: pos.y * 0.85, opacity: 0 }}
+              animate={{
+                x: pos.x,
+                y: pos.y,
+                opacity: i === activeIdx ? 1 : TEXT.wheelNames.opacity,
+              }}
+              exit={{ opacity: 0, transition: { duration: 0.18 } }}
+              transition={{
+                x: { ...spring(SPRINGS.snappy), delay: i * WHEEL.dotStaggerS },
+                y: { ...spring(SPRINGS.snappy), delay: i * WHEEL.dotStaggerS },
+                opacity: { duration: 0.2, delay: i * WHEEL.dotStaggerS },
+              }}
+            >
+              {/* Inner span centers the word on the anchor — framer owns the
+                  outer transform, so the -50% centering must live here. */}
+              <span
+                style={{
+                  display: "inline-block",
+                  transform: "translate(-50%, -50%)",
+                  fontSize: TEXT.wheelNames.sizePx,
+                  letterSpacing: "0.08em",
+                  color: chromeInk(1),
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {EMOTIONS[i]}
+              </span>
+            </motion.span>
+          ))}
+      </AnimatePresence>
+
+      {/* One lowercase word — the only reading on screen. While the
+          learning names ride the wheel dots (first 3 commits), the big
+          label yields during the WHEEL phase so the chosen emotion's name
+          never renders twice (design review); it returns for the bar. */}
+      <AnimatePresence>
+        {label && !(namesOn && phase === "wheel") && (
           <motion.span
             key={label}
             initial={{ opacity: 0 }}
@@ -637,7 +787,7 @@ export function OrbFlow({
               x: "-50%",
               fontSize: TEXT.label.sizePx,
               letterSpacing: TEXT.label.letterSpacing,
-              color: "#FFFFFF",
+              color: chromeInk(1),
               whiteSpace: "nowrap",
               pointerEvents: "none",
             }}
@@ -647,7 +797,48 @@ export function OrbFlow({
         )}
       </AnimatePresence>
 
-      <Orb rgb={rgb} scale={scale} haloAlpha={haloAlpha} />
+      {/* the one-time gesture whisper */}
+      <AnimatePresence>
+        {hintOn && (
+          <motion.div
+            key="orb-hint"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 6, transition: { duration: 0.35 } }}
+            transition={{ delay: 2.2, duration: 0.6 }}
+            style={{
+              position: "absolute",
+              bottom: "112%",
+              left: "50%",
+              transform: "translateX(-50%)",
+              width: 210,
+              marginLeft: -105,
+              textAlign: "center",
+              pointerEvents: "none",
+              zIndex: 8,
+            }}
+          >
+            <svg width="54" height="20" viewBox="0 0 54 20" style={{ display: "block", margin: "0 auto 6px" }}>
+              <path d="M 5 16 A 24 24 0 0 1 49 16" fill="none" stroke={chromeInk(0.4)} strokeWidth="1.5" strokeLinecap="round" strokeDasharray="1 5" />
+              <circle cx="7" cy="15" r="2.6" fill={chromeInk(0.9)}>
+                <animate attributeName="cx" values="7;47;7" dur="2.6s" repeatCount="indefinite" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1" />
+              </circle>
+            </svg>
+            <span
+              style={{
+                fontSize: 12.5,
+                lineHeight: 1.5,
+                letterSpacing: "0.03em",
+                color: chromeInk(0.85),
+                textShadow: paper > 0.5 ? "none" : "0 1px 10px rgba(0,0,0,0.5)",
+              }}
+            >
+              hold the orb, then slide — how strong does it feel?
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <Orb rgb={rgb} scale={scale} haloAlpha={haloAlpha} paper={paper} />
 
       {/* The reward — never the same twice. */}
       {burst && (
@@ -672,7 +863,7 @@ export function OrbFlow({
             left: "50%",
             x: "-50%",
             fontSize: TEXT.hint.sizePx,
-            color: "#FFFFFF",
+            color: hintColor,
             letterSpacing: "0.04em",
             whiteSpace: "nowrap",
             pointerEvents: "none",

@@ -19,3 +19,32 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
 }
+
+/* Map chrome, brand-quiet (constitution: nothing generic, nothing bright).
+   Attribution stays legible per Mapbox ToS — dimmed ink, lifting on hover. */
+.mapboxgl-ctrl-logo {
+  opacity: 0.28;
+  filter: grayscale(1);
+  transition: opacity 300ms ease;
+}
+.mapboxgl-ctrl-logo:hover {
+  opacity: 0.6;
+}
+.mapboxgl-ctrl-attrib {
+  background: transparent !important;
+}
+.mapboxgl-ctrl-attrib.mapboxgl-compact {
+  background: rgba(14, 15, 20, 0.55) !important;
+  border: 1px solid rgba(233, 236, 244, 0.1);
+}
+.mapboxgl-ctrl-attrib a,
+.mapboxgl-ctrl-attrib-button {
+  color: rgba(233, 236, 244, 0.35) !important;
+  transition: color 300ms ease;
+}
+.mapboxgl-ctrl-attrib a:hover {
+  color: rgba(233, 236, 244, 0.7) !important;
+}
+.mapboxgl-ctrl-attrib-button {
+  filter: invert(0.8) opacity(0.5);
+}

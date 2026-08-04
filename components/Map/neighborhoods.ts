@@ -108,10 +108,24 @@ function globalOpacity(zoom: number): number {
  * no letter-spacing; thin spaces between characters carry the tracking.) */
 const track = (s: string) => s.split("").join(" ");
 
-function buildBoroughLayer(zoom: number) {
+/** Label ink: whisper-white on the night city, graphite on the paper day.
+ *  Alpha rises a touch on paper — dark-on-light needs more presence for the
+ *  same whisper. */
+function labelColor(alpha: number, paper: number): [number, number, number, number] {
+  const mix = (a: number, b: number) => Math.round(a + (b - a) * paper);
+  return [mix(233, 52), mix(236, 58), mix(244, 70), mix(alpha, Math.min(255, alpha * 1.5))];
+}
+
+function buildBoroughLayer(zoom: number, paper: number, dims?: number[], dim = 1) {
   const { from, to } = LABELS.boroughFadeOut;
   const t = Math.min(1, Math.max(0, (zoom - from) / (to - from)));
-  const opacity = 1 - t * t * (3 - 2 * t);
+  // Fade out BOTH ways: up into neighborhoods, and down into the world —
+  // at world zoom all five caps otherwise collapse onto one constellation
+  // as garbled text (design review; reachable since the journal unlocked
+  // the camera below the old minZoom).
+  const fi = LABELS.boroughFadeIn;
+  const ti = Math.min(1, Math.max(0, (zoom - fi.from) / (fi.to - fi.from)));
+  const opacity = (1 - t * t * (3 - 2 * t)) * (ti * ti * (3 - 2 * ti)) * dim;
   return new TextLayer<(typeof LABELS.boroughs)[number]>({
     id: "borough-labels",
     data: LABELS.boroughs,
@@ -120,7 +134,11 @@ function buildBoroughLayer(zoom: number) {
     getPosition: (d) => d.anchor,
     getText: (d) => track(d.name),
     getSize: LABELS.boroughSizePx,
-    getColor: [233, 236, 244, LABELS.boroughAlpha],
+    // A cap dims further when bright feeling pools beneath it — no label
+    // ever fights a feeling (dims come from MapStage, 1 = undimmed).
+    getColor: (_, { index }) =>
+      labelColor(Math.round(LABELS.boroughAlpha * (dims?.[index] ?? 1)), paper),
+    updateTriggers: { getColor: [paper, ...(dims ?? [])] },
     fontFamily: "Inter, system-ui, sans-serif",
     fontWeight: 500,
     fontSettings: { sdf: true, smoothing: 0.32 },
@@ -153,8 +171,17 @@ function tiersOf(data: LabelDatum[]) {
 /** Borough layer + three neighborhood TextLayers (one per tier), opacity
  *  recomputed per zoom — the caller feeds these into overlay.setProps on map
  *  move (no React churn). */
-export function buildLabelLayers(data: LabelDatum[], zoom: number) {
-  const g = globalOpacity(zoom);
+export function buildLabelLayers(
+  data: LabelDatum[],
+  zoom: number,
+  paper = 0,
+  boroughDims?: number[],
+  /** THE QUIET GROUND (private redesign, 07-17): the veil's crossfade
+   *  also settles the names — in the journal, no word outshines the
+   *  dimmest lantern (brightness hierarchy). 1 = public, untouched. */
+  dim = 1,
+) {
+  const g = globalOpacity(zoom) * dim;
   const tierData = tiersOf(data);
   const tiers = [0, 1, 2].map((tier) => {
     const opacity = tierOpacity(zoom, LABELS.tierZoom[tier]) * g;
@@ -166,7 +193,7 @@ export function buildLabelLayers(data: LabelDatum[], zoom: number) {
       getPosition: (d) => d.anchor,
       getText: (d) => (LABELS.uppercase ? d.name.toUpperCase() : d.name),
       getSize: LABELS.sizePx[tier],
-      getColor: [233, 236, 244, LABELS.alpha[tier]],
+      getColor: labelColor(LABELS.alpha[tier], paper),
       fontFamily: "Inter, system-ui, sans-serif",
       fontWeight: 500,
       fontSettings: { sdf: true, smoothing: 0.32 },
@@ -176,5 +203,5 @@ export function buildLabelLayers(data: LabelDatum[], zoom: number) {
       parameters: { depthWriteEnabled: false },
     });
   });
-  return [buildBoroughLayer(zoom), ...tiers];
+  return [buildBoroughLayer(zoom, paper, boroughDims, dim), ...tiers];
 }

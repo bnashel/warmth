@@ -40,47 +40,85 @@ const POCKETS: [number, number, Emotion, number][] = [
   [-73.958, 40.714, "energy", 8.5], // Williamsburg
   [-73.95, 40.729, "calm", 6], // Greenpoint
   [-73.941, 40.686, "joy", 7.5], // Bed-Stuy
-  [-73.99, 40.703, "awe", 8], // DUMBO
+  [-73.99, 40.703, "gratitude", 8], // DUMBO (was awe — removed 2026-07-02)
   [-73.977, 40.669, "calm", 7], // Park Slope
   [-73.969, 40.661, "calm", 8], // Prospect Park
   [-73.944, 40.668, "love", 6.5], // Crown Heights
   [-74.005, 40.645, "love", 5.5], // Sunset Park
   [-73.985, 40.578, "joy", 6.5], // Coney Island
   [-73.917, 40.695, "energy", 6], // Bushwick
-  [-73.902, 40.635, "reflective", 4.5], // Canarsie-ish
+  [-73.902, 40.635, "gratitude", 4.5], // Canarsie-ish
   // Manhattan
   [-73.984, 40.727, "joy", 8], // East Village
-  [-73.997, 40.716, "reflective", 6], // Chinatown
-  [-74.012, 40.705, "awe", 7], // FiDi
+  [-73.997, 40.716, "gratitude", 6], // Chinatown
+  [-74.012, 40.705, "energy", 7], // FiDi (was awe — removed 2026-07-02)
   [-74.003, 40.735, "love", 8.5], // West Village
   [-73.985, 40.755, "energy", 9], // Times Square
-  [-73.978, 40.765, "awe", 6.5], // Columbus Circle
+  [-73.978, 40.765, "joy", 6.5], // Columbus Circle (was awe — removed 2026-07-02)
   [-73.966, 40.782, "calm", 7.5], // Central Park
   [-73.978, 40.788, "love", 6], // UWS
   [-73.955, 40.777, "calm", 5.5], // UES
   [-73.945, 40.809, "joy", 8], // Harlem
-  [-73.938, 40.845, "reflective", 6], // Washington Heights
+  [-73.938, 40.845, "gratitude", 6], // Washington Heights
   [-73.99, 40.744, "energy", 6.5], // Flatiron
   // Queens
   [-73.923, 40.771, "love", 6.5], // Astoria
-  [-73.94, 40.745, "awe", 7], // Long Island City
+  [-73.94, 40.745, "energy", 7], // Long Island City (was awe — removed 2026-07-02)
   [-73.883, 40.748, "love", 5.5], // Jackson Heights
   [-73.83, 40.759, "joy", 6.5], // Flushing
-  [-73.858, 40.7, "reflective", 5], // Forest Hills
+  [-73.858, 40.7, "gratitude", 5], // Forest Hills
   [-73.795, 40.707, "joy", 5], // Jamaica
+  // …and the east/coast (2026-07-08: these were pitch black — the old
+  // ellipse landmass missed them entirely; no place is a void):
+  [-73.845, 40.735, "joy", 5], // Flushing Meadows-Corona Park
+  [-73.765, 40.697, "gratitude", 4.5], // St. Albans
+  [-73.77, 40.765, "calm", 4.5], // Bayside
+  [-73.86, 40.58, "calm", 5], // the Rockaways (beach air)
   // The Bronx
   [-73.92, 40.827, "energy", 6.5], // South Bronx
   [-73.877, 40.86, "calm", 5.5], // Bronx Park
-  [-73.905, 40.881, "reflective", 4.5], // Riverdale-ish
+  [-73.905, 40.881, "gratitude", 4.5], // Riverdale-ish
+  [-73.828, 40.85, "love", 4.5], // Parkchester / eastern Bronx
   // Staten Island
-  [-74.077, 40.641, "reflective", 5.5], // St. George
+  [-74.077, 40.641, "gratitude", 5.5], // St. George
   [-74.15, 40.58, "calm", 5], // mid-island
   [-74.19, 40.54, "calm", 4.5], // south shore
 ];
 
-/** Borough landmasses as (optionally rotated) ellipses — coarse on purpose;
- *  the field's soft kernels forgive a little shoreline spill. */
-const LAND: { cx: number; cy: number; rx: number; ry: number; rotDeg: number }[] = [
+/** THE REAL LANDMASS (2026-07-08): the wash walks the same NTA polygons the
+ *  land mask is built from — parks, airports, and cemeteries included — so
+ *  ambient feeling reaches every place the field is allowed to live. The
+ *  old borough ellipses missed eastern Queens, the Rockaways, and City
+ *  Island entirely (Eli's dead-space report); they remain only as the
+ *  fetch-failure fallback so the city is never a void. */
+const LAND_URL = "/data/nyc-landareas.json";
+
+type LandPoly = { rings: number[][][]; bbox: [number, number, number, number] };
+let landPolys: LandPoly[] | null = null;
+let landLoad: Promise<void> | null = null;
+
+async function loadLand(): Promise<void> {
+  try {
+    const res = await fetch(LAND_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = (await res.json()) as { polygons: number[][][][] };
+    landPolys = data.polygons.map((rings) => {
+      let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
+      for (const [x, y] of rings[0]) {
+        if (x < w) w = x;
+        if (x > e) e = x;
+        if (y < s) s = y;
+        if (y > n) n = y;
+      }
+      return { rings, bbox: [w, s, e, n] };
+    });
+  } catch (err) {
+    console.warn("warmth: land polygons unavailable, wash falls back to ellipses", err);
+  }
+}
+
+/** Fallback borough ellipses — coarse; used only if the land fetch fails. */
+const LAND_FALLBACK: { cx: number; cy: number; rx: number; ry: number; rotDeg: number }[] = [
   { cx: -73.967, cy: 40.788, rx: 0.016, ry: 0.088, rotDeg: -17 }, // Manhattan (tilted)
   { cx: -73.944, cy: 40.655, rx: 0.066, ry: 0.056, rotDeg: 0 }, // Brooklyn
   { cx: -73.85, cy: 40.72, rx: 0.095, ry: 0.052, rotDeg: 0 }, // Queens
@@ -93,7 +131,25 @@ const SPACING_LNG = 0.018;
 const SPACING_LAT = 0.0145;
 
 function insideLand(lng: number, lat: number): boolean {
-  for (const e of LAND) {
+  if (landPolys) {
+    for (const p of landPolys) {
+      const [w, s, e, n] = p.bbox;
+      if (lng < w || lng > e || lat < s || lat > n) continue;
+      let inside = false;
+      for (const ring of p.rings) {
+        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+          const [xa, ya] = ring[i];
+          const [xb, yb] = ring[j];
+          if (ya > lat !== yb > lat && lng < xa + ((lat - ya) / (yb - ya)) * (xb - xa)) {
+            inside = !inside;
+          }
+        }
+      }
+      if (inside) return true;
+    }
+    return false;
+  }
+  for (const e of LAND_FALLBACK) {
     const rad = (e.rotDeg * Math.PI) / 180;
     const dx = lng - e.cx;
     const dy = lat - e.cy;
@@ -134,15 +190,22 @@ function washEmotion(lng: number, lat: number, roll: number): Emotion {
 }
 
 /**
- * The standing city: ~90 pocket moments + ~200 wash moments, ages staggered
- * across the last 12h so the recency fade gives the water natural depth.
+ * The standing city: ~100 pocket moments + wash moments across the REAL
+ * landmass, ages staggered across the last 12h so the recency fade gives
+ * the water natural depth. Async: waits (once) for the land polygons —
+ * on fetch failure it degrades to the ellipse fallback, never a blocker.
  */
-export function ambientSeedMoments(): Moment[] {
+export async function ambientSeedMoments(): Promise<Moment[]> {
+  await (landLoad ??= loadLand());
+  return buildMoments();
+}
+
+function buildMoments(): Moment[] {
   const rng = mulberry32(0x5eed);
   const now = Date.now();
   const moments: Moment[] = [];
   let i = 0;
-  const push = (lng: number, lat: number, emotion: Emotion, intensity: number) => {
+  const push = (lng: number, lat: number, emotion: Emotion, intensity: number, wash = false) => {
     moments.push({
       id: `ambient-${i++}`,
       emotion,
@@ -151,33 +214,38 @@ export function ambientSeedMoments(): Moment[] {
       lat,
       createdAt: now - rng() * 12 * 3600_000,
       seed: true,
+      ...(wash ? { wash: true } : {}),
     });
   };
 
-  // Pockets: 2–3 moments each, scattered ~600m, strength wobbling ±1.5.
+  // Pockets: 2–3 moments each, scattered ~200m (tightened 2026-07-08 for
+  // the 1/16-mile kernels — a pocket must read as ONE local glow, not a
+  // scatter of separate dots), strength wobbling ±1.5.
   for (const [lng, lat, emotion, strength] of POCKETS) {
     const n = 2 + Math.round(rng());
     for (let k = 0; k < n; k++) {
       push(
-        lng + (rng() - 0.5) * 0.012,
-        lat + (rng() - 0.5) * 0.01,
+        lng + (rng() - 0.5) * 0.004,
+        lat + (rng() - 0.5) * 0.0032,
         emotion,
         strength + (rng() - 0.5) * 3,
       );
     }
   }
 
-  // Wash: the thin water itself. Jittered lattice over each landmass,
-  // low intensity, 85% keep-rate so the sheet stays organic.
+  // Wash: the thin water itself. Jittered lattice over the real landmass,
+  // low intensity, 92% keep-rate (2026-07-08: was 85% — the merged look
+  // wants an unbroken quiet base; no land cell may read as a void).
   for (let lng = -74.24; lng <= -73.72; lng += SPACING_LNG) {
     for (let lat = 40.5; lat <= 40.92; lat += SPACING_LAT) {
       if (!insideLand(lng, lat)) continue;
-      if (rng() > 0.85) continue;
+      if (rng() > 0.92) continue;
       push(
         lng + (rng() - 0.5) * 0.008,
         lat + (rng() - 0.5) * 0.006,
         washEmotion(lng, lat, rng()),
-        1 + rng() * 2,
+        1.5 + rng() * 2,
+        true, // the under-wash: wide dim skirt, never an entry
       );
     }
   }
