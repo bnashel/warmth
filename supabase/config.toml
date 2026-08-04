@@ -144,10 +144,9 @@ max_catalogs = 2
 # [storage.analytics.buckets.my-warehouse]
 
 # Store vector embeddings in S3 for large and durable datasets
+# (disabled: Pro-plan feature — `config push` 402s with it enabled)
 [storage.vector]
-enabled = true
-max_buckets = 10
-max_indexes = 5
+enabled = false
 
 # Vector Buckets is available to Supabase Pro plan.
 # [storage.vector.buckets.documents-openai]
@@ -156,11 +155,20 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
-site_url = "http://127.0.0.1:3000"
+# Sign-in is CODE-based (see [auth.email.template.magic_link]): the emailed
+# six-digit code is typed into the wall, so no email link ever redirects.
+# site_url still matters for future OAuth callbacks; the allow-list covers
+# local dev and every Vercel preview/production URL of this project.
+site_url = "http://localhost:3000"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://127.0.0.1:3000"]
+additional_redirect_urls = [
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "https://warmth-three.vercel.app",
+  "https://*-benjamin-nashels-projects.vercel.app",
+]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
@@ -247,6 +255,22 @@ otp_expiry = 3600
 # [auth.email.template.invite]
 # subject = "You have been invited"
 # content_path = "./supabase/templates/invite.html"
+
+# THE SIGN-IN EMAIL SHOULD BE CODE-ONLY (Ben, 2026-08-04). No link on
+# purpose: mail apps prefetch links and consume the one-time token before
+# the human ever taps (observed on iCloud Mail — the link arrived already
+# expired), and a link signs in the wrong device when email is read
+# elsewhere. A typed six-digit code has neither problem.
+#
+# COMMENTED because the free tier's built-in sender locks templates
+# ("Email template modification is not available for free tier projects
+# using the default email provider"). The template file is ready in
+# supabase/templates/. TO ENABLE: set up custom SMTP (SendGrid/Brevo free
+# tier, single-sender verification), fill [auth.email.smtp] above, then
+# uncomment these three lines and run `npx supabase config push`.
+# [auth.email.template.magic_link]
+# subject = "your warmth code"
+# content_path = "./supabase/templates/magic_link.html"
 
 # Uncomment to customize notification email template
 # [auth.email.notification.password_changed]

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Inter } from "next/font/google";
 import { EMOTION_HUES, SPRING } from "@/lib/theme";
-import { signInWithEmail } from "@/lib/auth";
+import { signInWithEmail, verifyEmail } from "@/lib/auth";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
 
@@ -12,16 +12,21 @@ const inter = Inter({ subsets: ["latin"], weight: ["400", "500"] });
 const HUE_RIBBON = `linear-gradient(90deg, ${EMOTION_HUES.joy}, ${EMOTION_HUES.energy}, ${EMOTION_HUES.love}, ${EMOTION_HUES.gratitude}, ${EMOTION_HUES.calm})`;
 
 /**
- * The wall, simplified to the ONE path that works today (Eli, 2026-07-09):
- * email → tap the link. Bigger type, one field, one button. Google and
+ * The wall (Eli, 2026-07-09; code entry added Ben, 2026-08-04): email →
+ * then EITHER tap the emailed link on this device OR type the six-digit
+ * code. The code path exists because mail apps prefetch links and burn
+ * the one-time token before the human taps (observed on iCloud), and a
+ * link can't sign in a device that reads its email elsewhere. Google and
  * phone return when Ben lands OAuth/Twilio credentials (handoff doc);
- * Apple is dropped (Eli's call). A type-a-code step returns with custom
- * SMTP (free-tier emails are link-only). The living city breathes behind
- * the glass; every state change is a spring — nothing pops (rule 4).
+ * Apple is dropped (Eli's call). Emails carry the code once custom SMTP
+ * lands (free-tier template is locked to link-only — see config.toml).
+ * The living city breathes behind the glass; every state change is a
+ * spring — nothing pops (rule 4).
  */
 export function AuthOverlay() {
   const [email, setEmail] = useState("");
-  const [stage, setStage] = useState<"ask" | "sending" | "sent">("ask");
+  const [stage, setStage] = useState<"ask" | "sending" | "sent" | "checking">("ask");
+  const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   async function send() {
@@ -38,6 +43,25 @@ export function AuthOverlay() {
       setStage("ask");
       setError(res.error);
     }
+  }
+
+  async function check(candidate: string) {
+    setError(null);
+    setStage("checking");
+    const res = await verifyEmail(email.trim(), candidate);
+    if (res.error) {
+      // Session arrival is what dismisses the wall; here only failure needs a voice.
+      setStage("sent");
+      setCode("");
+      setError("that code didn't take — check it, or send a fresh one");
+    }
+  }
+
+  // Digits only, six of them; the sixth submits on its own.
+  function onCode(v: string) {
+    const digits = v.replace(/\D/g, "").slice(0, 6);
+    setCode(digits);
+    if (digits.length === 6) void check(digits);
   }
 
   return (
@@ -110,7 +134,7 @@ export function AuthOverlay() {
         </p>
 
         <AnimatePresence mode="wait">
-          {stage !== "sent" ? (
+          {stage === "ask" || stage === "sending" ? (
             <motion.div key="ask" exit={{ opacity: 0, y: -8 }} transition={SPRING.settle}>
               <input
                 type="email"
@@ -185,15 +209,53 @@ export function AuthOverlay() {
                   margin: "12px 0 0",
                 }}
               >
-                tap the link in it on this device
+                type your six-digit code here —
                 <br />
-                and you&apos;ll land right back here, signed in
+                or tap the emailed link on this device
               </p>
+              <input
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                autoFocus
+                placeholder="······"
+                value={code}
+                disabled={stage === "checking"}
+                onChange={(e) => onCode(e.target.value)}
+                aria-label="six-digit sign-in code"
+                style={{
+                  width: "100%",
+                  marginTop: 22,
+                  padding: "15px 18px",
+                  borderRadius: 16,
+                  border: "1px solid rgba(233,236,244,0.18)",
+                  background: "rgba(233,236,244,0.06)",
+                  color: "rgba(233,236,244,0.95)",
+                  fontSize: 26,
+                  letterSpacing: "0.42em",
+                  textAlign: "center",
+                  outline: "none",
+                  opacity: stage === "checking" ? 0.55 : 1,
+                }}
+              />
+              {stage === "checking" && (
+                <p style={{ fontSize: 14, color: "rgba(233,236,244,0.5)", margin: "12px 0 0" }}>
+                  checking…
+                </p>
+              )}
+              {error && (
+                <p style={{ fontSize: 14.5, color: EMOTION_HUES.energy, margin: "12px 0 0" }}>
+                  {error}
+                </p>
+              )}
               <button
                 type="button"
-                onClick={() => setStage("ask")}
+                onClick={() => {
+                  setCode("");
+                  setError(null);
+                  setStage("ask");
+                }}
                 style={{
-                  marginTop: 26,
+                  marginTop: 24,
                   padding: "10px 18px",
                   borderRadius: 999,
                   border: "1px solid rgba(233,236,244,0.16)",
