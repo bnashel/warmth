@@ -183,6 +183,32 @@ export function AuthOverlay() {
                   {error}
                 </p>
               )}
+              {/* The code panel must be reachable even when sending is rate
+                  limited (2 emails/hour on the built-in sender) — a code can
+                  arrive out-of-band while the send itself fails. */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (!email.trim().includes("@")) {
+                    setError("type your email first — the code belongs to it");
+                    return;
+                  }
+                  setError(null);
+                  setStage("sent");
+                }}
+                style={{
+                  marginTop: 18,
+                  padding: "8px 16px",
+                  borderRadius: 999,
+                  border: "none",
+                  background: "transparent",
+                  color: "rgba(233,236,244,0.45)",
+                  fontSize: 13.5,
+                  cursor: "pointer",
+                }}
+              >
+                already have a code?
+              </button>
             </motion.div>
           ) : (
             <motion.div
