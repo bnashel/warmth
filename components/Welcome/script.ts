@@ -51,7 +51,7 @@ export const WELCOME_STEPS: WelcomeStep[] = [
   },
   {
     id: "public",
-    lines: ["every light is someone, feeling something — right now"],
+    lines: ["every light is someone, feeling something right now"],
     tag: "where × what",
     legend: true,
     // the public view's own caption, verbatim — met again in the HUD
@@ -59,15 +59,15 @@ export const WELCOME_STEPS: WelcomeStep[] = [
   },
   {
     id: "private",
-    lines: ["you keep a second map — only you can see this"],
+    lines: ["you keep a second map. only you can see this"],
     tag: "where × what × when",
-    note: { film: "a glimpse — yours begins tonight" },
+    note: { film: "a glimpse. yours begins tonight" },
   },
   {
     id: "orb",
     // The ghost narrates its own phases (GHOST_CAPTIONS) — these lines are
     // only the fallback before the first gesture begins.
-    lines: ["press and hold — slide to a feeling, then how strong"],
+    lines: ["press and hold. slide to a feeling, then how strong"],
   },
   {
     id: "yours",
@@ -79,8 +79,8 @@ export const WELCOME_STEPS: WelcomeStep[] = [
 /** Captions the orb step swaps through as the ghost hand moves. */
 export const GHOST_CAPTIONS = {
   press: "press and hold",
-  wheel: "five feelings fan out — slide to one",
-  bar: "hold it — then how strong?",
+  wheel: "five feelings fan out. slide to one",
+  bar: "hold it, then how strong?",
   burst: "stronger burns brighter",
 } as const;
 

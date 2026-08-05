@@ -124,15 +124,9 @@ export default function OneScreen() {
   // Post-commit whisper: a small confirmation near where the light landed.
   const [whisper, setWhisper] = useState<{ text: string; x: number; y: number } | null>(null);
   const whisperTimer = useRef<number | null>(null);
-  // Learning mode: the first 3 commits name every picker dot (persisted —
-  // storage can be blocked; never worth throwing over).
-  const [commitCount, setCommitCount] = useState(() => {
-    try {
-      return Number(window.localStorage.getItem("warmth-commit-count") ?? 0) || 0;
-    } catch {
-      return 0;
-    }
-  });
+  // (Learning labels retired 07-27, Eli: names around the wheel crowded
+  // the orb. The single active-emotion word above the orb and the legend
+  // carry the teaching now — OrbFlow's namesOn stays available.)
   // Aurora time-gap whisper (thread looks): tap a connection between two
   // memories and the time between them surfaces there, then breathes away.
   const [gapChip, setGapChip] = useState<{ text: string; x: number; y: number } | null>(null);
@@ -344,16 +338,6 @@ export default function OneScreen() {
     // The welcome (if one is playing) dissolves on this exact beat — the
     // burst has just begun; the first real feeling completes the walkthrough.
     notifyWelcomeCommit({ emotion, intensity });
-    // Learning labels retire after the third commit.
-    setCommitCount((n) => {
-      const next = n + 1;
-      try {
-        window.localStorage.setItem("warmth-commit-count", String(next));
-      } catch {
-        /* storage blocked — labels just stay a session longer */
-      }
-      return next;
-    });
     // The burst is playing on the orb. One beat of silence, then the city
     // receives it — the bloom continues the burst's outward motion.
     window.setTimeout(() => {
@@ -654,7 +638,7 @@ export default function OneScreen() {
           hintWord="hold"
           hintColor={paperText(1)}
           paper={paper}
-          namesOn={commitCount < 3}
+          muted={hintsMuted}
           gestureDepth={gestureDepth}
           onCommit={handleCommit}
         />
@@ -695,9 +679,10 @@ export default function OneScreen() {
         )}
       </AnimatePresence>
 
-      {/* On this day — the journal greets you with an old feeling. */}
+      {/* On this day — the journal greets you with an old feeling. Never
+          while a walkthrough narrates (one teacher at a time). */}
       <AnimatePresence>
-        {view === "private" && onThisDay && (
+        {view === "private" && onThisDay && !hintsMuted && (
           <motion.button
             type="button"
             initial={{ opacity: 0, y: -6 }}
@@ -818,15 +803,17 @@ export default function OneScreen() {
         )}
       </AnimatePresence>
 
-      {/* THE ONE GALLERY (merge, 07-13): every look from both trunks —
-          Eli's nine, Ben's four pond looks, and the PAPER WORLD — one
-          dropdown, live switches. Dev builds (or ?looks=1). */}
-      {galleryOn && <LookGallery />}
-      {/* THE LEGEND (07-14): five glowing dots, bottom-left — which color
-          is which feeling. Reads over night and paper alike. In private
-          it becomes THE EMOTION LENS (07-17): tap a feeling to see only
-          it — where does my calm live? — tap again to release. */}
-      <EmotionLegend interactive={view === "private"} />
+      {/* THE ONE GALLERY (merge, 07-13) + THE LEGEND/LENS (07-14/17).
+          Both breathe away while a walkthrough narrates (07-27): the film
+          owns the stage — no chips, no duplicate legend under its words. */}
+      <motion.div
+        animate={{ opacity: hintsMuted ? 0 : 1 }}
+        transition={{ duration: 0.6, ease: "easeInOut" }}
+        style={{ pointerEvents: hintsMuted ? "none" : "auto" }}
+      >
+        {galleryOn && <LookGallery />}
+        <EmotionLegend interactive={view === "private"} />
+      </motion.div>
 
       {/* THE FIRST HELLO is now Ben's welcome film (Eli's call, 07-27):
           WELCOME_DEFAULT in Welcome/script.ts auto-plays it for first
