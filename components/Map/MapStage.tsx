@@ -302,6 +302,10 @@ export default function MapStage({
       if (document.visibilityState !== "visible") return;
       const map = mapRef.current?.getMap();
       if (!map || !loaded.current) return;
+      // Never mid-gesture (mobile audit, 07-27): re-setting road paint
+      // expressions re-binds paint across every loaded tile — a hitch
+      // that landed inside pinches. The sky can wait a second.
+      if (map.isMoving()) return;
       applyAtmosphereInk(map, atmosphere.current);
       // The veil wears the same graded ground tone the ink just landed on.
       if (map.getLayer("private-veil")) {
@@ -508,16 +512,23 @@ export default function MapStage({
       // In the journal the names settle with the veil — no word may
       // outshine the dimmest lantern (design review; brightness law).
       const labelDim = 1 - viewMix.current * LABELS.privateDim;
+      // Mid-pinch the labels rebuild at a coarser step (mobile audit,
+      // 07-27): a fast pinch across four zoom levels was ~80 TextLayer
+      // rebuilds; at 0.25 it's ~16, and the fine step returns on settle.
+      const zoomStep = map.isZooming() ? 0.25 : 0.05;
       const labelsStale =
         !labelCache.current ||
-        Math.abs(labelCache.current.zoom - zoom) > 0.05 || // 07-14: was 0.02 = every frame mid-zoom
+        Math.abs(labelCache.current.zoom - zoom) > zoomStep ||
         Math.abs(labelCache.current.paper - inkWeight(atmo)) > 0.04 ||
         Math.abs(labelCache.current.dim - labelDim) > 0.03 ||
         labelCache.current.dimsKey !== dimsKey;
       if (labelsStale) {
         labelCache.current = {
           zoom,
-          paper: atmo.paper,
+          // inkWeight, NOT atmo.paper (mobile audit bugfix): the staleness
+          // check compares against inkWeight, and in the paper world the
+          // two never matched — labels rebuilt every single frame.
+          paper: inkWeight(atmo),
           dimsKey,
           dim: labelDim,
           layers: buildLabelLayers(labelData.current, zoom, inkWeight(atmo), boroughDims, labelDim),
@@ -570,9 +581,14 @@ export default function MapStage({
         onLoad={(e) => {
           const map = e.target;
           // Motion is a choice, not a default: heavy-glass pan, anchored
-          // zoom. Rotation is on (two fingers / right-drag); pitch stays off.
+          // zoom. Pitch stays off. TOUCH rotation is off (mobile audit,
+          // 07-27): with it on, every pinch also rotated the map — the
+          // classic "glitchy zoom". Desktop right-drag rotation stays,
+          // and the north chip still brings you home. The flag survives
+          // the orb-hold freeze's disable/enable cycle.
           map.dragPan.enable(MOTION.dragPan);
           map.scrollZoom.setWheelZoomRate(MOTION.wheelZoomRate);
+          map.touchZoomRotate.disableRotation();
           // THE FIELD — added after the base layers; deck pins its label
           // groups above it, so names stay readable over the light.
           // A shader-compile failure (seen once: driver returned a null
@@ -625,7 +641,10 @@ export default function MapStage({
           loaded.current = true;
           onMapReady?.(map);
         }}
-        onMove={(e) => {
+        onMoveEnd={(e) => {
+          // Chips settle in when the camera settles (mobile audit, 07-27):
+          // deciding them on every move event re-rendered the stage mid-
+          // pinch each time a threshold flipped. moveend is soon enough.
           const v = e.viewState;
           setRotated(Math.abs(v.bearing) > 0.5);
           // "Away" = meaningfully off the settled home shot — generous

@@ -310,7 +310,7 @@ export default function OneScreen() {
       } else if (d <= 0.02 && frozen) {
         frozen = false;
         map.dragPan.enable(MOTION.dragPan);
-        map.touchZoomRotate.enable(); // rotation stays on (Ben's call)
+        map.touchZoomRotate.enable(); // pinch zoom back; touch rotation stays off (07-27 — the flag survives this cycle)
         map.scrollZoom.enable();
         map.scrollZoom.setWheelZoomRate(MOTION.wheelZoomRate);
       }
@@ -407,6 +407,11 @@ export default function OneScreen() {
         background: "#0A0B0F",
         overflow: "hidden",
         overscrollBehavior: "none",
+        // THE GESTURE LOCK (mobile audit, 07-27): every touch starts
+        // inside this stage, and none of it belongs to the browser — no
+        // page pinch-zoom, no double-tap zoom, no rubber-band. The map's
+        // and orb's own handlers keep receiving everything.
+        touchAction: "none",
         userSelect: "none",
         WebkitUserSelect: "none",
       }}
@@ -486,14 +491,15 @@ export default function OneScreen() {
         <div
           role="group"
           aria-label="Map view"
+          // glass-blur: frosted on desktop only (mobile audit — backdrop
+          // blur over the live canvas is a per-frame readback on phones).
+          className="glass-blur"
           style={{
             display: "flex",
             padding: 3,
             borderRadius: 999,
-            background: "rgba(10,11,15,0.55)",
+            background: "rgba(10,11,15,0.62)",
             border: "1px solid rgba(233,236,244,0.14)",
-            backdropFilter: "blur(14px)",
-            WebkitBackdropFilter: "blur(14px)",
           }}
         >
           {VIEWS.map((v) => (

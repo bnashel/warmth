@@ -107,7 +107,15 @@ const getClusterRadius = (d: LanternCluster) =>
 /* Per-frame identity caches — the trail rebuilds layers every push while
  * visible, but attribute uploads only happen when DATA identity changes,
  * so derived arrays are cached on version (same story as the siblings). */
-let clusterCache: { key: string; data: LivePoint[]; clusters: LanternCluster[] } | null = null;
+let clusterCache: {
+  key: string;
+  data: LivePoint[];
+  clusters: LanternCluster[];
+  /** The counts subset, cached WITH the clusters (mobile audit, 07-27):
+   *  a fresh .filter() every push changed the TextLayer's data identity
+   *  and re-laid glyphs out every frame the journal was visible. */
+  counted: LanternCluster[];
+} | null = null;
 let ringCache: { version: number; data: LivePoint[]; remembered: LivePoint[] } | null = null;
 let cueCache: {
   version: number;
@@ -115,14 +123,17 @@ let cueCache: {
   first: LivePoint;
   last: LivePoint;
   began: string;
+  /** Stable cue-array identity (same audit finding as `counted`). */
+  arr: LivePoint[];
 } | null = null;
 
-function cachedClusters(data: LivePoint[], version: number, zoom: number): LanternCluster[] {
+function cachedClusters(data: LivePoint[], version: number, zoom: number) {
   const key = `${version}:${Math.round(zoom * 4) / 4}`;
   if (!clusterCache || clusterCache.key !== key || clusterCache.data !== data) {
-    clusterCache = { key, data, clusters: clusterLanterns(data, zoom) };
+    const clusters = clusterLanterns(data, zoom);
+    clusterCache = { key, data, clusters, counted: clusters.filter((c) => c.count > 1) };
   }
-  return clusterCache.clusters;
+  return clusterCache;
 }
 
 function cachedRemembered(data: LivePoint[], version: number): LivePoint[] {
@@ -172,12 +183,23 @@ export function buildLanternTrailLayers(
 ) {
   if (fade < 0.01 || data.length === 0) return [];
 
+  // THE GATHERED CROSSFADE (mobile audit, 07-27): the old hard branch at
+  // belowZoom swapped entire layer sets in one frame — a visible pop plus
+  // a model/glyph-atlas rebuild hitch landing mid-pinch. The gathered and
+  // street lanterns now overlap across a ±0.3-zoom band and trade
+  // presence smoothly; outside the band exactly one set renders, as before.
+  const bz = TRAIL.spark.cluster.belowZoom;
+  const bandT = Math.min(1, Math.max(0, (bz + 0.3 - zoom) / 0.6));
+  const clusterW = data.length > 1 ? bandT * bandT * (3 - 2 * bandT) : 0;
+  const layers = [];
+
   // THE GATHERED LANTERNS: zoomed out, nearby moments hang as one lamp
   // sized by how many it holds; tap to descend.
-  if (zoom < TRAIL.spark.cluster.belowZoom && data.length > 1) {
-    const clusters = cachedClusters(data, version, zoom);
+  if (clusterW > 0.01) {
+    const cfade = fade * clusterW;
+    const { clusters, counted } = cachedClusters(data, version, zoom);
     const clusterNight = 1 - paper;
-    const light = lanternLight(fade);
+    const light = lanternLight(cfade);
     const shared = {
       data: clusters,
       getPosition: (d: GlowDatum) => d.position,
@@ -191,7 +213,7 @@ export function buildLanternTrailLayers(
       timeSec,
       radiusScale: 1,
     };
-    return [
+    layers.push(
       // Halo only where added light is visible (the night worlds) — on
       // bone it was a wasted draw call (code review). Tighter than the
       // street-zoom halo: at world distance neighboring clusters must
@@ -204,7 +226,7 @@ export function buildLanternTrailLayers(
               pickable: false,
               radiusScale: L.halo.radiusFactor * 0.72,
               radiusMaxPixels: TRAIL.spark.cluster.maxRadiusPx * L.halo.radiusFactor * 0.72,
-              light: { ...light.halo, gain: L.halo.gain * fade * 0.8 * clusterNight },
+              light: { ...light.halo, gain: L.halo.gain * cfade * 0.8 * clusterNight },
               parameters: ADDITIVE_LIGHT,
             }),
           ]
@@ -223,20 +245,20 @@ export function buildLanternTrailLayers(
       }),
       new TextLayer<LanternCluster>({
         id: "journal-lantern-counts",
-        data: clusters.filter((c) => c.count > 1),
+        data: counted,
         getPosition: (d) => d.position,
         getText: (d) => String(d.count),
         getSize: TRAIL.spark.countLabel.sizePx,
         // The count whispers in the cluster's own hue — no white lives
         // in the journal (Eli, 2026-07-08; the lantern keeps the law).
         getColor: (d: LanternCluster) =>
-          [d.hue[0], d.hue[1], d.hue[2], Math.round(TRAIL.spark.countLabel.alpha * fade)] as [
+          [d.hue[0], d.hue[1], d.hue[2], Math.round(TRAIL.spark.countLabel.alpha * cfade)] as [
             number,
             number,
             number,
             number,
           ],
-        updateTriggers: { getColor: [version, Math.round(fade * 32)] },
+        updateTriggers: { getColor: [version, Math.round(cfade * 32)] },
         getPixelOffset: (d: LanternCluster) => [0, -(getClusterRadius(d) + 11)] as [number, number],
         fontFamily: "Inter, system-ui, sans-serif",
         fontWeight: 500,
@@ -246,8 +268,13 @@ export function buildLanternTrailLayers(
         billboard: true,
         parameters: { depthWriteEnabled: false },
       }),
-    ];
+    );
   }
+
+  // THE STREET LANTERNS — each moment its own lamp. Fades out as the
+  // gathered set fades in (and vice versa) across the crossfade band.
+  if (clusterW >= 0.99) return layers;
+  const sfade = fade * (1 - clusterW);
 
   const shared = {
     data,
@@ -267,7 +294,6 @@ export function buildLanternTrailLayers(
     radiusMaxPixels: L.maxRadiusPx,
   };
   const night = 1 - paper;
-  const layers = [];
 
   // PAPER WORLD: added light is invisible on bone — the lantern soaks in
   // as a crisp round keepsake stain (deepest-mark-wins, never a bruise).
@@ -283,7 +309,7 @@ export function buildLanternTrailLayers(
         },
         radiusScale: shared.radiusScale * L.stain.radiusScale,
         light: {
-          gain: TRAIL.gain * L.stain.gainBoost * fade,
+          gain: TRAIL.gain * L.stain.gainBoost * sfade,
           pigment: paper,
           stainEdge: L.stain.edge,
           stainRing: L.stain.ring,
@@ -297,7 +323,7 @@ export function buildLanternTrailLayers(
   }
 
   if (night > 0.01) {
-    const light = lanternLight(fade * night);
+    const light = lanternLight(sfade * night);
     // The halo first — every lamp hangs above its own light.
     layers.push(
       new EmotionGlowLayer({
@@ -345,21 +371,22 @@ export function buildLanternTrailLayers(
                 ? undefined
                 : "numeric",
           }),
+          arr: oldest === newest ? [newest] : [oldest, newest],
         };
       }
-      const { first, last, began } = cueCache;
+      const { first, last, began, arr } = cueCache;
       layers.push(
         new TextLayer<LivePoint>({
           id: "journal-journey-cues",
-          data: first === last ? [last] : [first, last],
+          data: arr,
           getPosition: (d) => d.position,
           getText: (d) => (d === first && first !== last ? `began ${began}` : "now"),
           getSize: 11,
-          getColor: (d) => [d.hue[0], d.hue[1], d.hue[2], Math.round(190 * fade * night)],
+          getColor: (d) => [d.hue[0], d.hue[1], d.hue[2], Math.round(190 * sfade * night)],
           getPixelOffset: (d: LivePoint) => [0, -(getLanternRadius(d) + 13)] as [number, number],
           updateTriggers: {
             getText: version,
-            getColor: [version, Math.round(fade * night * 32)],
+            getColor: [version, Math.round(sfade * night * 32)],
             getPixelOffset: version,
           },
           fontFamily: "Inter, system-ui, sans-serif",
@@ -390,9 +417,9 @@ export function buildLanternTrailLayers(
               d.hue[0],
               d.hue[1],
               d.hue[2],
-              Math.round(L.ring.alpha * fade * (0.15 + 0.85 * d.weight)),
+              Math.round(L.ring.alpha * sfade * (0.15 + 0.85 * d.weight)),
             ] as [number, number, number, number],
-          updateTriggers: { getRadius: version, getLineColor: version },
+          updateTriggers: { getRadius: version, getLineColor: [version, Math.round(sfade * 32)] },
           radiusUnits: "pixels" as const,
           radiusScale: shared.radiusScale,
           radiusMaxPixels: L.maxRadiusPx * L.ring.radiusFactor,

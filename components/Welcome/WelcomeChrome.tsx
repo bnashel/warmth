@@ -146,15 +146,17 @@ export function WelcomeChrome({
           }}
         >
           <div
+            // glass-blur: frosted on desktop only (mobile audit) — during
+            // the film the camera is easing every frame, and a blurred
+            // plate over the moving canvas costs a readback per frame.
+            className="glass-blur"
             style={{
               maxWidth: 420,
               textAlign: "center",
               borderRadius: 18,
               padding: "16px 22px",
-              background: "rgba(6,7,10,0.5)",
+              background: "rgba(6,7,10,0.62)",
               border: `1px solid ${WHISPER(0.1)}`,
-              backdropFilter: "blur(14px)",
-              WebkitBackdropFilter: "blur(14px)",
             }}
           >
             {step.title && !hideTitle && (
