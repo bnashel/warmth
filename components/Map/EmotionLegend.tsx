@@ -33,7 +33,9 @@ export default function EmotionLegend({ interactive = false }: { interactive?: b
       style={{
         position: "absolute",
         left: 16,
-        bottom: "max(env(safe-area-inset-bottom), 96px)",
+        // Lifted 07-27 (Eli): well clear of the orb's island and the
+        // bottom chrome — the key floats at the screen's lower third.
+        bottom: "calc(max(env(safe-area-inset-bottom, 0px), 96px) + 110px)",
         zIndex: 9, // under the panels/chips, over the map
         display: "flex",
         flexDirection: "column",

@@ -650,24 +650,26 @@ export default function OneScreen() {
         />
       </motion.div>
 
-      {/* THE TIME SCRUBBER (private redesign, 07-17): drag back through
-          your year and watch the journal replay — lanterns kindle as
-          their moments arrive, the month whispers above your finger.
-          Hidden while a memory card is open or the welcome is telling. */}
+      {/* THE TIME SCRUBBER (private redesign, 07-17; moved to the right
+          edge 07-27, Eli): a standing hairline — now at the top, the
+          first day at the bottom. Pull down through your year and the
+          journal replays; the month whispers beside your thumb. Hidden
+          while a memory card is open or the welcome is telling. Seated
+          below the north/recenter chips, above the orb's island. */}
       <AnimatePresence>
         {view === "private" && scrubStart && !editingId && !hintsMuted && (
           <motion.div
             key="time-scrubber"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 6 }}
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 8 }}
             transition={SPRING.settle}
             style={{
               position: "absolute",
-              left: 26,
-              right: 26,
-              bottom: `calc(env(safe-area-inset-bottom, 0px) + ${ORB.bottomOffset + 96}px)`,
-              height: 40,
+              right: 12,
+              top: "24%",
+              height: "38%",
+              width: 44,
               zIndex: 10,
             }}
           >
