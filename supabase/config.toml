@@ -269,7 +269,7 @@ otp_expiry = 3600
 # tier, single-sender verification), fill [auth.email.smtp] above, then
 # uncomment these three lines and run `npx supabase config push`.
 # [auth.email.template.magic_link]
-# subject = "your warmth code"
+# subject = "your warmth sign-in code"
 # content_path = "./supabase/templates/magic_link.html"
 
 # Uncomment to customize notification email template

@@ -29,6 +29,22 @@ export function AuthOverlay() {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  /** Provider errors are for us, not for the person signing in: they arrive
+   *  as rate-limit prose, transport failures, or — seen live — a bare "{}"
+   *  when the mail provider dies without a message. Translate to something
+   *  human, always offer the way forward, and never render raw JSON. */
+  function humanError(raw: string): string {
+    const s = (raw || "").toLowerCase();
+    if (s.includes("rate") || s.includes("limit") || s.includes("too many")) {
+      return "that's a lot of codes for one hour — wait a bit, or use one you already have";
+    }
+    if (s.includes("invalid") && s.includes("email")) return "that doesn't look like an email";
+    if (!raw || raw === "{}" || s.includes("sending") || s.includes("unexpected")) {
+      return "the email didn't go out — that's on us, not you. try again in a moment";
+    }
+    return raw;
+  }
+
   async function send() {
     const addr = email.trim();
     if (!addr.includes("@")) {
@@ -41,7 +57,7 @@ export function AuthOverlay() {
     if (!res.error) setStage("sent");
     else {
       setStage("ask");
-      setError(res.error);
+      setError(humanError(res.error));
     }
   }
 
@@ -176,7 +192,7 @@ export function AuthOverlay() {
                   opacity: stage === "sending" ? 0.6 : 1,
                 }}
               >
-                {stage === "sending" ? "sending…" : "send me a sign-in link"}
+                {stage === "sending" ? "sending…" : "send me a code"}
               </motion.button>
               {error && (
                 <p style={{ fontSize: 14.5, color: EMOTION_HUES.energy, margin: "14px 0 0" }}>
@@ -235,9 +251,9 @@ export function AuthOverlay() {
                   margin: "12px 0 0",
                 }}
               >
-                type your six-digit code here —
+                we sent you a six-digit code.
                 <br />
-                or tap the emailed link on this device
+                type it here — it works for an hour
               </p>
               <input
                 inputMode="numeric"

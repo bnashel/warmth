@@ -1,13 +1,64 @@
-<!-- Code-only on purpose: no link for a mail app to prefetch (and thereby
-     burn the one-time token), nothing to open on the wrong device. The
-     code is typed into the wall on whichever device asked for it. -->
-<div style="background:#0A0B0F;padding:44px 24px;text-align:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <p style="margin:0;font-size:22px;font-weight:500;letter-spacing:0.02em;color:#E9ECF4;">warmth</p>
-  <div style="height:3px;width:120px;margin:12px auto 26px;border-radius:2px;background:linear-gradient(90deg,#FFEE75,#F79A6E,#F695BC,#BCA8F5,#63D6BE);opacity:0.85;"></div>
-  <p style="margin:0 0 10px;font-size:15px;color:rgba(233,236,244,0.62);">your sign-in code</p>
-  <p style="margin:0;font-size:38px;font-weight:600;letter-spacing:0.28em;color:#E9ECF4;">{{ .Token }}</p>
-  <p style="margin:26px 0 0;font-size:13px;line-height:1.6;color:rgba(233,236,244,0.45);">
-    type it into warmth on the device you started from.<br>
-    it works for an hour; if you didn't ask for it, just ignore this.
-  </p>
-</div>
+<!-- The sign-in email. CODE ONLY — no link anywhere, on purpose: mail apps
+     prefetch links and burn the one-time token before the human ever taps
+     (observed on iCloud), and a link signs in whichever device opened the
+     mail, which is the wrong one whenever you read mail on a laptop.
+
+     Table layout with inline styles: Gmail strips <style> blocks, Outlook
+     ignores flexbox, and several clients drop background-image. This renders
+     the same everywhere, and degrades to plain readable text if all styling
+     is stripped. -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0;padding:0;background-color:#0A0B0F;">
+  <tr>
+    <td align="center" style="padding:40px 16px;">
+
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:420px;background-color:#111318;border-radius:20px;">
+        <tr>
+          <td align="center" style="padding:40px 32px 36px 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+
+            <!-- wordmark -->
+            <p style="margin:0;font-size:26px;font-weight:500;letter-spacing:0.5px;color:#E9ECF4;">warmth</p>
+
+            <!-- the five hues, as a ribbon (five cells, not a gradient:
+                 Outlook drops CSS gradients entirely) -->
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:14px auto 0 auto;">
+              <tr>
+                <td width="26" height="3" style="background-color:#FFEE75;font-size:0;line-height:0;">&nbsp;</td>
+                <td width="26" height="3" style="background-color:#F79A6E;font-size:0;line-height:0;">&nbsp;</td>
+                <td width="26" height="3" style="background-color:#F695BC;font-size:0;line-height:0;">&nbsp;</td>
+                <td width="26" height="3" style="background-color:#BCA8F5;font-size:0;line-height:0;">&nbsp;</td>
+                <td width="26" height="3" style="background-color:#63D6BE;font-size:0;line-height:0;">&nbsp;</td>
+              </tr>
+            </table>
+
+            <p style="margin:30px 0 0 0;font-size:15px;line-height:22px;color:#9AA1B0;">
+              your sign-in code
+            </p>
+
+            <!-- the code -->
+            <p style="margin:12px 0 0 0;font-size:40px;font-weight:600;letter-spacing:10px;color:#FFFFFF;font-family:'SF Mono',SFMono-Regular,Menlo,Consolas,monospace;">{{ .Token }}</p>
+
+            <p style="margin:26px 0 0 0;font-size:14px;line-height:22px;color:#9AA1B0;">
+              type it into warmth on the device you<br>started from. it works for one hour.
+            </p>
+
+            <!-- hairline -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:28px 0 0 0;">
+              <tr><td height="1" style="background-color:#23262E;font-size:0;line-height:0;">&nbsp;</td></tr>
+            </table>
+
+            <p style="margin:20px 0 0 0;font-size:12px;line-height:19px;color:#5E6472;">
+              didn't ask for this? nothing happens until the code is typed —
+              you can ignore this email.
+            </p>
+
+          </td>
+        </tr>
+      </table>
+
+      <p style="margin:22px 0 0 0;font-size:11px;color:#4A4F5C;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+        warmth — how the city feels, together
+      </p>
+
+    </td>
+  </tr>
+</table>
