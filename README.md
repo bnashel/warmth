@@ -41,14 +41,26 @@ floating above it.
   Welcome/  THE WELCOME (first-run walkthrough): two versions in a bake-off
             (slides / film) behind ?welcome=…; the sequencer, the stage
             contract into the product, the ghost hand, the axes figure
+  Auth/     THE WALL & THE PROFILE: sign-in (email → six-digit code),
+            AppGate (the gate + journal reconciliation at sign-in), and
+            the account card (name, stats, export / change email / delete)
   Lab/      dev-gated harnesses (look gallery, weather preview, labs) &
             test seed data — never visible to real users
 
 /lib        shared plumbing: theme.ts (tokens — source of truth),
             momentsStore.ts (the live data both views render),
             map.ts, location.ts, sound.ts, supabase.ts
+            · the backend seam: auth.ts (identity), sync.ts (the dual
+              write — anonymous public row + owned journal row),
+              publicField.ts (the coarsened field: snapshot + realtime),
+              journalSync.ts (claim/hydrate/photo sweep at sign-in),
+              photos.ts (private Storage), account.ts (export/delete)
 
-/supabase   migrations (via Supabase CLI only)
+/supabase   migrations (via Supabase CLI only) · functions/ (edge
+            functions: delete-account) · templates/ (the sign-in email)
+/scripts    build-*.mjs (map data) · backend-proof/ (THE PROOF: runs the
+            real migrations on a real Postgres and attacks every privacy
+            promise — `cd scripts/backend-proof && npm test`)
 /docs       build plan, design system, parked ideas, map style history,
             worlds.md (the map of every look/world + the switcher contract)
 ```
@@ -77,4 +89,17 @@ npm run lint
 ```
 
 Copy `.env.example` to `.env.local` and fill in the keys when wiring up the map
-and Supabase. Deploys: push to `main` → auto-deploys on Vercel.
+and Supabase.
+
+**Deploys are manual** — Git auto-deploy is deliberately *not* connected, so a
+push can never publish on its own:
+
+```bash
+npx vercel@latest          # a preview URL (safe: production untouched)
+npx vercel@latest --prod   # promote to production
+```
+
+**The backend** lives in a linked Supabase project. Schema changes go
+`supabase migration new …` → `npx supabase db push`; never hand-edit an
+applied migration. Before pushing schema, run the proof:
+`cd scripts/backend-proof && npm test`.

@@ -52,7 +52,8 @@ An ambient, beautiful live map of how a city feels. Emotion is rendered as glowi
 
 ## Tech stack
 - Next.js (App Router) + React + TypeScript
-- Supabase: Postgres + PostGIS, Auth (anonymous + optional email), Realtime
+- Supabase: Postgres + PostGIS, Auth (email → six-digit code; a hard wall,
+  no anonymous path), Realtime, Storage (private memory photos)
 - Mapbox GL JS (base map) + deck.gl (glow layers)
 - Framer Motion (motion), Web Audio (sound)
 - Hosting: Vercel. Repo: GitHub.
@@ -63,9 +64,14 @@ An ambient, beautiful live map of how a city feels. Emotion is rendered as glowi
 /app         page.tsx = the product (one screen); lab/ + maplab/ = dev-only workshops
 /components  Screen/ (composition + public/private tabs) · Map/ (city + public field, tune.ts)
              · Orb/ (the slider, feel.ts) · Trail/ (private diary dots) · Welcome/ (first-run
-             walkthrough — slides/film bake-off) · Lab/ (workshop harnesses)
-/lib         theme.ts (tokens), momentsStore.ts (live data), map.ts, location.ts, sound.ts, supabase.ts
+             walkthrough — slides/film bake-off) · Auth/ (the wall + the profile card)
+             · Lab/ (workshop harnesses)
+/lib         theme.ts (tokens), momentsStore.ts (live data), map.ts, location.ts, sound.ts
+             · the backend seam: supabase.ts, auth.ts, sync.ts, publicField.ts,
+               journalSync.ts, photos.ts, account.ts
 /supabase    migrations (via Supabase CLI — never hand-edit applied files)
+             · functions/ (edge: delete-account) · templates/ (the sign-in email)
+/scripts     backend-proof/ = THE PROOF (real migrations on a real Postgres, 28 tests)
 /docs        build plan, design system, later.md (parked ideas), map-candidates (style history)
 ```
 Ownership: Ben drives Orb/, Eli drives Map/; Screen/, Trail/, lib/ are shared.
@@ -74,8 +80,11 @@ Commit prefixes by area: orb: · map: · field: · screen: · trail: · store: �
 ## Commands
 - Dev server: `npm run dev` (labs at /lab and /maplab are dev-only)
 - Lint: `npm run lint` · Build: `npm run build`
-- Run tests: none yet (no framework installed — ask Ben before adding one)
-- Deploy: `npx vercel@latest` for now (Git auto-deploy not connected yet)
+- Backend proof: `cd scripts/backend-proof && npm test` (28 tests — run before
+  any schema change; no framework in the app itself, ask Ben before adding one)
+- Schema: `supabase migration new …` → `npx supabase db push` (project is linked)
+- Deploy: `npx vercel@latest` (preview) · `--prod` to promote. Git auto-deploy
+  is deliberately NOT connected: a push must never publish on its own.
 
 ## Workflow
 - **Plan first** for anything touching more than one file: propose a plan, wait for my approval.
