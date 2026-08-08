@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Deno runtime, not ours to lint (Deno globals, npm: specifiers):
+    "supabase/functions/**",
   ]),
 ]);
 
