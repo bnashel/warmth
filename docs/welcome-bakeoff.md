@@ -52,6 +52,24 @@ Judge on a phone over LAN with `?wall=off` (same as the look bake-offs).
   choreography, never anyone's journal); they're swept while the field is
   faded out in the private view.
 
+## Status (2026-08-08)
+
+`WELCOME_DEFAULT = "film"` — so a first-time visitor now gets an
+introduction instead of a wordless glowing city. This is **not the verdict**:
+nothing is deleted, both shells still build, and switching is one word in
+`components/Welcome/script.ts`.
+
+Still open for Ben + Eli: whether film or slides actually wins (then delete
+the loser), and whether film's two honesty choices below survive — they read
+differently now that the backend is live and the city holds real feelings.
+
+Note the sequence for a genuinely new person: **the auth wall comes first**,
+then the welcome plays once they are signed in (the gate only mounts with a
+session). Your own devices likely have the `warmth-welcomed-v1` flag set from
+judging, so you will not see it auto-play — use `?welcome=reset`, or the
+"watch the welcome again" row in the account card, which appears now that a
+default exists.
+
 ## After the pick
 
 Set `WELCOME_DEFAULT` in `components/Welcome/script.ts` to the winner —

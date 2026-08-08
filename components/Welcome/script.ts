@@ -12,13 +12,22 @@
 export type WelcomeVersion = "slides" | "film";
 
 /**
- * THE BAKE-OFF SWITCH. While null, no version auto-plays for real users —
- * both are judged behind ?welcome=slides / ?welcome=film on dev builds and
- * judging previews. When Ben picks the winner, its key lands here and the
- * welcome plays on every first visit (skippable, replayable); the loser is
- * deleted (the ember-vs-splat rule).
+ * THE WELCOME THAT PLAYS. Held at null through the bake-off, which meant a
+ * brand-new user got no introduction at all — they met a glowing city with
+ * no idea what the lights were or that the orb was theirs.
+ *
+ * Set to "film" (Ben, 2026-08-08): the real night map performs behind the
+ * words, so the first thing anyone sees is the product itself rather than a
+ * diagram of it. Both versions still work and are one word apart — switch
+ * to "slides" here, or compare them any time with ?welcome=slides /
+ * ?welcome=film on a dev build.
+ *
+ * NOT YET the bake-off verdict: nothing is deleted. The ember-vs-splat rule
+ * (loser gets removed) still waits on Ben + Eli agreeing, and the film's
+ * honesty choices — a one-beat glimpse of a demo journal, three injected
+ * demo feelings — are still open to veto (docs/welcome-bakeoff.md).
  */
-export const WELCOME_DEFAULT: WelcomeVersion | null = null;
+export const WELCOME_DEFAULT: WelcomeVersion | null = "film";
 
 export type WelcomeStep = {
   id: "welcome" | "public" | "private" | "orb" | "yours";
