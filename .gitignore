@@ -44,9 +44,14 @@ next-env.d.ts
 # claude code — per-user local settings (never shared)
 .claude/settings.local.json
 
-# playwright MCP session artifacts + local screenshots
+# playwright MCP session artifacts + local screenshots.
+# Root-level captures are scratch by default — /*.png was already ignored,
+# but .jpeg was not, which is how 77 design frames (16 MB) ended up tracked
+# in the repo root. Keepers belong in docs/screenshots/ (git mv, not copy).
 .playwright-mcp/
 /*.png
+/*.jpg
+/*.jpeg
 
 # playwright session artifacts (review agents)
 .playwright-cli/
