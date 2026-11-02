@@ -114,6 +114,7 @@ export function OrbFlow({
   hintColor = "#FFFFFF",
   paper = 0,
   namesOn = false,
+  muted = false,
   gestureDepth,
   onCommit,
 }: {
@@ -126,6 +127,10 @@ export function OrbFlow({
   /** Learning mode (a user's first 3 commits): every wheel dot carries its
    *  emotion name. After that, the active label alone — which is right. */
   namesOn?: boolean;
+  /** True while a walkthrough narrates (two teachers must never talk over
+   *  each other): the one-time gesture whisper stays hidden AND untouched —
+   *  taps that advance the film must not retire a lesson never seen. */
+  muted?: boolean;
   gestureDepth: MotionValue<number>;
   /**
    * Fires the instant a feeling is committed (start of the burst, not the
@@ -160,7 +165,9 @@ export function OrbFlow({
   };
   // Tap-away anywhere outside the orb retires it.
   useEffect(() => {
-    if (!hintOn) return;
+    // Never while a walkthrough narrates: taps advancing the film must
+    // not retire a whisper that was never on screen.
+    if (!hintOn || muted) return;
     const away = (e: PointerEvent) => {
       if (!(e.target as HTMLElement)?.closest?.("[data-orb-hit]")) retireHint();
     };
@@ -171,8 +178,8 @@ export function OrbFlow({
       window.clearTimeout(arm);
       window.removeEventListener("pointerdown", away);
     };
-     
-  }, [hintOn]);
+
+  }, [hintOn, muted]);
 
   // THE INVITE (07-14, discoverability): before anyone touches it, the
   // orb visibly asks — two gentle swells shortly after mount (mobile has
@@ -265,6 +272,10 @@ export function OrbFlow({
   /* ---------- wheel phase ---------- */
   function onPointerDown(e: React.PointerEvent) {
     if (phaseRef.current === "bursting") return;
+    // A pinch's second finger must NEVER start the orb (mobile audit): it
+    // would freeze the map's gestures mid-pinch and kill the zoom until
+    // every finger lifts. Only a primary pointer opens the wheel.
+    if (!e.isPrimary) return;
     const st = g.current;
     if (st.pointerId !== null) return; // one finger owns the gesture
     st.pointerId = e.pointerId;
@@ -799,7 +810,7 @@ export function OrbFlow({
 
       {/* the one-time gesture whisper */}
       <AnimatePresence>
-        {hintOn && (
+        {hintOn && !muted && (
           <motion.div
             key="orb-hint"
             initial={{ opacity: 0, y: 8 }}
@@ -833,7 +844,7 @@ export function OrbFlow({
                 textShadow: paper > 0.5 ? "none" : "0 1px 10px rgba(0,0,0,0.5)",
               }}
             >
-              hold the orb, then slide — how strong does it feel?
+              hold the orb, then slide. how strong does it feel?
             </span>
           </motion.div>
         )}

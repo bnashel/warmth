@@ -175,10 +175,10 @@ const getClusterRadius = (d: SparkCluster) =>
  * visible (the breath rides a time uniform), but deck re-uploads attributes
  * whenever DATA identity changes — so clusters and ring subsets are cached
  * on (version, quantized zoom) and reused across frames (code review). */
-let clusterCache: { key: string; data: LivePoint[]; clusters: SparkCluster[] } | null = null;
+let clusterCache: { key: string; data: LivePoint[]; clusters: SparkCluster[]; counted: SparkCluster[] } | null = null;
 let ringCache: { version: number; data: LivePoint[]; remembered: LivePoint[] } | null = null;
 /** The newest entry (the "now" cue) — same version-keyed reuse. */
-let newestCache: { version: number; data: LivePoint[]; last: LivePoint } | null = null;
+let newestCache: { version: number; data: LivePoint[]; last: LivePoint; arr: LivePoint[] } | null = null;
 
 /* ---- THE THREAD (round 2, item 4 — off by default, on demand) --------
  * The always-on beaded network is gone (Ben + Eli). What remains is ONE
@@ -279,16 +279,17 @@ function threadReveal(fade: number, timeSec: number): number {
   return Math.max(0, 1 - out);
 }
 
-function cachedClusters(data: LivePoint[], version: number, zoom: number): SparkCluster[] {
+function cachedClusters(data: LivePoint[], version: number, zoom: number) {
   const key = `${version}:${Math.round(zoom * 4) / 4}`;
   // Data identity matters like in the sibling caches (review fix, 07-14):
   // ?journal=test keeps a FIXED version but re-allocates its points with
   // fresh world-aware hues on a night ↔ paper switch — without this check
   // the constellations kept the old world's colors until zoom moved.
   if (!clusterCache || clusterCache.key !== key || clusterCache.data !== data) {
-    clusterCache = { key, data, clusters: clusterSparks(data, zoom) };
+    const clusters = clusterSparks(data, zoom);
+    clusterCache = { key, data, clusters, counted: clusters.filter((c) => c.count > 1) };
   }
-  return clusterCache.clusters;
+  return clusterCache;
 }
 
 function cachedRemembered(data: LivePoint[], version: number): LivePoint[] {
@@ -391,7 +392,7 @@ export function buildTrailLayers(
   // THE CONSTELLATION VIEW: zoomed out, the journal gathers. One breathing
   // point per cell, sized by how many moments it holds; tap to descend.
   if (zoom < TRAIL.spark.cluster.belowZoom && data.length > 1) {
-    const clusters = cachedClusters(data, version, zoom);
+    const { clusters, counted } = cachedClusters(data, version, zoom);
     return [
       new EmotionGlowLayer({
         id: "journal-constellations",
@@ -426,7 +427,7 @@ export function buildTrailLayers(
       }),
       new TextLayer<SparkCluster>({
         id: "journal-constellation-counts",
-        data: clusters.filter((c) => c.count > 1),
+        data: counted, // stable identity (mobile audit): no per-frame glyph relayout
         getPosition: (d) => d.position,
         getText: (d) => String(d.count),
         getSize: TRAIL.spark.countLabel.sizePx,
@@ -611,13 +612,13 @@ export function buildTrailLayers(
       if (!newestCache || newestCache.version !== version || newestCache.data !== data) {
         let newest = data[0];
         for (const p of data) if (p.createdAt >= newest.createdAt) newest = p;
-        newestCache = { version, data, last: newest };
+        newestCache = { version, data, last: newest, arr: [newest] };
       }
-      const last = newestCache.last;
+      const { arr } = newestCache;
       layers.push(
         new TextLayer<LivePoint>({
           id: "journal-journey-cues",
-          data: [last],
+          data: arr, // stable identity (mobile audit)
           getPosition: (d) => d.position,
           getText: () => "now",
           getSize: 11,

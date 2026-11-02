@@ -2,13 +2,14 @@
 
 /**
  * components/Trail/TimeScrubber.tsx — drag back through your year
- * (private-mode redesign, 2026-07-17).
+ * (private-mode redesign, 2026-07-17; moved to the screen's side 07-27,
+ * Eli: the bottom strip crowded the orb).
  *
- * A quiet hairline above the orb, private view only: the left end is the
- * journal's first day, the right end is now. Drag the thumb and the map
- * replays — lanterns kindle as their moments arrive, the month whispers
- * above your finger. Release near the right edge (or tap "now") and the
- * thumb springs home, the journal returns to the present.
+ * A quiet vertical hairline on the right edge, private view only: the top
+ * is now, the bottom is the journal's first day. Pull the thumb DOWN and
+ * the map replays backward — lanterns kindle as their moments arrive, the
+ * month whispers beside your thumb. Release near the top (or tap "now")
+ * and the thumb springs home, the journal returns to the present.
  *
  * The scrub state itself lives outside React (lib/timeScrub.ts); the
  * trail pipeline reads it every push. This component is only the hand.
@@ -18,9 +19,9 @@ import { AnimatePresence, motion, animate } from "framer-motion";
 import { SPRING } from "@/lib/theme";
 import { scrubTime, scrubTo } from "@/lib/timeScrub";
 
-/** Within this fraction of the right edge the thumb means "now" (live). */
+/** Within this fraction of the top end the thumb means "now" (live). */
 const NOW_SNAP = 0.97;
-/** Releasing a drag this close to the edge springs the rest of the way
+/** Releasing a drag this close to the top springs the rest of the way
  *  home — a generous band, so "almost now" never strands the journal a
  *  breath in the past (design review blocker). */
 const HOME_BAND = 0.94;
@@ -44,16 +45,16 @@ export function TimeScrubber({
   startMs,
   ink,
 }: {
-  /** The journal's first moment (epoch ms) — the left end of the line. */
+  /** The journal's first moment (epoch ms) — the bottom end of the line. */
   startMs: number;
   /** Loose-chrome ink color for the current ground (paperText upstream). */
   ink: string;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
-  // 1 = now (live). Anything less = scrubbed into the past.
+  // 1 = now (live, the TOP of the line). Anything less = the past below.
   const [frac, setFrac] = useState(() => initFrac(startMs));
-  // The month under the thumb — derived in apply (never in render:
+  // The month beside the thumb — derived in apply (never in render:
   // the frac→time mapping reads the clock, which render must not).
   const [label, setLabel] = useState(() =>
     monthLabel(startMs + initFrac(startMs) * (Date.now() - startMs)),
@@ -71,11 +72,12 @@ export function TimeScrubber({
     scrubTo(c >= NOW_SNAP ? null : startMs + c * (Date.now() - startMs));
   };
 
-  const fromClientX = (clientX: number) => {
+  /** Vertical: the top of the rail is now (frac 1); down is the past. */
+  const fromClientY = (clientY: number) => {
     const el = trackRef.current;
     if (!el) return fracRef.current;
     const r = el.getBoundingClientRect();
-    return Math.min(1, Math.max(0, (clientX - r.left) / Math.max(1, r.width)));
+    return Math.min(1, Math.max(0, 1 - (clientY - r.top) / Math.max(1, r.height)));
   };
 
   /** The spring home: the year re-kindles on the way back to now. */
@@ -100,6 +102,7 @@ export function TimeScrubber({
   );
 
   const live = frac >= NOW_SNAP && !dragging;
+  const thumbTop = (1 - frac) * 100;
   return (
     <div
       style={{
@@ -117,10 +120,10 @@ export function TimeScrubber({
         homing.current?.stop();
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
         setDragging(true);
-        apply(fromClientX(e.clientX));
+        apply(fromClientY(e.clientY));
       }}
       onPointerMove={(e) => {
-        if (dragging) apply(fromClientX(e.clientX));
+        if (dragging) apply(fromClientY(e.clientY));
       }}
       onPointerUp={() => {
         if (!dragging) return;
@@ -132,29 +135,31 @@ export function TimeScrubber({
         goHome();
       }}
     >
-      {/* The line: the journal's whole span. */}
+      {/* The line: the journal's whole span, now standing upright. */}
       <div
         ref={trackRef}
         aria-hidden
         style={{
           position: "absolute",
-          left: 0,
-          right: 0,
-          top: 19,
-          height: 2,
+          top: 0,
+          bottom: 0,
+          left: "50%",
+          width: 2,
+          marginLeft: -1,
           borderRadius: 1,
           background: "rgba(233,236,244,0.13)",
         }}
       />
-      {/* The lived part — everything the thumb has passed. */}
+      {/* The lived part — from the first day up to the thumb. */}
       <div
         aria-hidden
         style={{
           position: "absolute",
-          left: 0,
-          width: `${frac * 100}%`,
-          top: 19,
-          height: 2,
+          bottom: 0,
+          height: `${frac * 100}%`,
+          left: "50%",
+          width: 2,
+          marginLeft: -1,
           borderRadius: 1,
           background: "rgba(233,236,244,0.34)",
         }}
@@ -165,8 +170,8 @@ export function TimeScrubber({
         transition={SPRING.snappy}
         style={{
           position: "absolute",
-          left: `${frac * 100}%`,
-          top: 20,
+          top: `${thumbTop}%`,
+          left: "50%",
           x: "-50%",
           y: "-50%",
           width: 12,
@@ -178,27 +183,26 @@ export function TimeScrubber({
           pointerEvents: "none",
         }}
       />
-      {/* The month, whispered above the thumb while in the past. */}
+      {/* The month, whispered beside the thumb while in the past. */}
       <AnimatePresence>
         {!live && (
           <motion.span
-            initial={{ opacity: 0, y: 5 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 3 }}
+            initial={{ opacity: 0, x: 5 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 3 }}
             transition={SPRING.settle}
             style={{
               position: "absolute",
-              // Clamped short of the right end — the chip must never sit
-              // on the "now" label (design review; "now" also yields).
-              left: `${Math.min(84, Math.max(8, frac * 100))}%`,
-              top: -16,
-              x: "-50%",
+              // To the LEFT of the rail, riding the thumb — clamped short
+              // of both ends so it never touches "now" or the screen edge.
+              top: `${Math.min(92, Math.max(6, thumbTop))}%`,
+              right: "100%",
+              marginRight: 10,
+              y: "-50%",
               padding: "4px 11px",
               borderRadius: 999,
               background: "rgba(10,11,15,0.66)",
               border: "1px solid rgba(233,236,244,0.13)",
-              backdropFilter: "blur(12px)",
-              WebkitBackdropFilter: "blur(12px)",
               color: "rgba(233,236,244,0.88)",
               fontSize: 11.5,
               letterSpacing: "0.05em",
@@ -210,21 +214,21 @@ export function TimeScrubber({
           </motion.span>
         )}
       </AnimatePresence>
-      {/* "now" — always the right end; a tap brings the journal home. */}
+      {/* "now" — always the top end; a tap brings the journal home. */}
       <button
         type="button"
         aria-label="Return to now"
         onClick={goHome}
         style={{
           position: "absolute",
-          right: -14,
-          top: -18,
-          padding: "10px 14px",
+          top: -30,
+          left: "50%",
+          transform: "translateX(-50%)",
+          padding: "8px 12px",
           border: "none",
           background: "transparent",
           color: ink,
-          // Yields while the month chip drifts near its corner.
-          opacity: !live && frac > 0.86 ? 0 : live ? 0.42 : 0.85,
+          opacity: live ? 0.42 : 0.85,
           fontSize: 10.5,
           letterSpacing: "0.08em",
           cursor: "pointer",

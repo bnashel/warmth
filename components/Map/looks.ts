@@ -131,7 +131,7 @@ export const LOOKS: LookDef[] = [
     id: "first-bloom",
     name: "first bloom",
     date: "07-05",
-    note: "soft circular blooms, no tiers, no weave — reconstruction",
+    note: "soft circular blooms, no tiers, no weave. reconstruction",
     config: {
       shape: { warpAmp: 0, scale: 8, drift: 0, streak: 0, band: 0, smoothWarp: 0 },
       dials: { ...ERA_WIDE, tierKeep: 0, richen: 0, weaveAmp: 0, shimmer: 0, overlapGate: 0, felt: 0, veil: 0, kernelSoftness: 2.5 },
@@ -142,7 +142,7 @@ export const LOOKS: LookDef[] = [
     id: "watercolor-night",
     name: "watercolor night",
     date: "07-06",
-    note: "blotted seeping edges, barely-moving weather — reconstruction",
+    note: "blotted seeping edges, barely-moving weather. reconstruction",
     config: {
       shape: { warpAmp: 0.085, scale: 10, drift: 0.01, streak: 0, band: 0, smoothWarp: 0 },
       dials: { ...ERA_WIDE, tierKeep: 0, richen: 0, weaveAmp: 0, shimmer: 0, overlapGate: 0, felt: 0, veil: 0, kernelSoftness: 2.5 },
@@ -212,7 +212,7 @@ export const LOOKS: LookDef[] = [
     id: "night-air",
     name: "night air",
     date: "07-10",
-    note: "FROM SCRATCH: an ambient field of feeling — light through night air, no bounded shapes at all. Pulse + overlap interaction kept; everything else rethought.",
+    note: "FROM SCRATCH: an ambient field of feeling: light through night air, no bounded shapes at all. Pulse + overlap interaction kept; everything else rethought.",
     config: {
       shape: { warpAmp: 0.02, scale: 4.6, drift: 0.008, streak: 0.25, band: 0, smoothWarp: 1 },
       dials: {
@@ -228,7 +228,7 @@ export const LOOKS: LookDef[] = [
     id: "the-garden",
     name: "the garden",
     date: "07-10",
-    note: "FROM SCRATCH (journal): entries bloom with age into a garden you've grown — opening after a month looks like what you've built. Public side = night air.",
+    note: "FROM SCRATCH (journal): entries bloom with age into a garden you've grown. opening after a month looks like what you've built. Public side = night air.",
     config: {
       shape: { warpAmp: 0.02, scale: 4.6, drift: 0.008, streak: 0.25, band: 0, smoothWarp: 1 },
       dials: {
@@ -244,7 +244,7 @@ export const LOOKS: LookDef[] = [
     id: "night-weather",
     name: "night weather",
     date: "07-10",
-    note: "the felt city, un-metronomed: every area breathes in its own drifting rhythm, overlapping feelings genuinely interpenetrate (meld + earlier gate), and silhouettes run freer — bigger slower swells leaning with the flow, never cellular. Journal = the keepsake lantern (07-17; was the garden — still in ?trail=garden and the-garden look).",
+    note: "the felt city, un-metronomed: every area breathes in its own drifting rhythm, overlapping feelings genuinely interpenetrate (meld + earlier gate), and silhouettes run freer: bigger slower swells leaning with the flow, never cellular. Journal = the keepsake lantern (07-17; was the garden, still in ?trail=garden and the-garden look).",
     config: {
       shape: { warpAmp: 0.052, scale: 3.8, drift: 0.012, streak: 0.4, band: 0.25, smoothWarp: 1 },
       dials: {
@@ -273,7 +273,7 @@ export const LOOKS: LookDef[] = [
     id: "ben-living-water",
     name: "living water · ben",
     date: "07-11",
-    note: "still water + THE POND: arrivals ripple outward through the field — you see the city being felt in.",
+    note: "still water + THE POND: arrivals ripple outward through the field. you see the city being felt in.",
     engine: "pond", pond: "living-water",
     config: { shape: { warpAmp: 0, scale: 0, drift: 0, streak: 0, band: 0, smoothWarp: 1 }, dials: { ...POND_DIALS }, journal: "ember" },
   },
@@ -297,7 +297,7 @@ export const LOOKS: LookDef[] = [
     id: "paper-world",
     name: "PAPER WORLD · ben",
     date: "07-12",
-    note: "FROM SCRATCH (Ben): the bone sheet — a sky-graded paper city where feelings soak in as granulated pigment and a commit blooms as a spreading ink drop. Joy on paper is true sun-yellow (#F2C010).",
+    note: "FROM SCRATCH (Ben): the bone sheet: a sky-graded paper city where feelings soak in as granulated pigment and a commit blooms as a spreading ink drop. Joy on paper is true sun-yellow (#F2C010).",
     engine: "pond", pond: "still-water", world: "paper",
     config: { shape: { warpAmp: 0, scale: 0, drift: 0, streak: 0, band: 0, smoothWarp: 1 }, dials: { ...POND_DIALS }, journal: "ember" },
   },

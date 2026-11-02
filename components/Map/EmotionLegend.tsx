@@ -27,19 +27,22 @@ export default function EmotionLegend({ interactive = false }: { interactive?: b
   return (
     <div
       aria-label="what each color means"
+      // glass-blur: frosted on desktop only — backdrop blur over the live
+      // canvas forces per-frame readbacks on mobile GPUs (mobile audit).
+      className="glass-blur"
       style={{
         position: "absolute",
         left: 16,
-        bottom: "max(env(safe-area-inset-bottom), 96px)",
+        // Lifted 07-27 (Eli): well clear of the orb's island and the
+        // bottom chrome — the key floats at the screen's lower third.
+        bottom: "calc(max(env(safe-area-inset-bottom, 0px), 96px) + 110px)",
         zIndex: 9, // under the panels/chips, over the map
         display: "flex",
         flexDirection: "column",
         gap: interactive ? 3 : 7,
         padding: interactive ? "7px 8px" : "10px 12px",
         borderRadius: 14,
-        background: "rgba(10,11,15,0.42)",
-        backdropFilter: "blur(10px)",
-        WebkitBackdropFilter: "blur(10px)",
+        background: "rgba(10,11,15,0.55)",
         border: "1px solid rgba(233,236,244,0.08)",
         // Purely informative in public — never steals a tap from the map.
         pointerEvents: interactive ? "auto" : "none",

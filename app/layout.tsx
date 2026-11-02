@@ -19,6 +19,15 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#0A0B0F",
+  // THE PINCH BELONGS TO THE MAP (mobile audit, 07-27): without this,
+  // any pinch the map's handlers miss (orb island, chips, the freeze
+  // window while a finger holds the orb) zooms the whole DOCUMENT and
+  // the entire UI scales — "the app is glitchy when zooming". The app
+  // is a fixed full-screen stage; the page itself never zooms.
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export default function RootLayout({
