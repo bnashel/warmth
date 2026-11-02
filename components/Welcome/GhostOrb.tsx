@@ -103,7 +103,9 @@ export function GhostOrb({
         touchAction: "none",
       }}
     >
-      <OrbFlow hintWord="" namesOn gestureDepth={gestureDepth} />
+      {/* namesOn retired (07-27): the ghost captions narrate the wheel —
+          radial name tags crowded the orb (Eli). */}
+      <OrbFlow hintWord="" gestureDepth={gestureDepth} />
       {/* the fingertip: a soft pad of light riding the gesture */}
       {!reduced && (
         <motion.div

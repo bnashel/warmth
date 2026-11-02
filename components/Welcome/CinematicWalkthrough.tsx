@@ -176,8 +176,8 @@ export function CinematicWalkthrough({ onFinish }: { onFinish: (how: WelcomeFini
           leaving
             ? { duration: 0.3, ease: "easeIn" }
             : seq.step.id === "private" || seq.step.id === "orb"
-              ? { duration: 1.5, times: [0.3, 1], ease: "easeInOut" }
-              : { duration: 0.7, ease: "easeInOut" }
+              ? { duration: 1.8, times: [0.3, 1], ease: "easeInOut" }
+              : { duration: 1.1, ease: "easeInOut" }
         }
         style={{
           position: "absolute",

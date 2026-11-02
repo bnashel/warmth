@@ -89,8 +89,17 @@ export function useWelcome(onFinish: (how: WelcomeFinish) => void): WelcomeSeque
     return onWelcomeCommit(() => finish("committed"));
   }, [handoff]);
 
+  // Each step gets a breath before the next can arrive (pacing pass,
+  // 07-27): a double-tap or an eager thumb must never cut a transition
+  // mid-flight or blow through two steps. Skip is never dwell-gated.
+  const stepEnteredAt = useRef(0);
+  useEffect(() => {
+    stepEnteredAt.current = performance.now();
+  }, [stepIndex]);
+
   const advance = () => {
     if (finishedRef.current) return;
+    if (performance.now() - stepEnteredAt.current < 700) return;
     unlockAudio();
     setStepIndex((i) => Math.min(i + 1, WELCOME_STEPS.length - 1));
   };

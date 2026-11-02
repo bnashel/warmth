@@ -22,6 +22,11 @@ export type WelcomeVersion = "slides" | "film";
  * to "slides" here, or compare them any time with ?welcome=slides /
  * ?welcome=film on a dev build.
  *
+ * Eli had called the film the winner too (2026-07-27, on private-mode), and
+ * his three-line IntroVeil retired from the first-run slot the same day
+ * (component kept, unmounted in OneScreen) so a first visit never gets two
+ * introductions at once.
+ *
  * NOT YET the bake-off verdict: nothing is deleted. The ember-vs-splat rule
  * (loser gets removed) still waits on Ben + Eli agreeing, and the film's
  * honesty choices — a one-beat glimpse of a demo journal, three injected
@@ -55,7 +60,7 @@ export const WELCOME_STEPS: WelcomeStep[] = [
   },
   {
     id: "public",
-    lines: ["every light is someone, feeling something — right now"],
+    lines: ["every light is someone, feeling something right now"],
     tag: "where × what",
     legend: true,
     // the public view's own caption, verbatim — met again in the HUD
@@ -63,15 +68,15 @@ export const WELCOME_STEPS: WelcomeStep[] = [
   },
   {
     id: "private",
-    lines: ["you keep a second map — only you can see this"],
+    lines: ["you keep a second map. only you can see this"],
     tag: "where × what × when",
-    note: { film: "a glimpse — yours begins tonight" },
+    note: { film: "a glimpse. yours begins tonight" },
   },
   {
     id: "orb",
     // The ghost narrates its own phases (GHOST_CAPTIONS) — these lines are
     // only the fallback before the first gesture begins.
-    lines: ["press and hold — slide to a feeling, then how strong"],
+    lines: ["press and hold. slide to a feeling, then how strong"],
   },
   {
     id: "yours",
@@ -83,8 +88,8 @@ export const WELCOME_STEPS: WelcomeStep[] = [
 /** Captions the orb step swaps through as the ghost hand moves. */
 export const GHOST_CAPTIONS = {
   press: "press and hold",
-  wheel: "five feelings fan out — slide to one",
-  bar: "hold it — then how strong?",
+  wheel: "five feelings fan out. slide to one",
+  bar: "hold it, then how strong?",
   burst: "stronger burns brighter",
 } as const;
 

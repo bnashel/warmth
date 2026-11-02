@@ -55,6 +55,12 @@ export function WelcomeChrome({
   const note = step.note?.[version];
   // The orb steps perform bottom-center — their words move up out of the way.
   const captionHigh = step.id === "orb" || step.id === "yours";
+  // The talking steps float mid-screen (Eli, 07-27): the old bottom-26%
+  // seat crowded the orb and its whisper. Comfortable air on every side —
+  // above the orb's island, below the view pill, at any phone height.
+  const captionSeat = captionHigh
+    ? { top: "calc(max(env(safe-area-inset-top, 0px), 18px) + 96px)" }
+    : { top: "35%" };
   // Deaf: on the handoff (the real orb below must hear the gesture) and the
   // moment the welcome finishes (a dying overlay must never swallow taps).
   const deaf = handoff || finished;
@@ -116,32 +122,41 @@ export function WelcomeChrome({
       <AnimatePresence mode="wait">
         <motion.div
           key={step.id}
-          initial={{ opacity: 0, y: reduced ? 0 : 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: reduced ? 0 : -6, transition: { duration: 0.28 } }}
-          transition={enter}
+          initial={{ opacity: 0, y: reduced ? 0 : 10 }}
+          animate={{
+            opacity: 1,
+            y: 0,
+            // A breath after the last step's exhale — the words arrive
+            // once the stage has settled, never mid-cut (pacing pass).
+            transition: reduced ? { duration: 0.15 } : { ...SPRING.settle, delay: 0.35 },
+          }}
+          exit={{
+            opacity: 0,
+            y: reduced ? 0 : -6,
+            transition: { duration: 0.45, ease: "easeInOut" },
+          }}
           style={{
             position: "absolute",
             left: 24,
             right: 24,
-            ...(captionHigh
-              ? { top: "calc(max(env(safe-area-inset-top, 0px), 18px) + 96px)" }
-              : { bottom: "26%" }),
+            ...captionSeat,
             display: "flex",
             justifyContent: "center",
             pointerEvents: "none",
           }}
         >
           <div
+            // glass-blur: frosted on desktop only (mobile audit) — during
+            // the film the camera is easing every frame, and a blurred
+            // plate over the moving canvas costs a readback per frame.
+            className="glass-blur"
             style={{
               maxWidth: 420,
               textAlign: "center",
               borderRadius: 18,
               padding: "16px 22px",
-              background: "rgba(6,7,10,0.5)",
+              background: "rgba(6,7,10,0.62)",
               border: `1px solid ${WHISPER(0.1)}`,
-              backdropFilter: "blur(14px)",
-              WebkitBackdropFilter: "blur(14px)",
             }}
           >
             {step.title && !hideTitle && (
@@ -177,8 +192,8 @@ export function WelcomeChrome({
                 key={lines.join("¶")}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                exit={{ opacity: 0, transition: { duration: 0.16 } }}
-                transition={{ duration: 0.28, ease: "easeOut" }}
+                exit={{ opacity: 0, transition: { duration: 0.3 } }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
               >
                 {lines.map((line) => (
                   <p

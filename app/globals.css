@@ -18,6 +18,22 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
+  /* The page never rubber-bands (mobile audit, 07-27). The full gesture
+     lock (touch-action) lives on the product screen's root, so the dev
+     labs keep their scroll. */
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+/* Glass that only frosts where it's cheap: backdrop blur over a per-frame
+   WebGL canvas forces a readback of the region behind it on mobile GPUs
+   (mobile audit, 07-27). Fine pointers (desktop) keep the frost; touch
+   devices get the plate's own ink, which reads near-identical. */
+@media (hover: hover) and (pointer: fine) {
+  .glass-blur {
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
 }
 
 /* Map chrome, brand-quiet (constitution: nothing generic, nothing bright).
